@@ -1,0 +1,39 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.davidefornelli/datanotes",
+  "title": "Datanotes",
+  "description": "The engine of your second brain: Markdown notes as database tables, for you and your agents.",
+  "websiteUrl": "https://datanotes.dev",
+  "repository": {
+    "url": "https://github.com/davidefornelli/datanotes",
+    "source": "github"
+  },
+  "version": "3.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "datanotes",
+      "version": "3.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "valueHint": "mcp",
+          "description": "Runs the MCP server of Datanotes over stdio."
+        },
+        {
+          "type": "named",
+          "name": "--database",
+          "valueHint": "folder",
+          "description": "The database folder. Without a running engine, the server starts one for the session.",
+          "format": "filepath",
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}

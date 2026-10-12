@@ -1,0 +1,37 @@
+/*
+ * starlight-theme-terminal with a green accent instead of its purple: the theme's brand and
+ * accent variables, overridden (unlayered CSS wins over the theme's `terminal` layer).
+ * Green #6ABF4B with black text on it in the dark theme (7.7:1 on the page, 9.2:1 under black
+ * text); in the light theme #367A24, which colours text too: 5.3:1 on white (AA needs 4.5:1).
+ */
+:root,
+:root[data-theme="dark"] {
+  --brand-primary: #6abf4b;
+  --brand-secondary: #6abf4b;
+  --sl-color-accent-low: #1c3215;
+  --sl-color-accent: #6abf4b;
+  --sl-color-accent-high: #b8e4a7;
+  --dn-on-accent: #000;
+}
+
+:root[data-theme="light"] {
+  --brand-primary: #367a24;
+  --brand-secondary: #367a24;
+  --sl-color-accent-low: #e2f3db;
+  --sl-color-accent: #367a24;
+  --sl-color-accent-high: #234f17;
+  --dn-on-accent: #fff;
+}
+
+/* text on the accent: buttons and the highlighted values */
+.sl-link-button.primary {
+  color: var(--dn-on-accent);
+}
+::selection {
+  color: var(--dn-on-accent);
+}
+
+/* headings without a lone last word */
+:is(h1, h2, h3, h4) {
+  text-wrap: balance;
+}

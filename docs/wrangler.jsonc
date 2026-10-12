@@ -1,0 +1,12 @@
+// Published by .github/workflows/docs.yml (npx wrangler deploy, after npm run build).
+{
+  "name": "datanotes-docs",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": true, "not_found_handling": "404-page" },
+  "routes": [
+    { "pattern": "datanotes.dev", "custom_domain": true },
+    { "pattern": "www.datanotes.dev", "custom_domain": true },
+    { "pattern": "datanote.dev", "custom_domain": true }
+  ]
+}

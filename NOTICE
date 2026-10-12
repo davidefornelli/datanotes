@@ -1,0 +1,13 @@
+Datanotes
+Copyright 2026 Davide Fornelli
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The `datanotes` command (dist/datanotes.cjs) bundles third-party software, each under its own
+license: dist/THIRD-PARTY-NOTICES.txt lists every package with its license and copyright.
+
+It includes Swagger UI (https://github.com/swagger-api/swagger-ui), licensed under the Apache
+License, Version 2.0, whose NOTICE reads:
+
+  swagger-ui
+  Copyright 2020-2021 SmartBear Software Inc.

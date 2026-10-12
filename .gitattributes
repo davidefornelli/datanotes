@@ -1,0 +1,5 @@
+# Shell scripts run on Linux (CI, Docker, Claude Code cloud sessions): always LF.
+*.sh text eol=lf
+# The test vault is compared byte for byte with what the engine writes (LF): a Windows checkout
+# must not turn its notes into CRLF.
+test-vault/** text eol=lf

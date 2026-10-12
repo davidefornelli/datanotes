@@ -1,0 +1,226 @@
+---
+title: Use your Markdown notes as a database
+description: "Datanotes runs your vault, a folder of Markdown notes, as typed database tables for you and your agents."
+template: splash
+hero:
+  tagline: Datanotes turns the notes you already keep into typed tables that you, your programs and your agents share. The engine checks every write. Every write through the engine is journaled and can be undone.
+  actions:
+    - text: Get Started
+      link: /start/quick-start/
+    - text: Connect an Agent
+      link: /start/connect-agents/
+      variant: minimal
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+## Why use Datanotes
+
+<p class="dn-lead">Your notes stay plain Markdown files. The engine adds what a database gives you.</p>
+
+<div class="not-content dn-cards dn-features">
+
+- [Tables from your notes](/guides/database-objects/tables/)
+
+  Each note with a `table` property is a row. One file, `metastore.yaml`, defines the columns.
+
+- [Every write checked](/guides/data-quality/validation/)
+
+  The engine checks types, links, unique values and CHECK rules. It refuses a bad write and changes nothing.
+
+- [All or nothing, with many clients](/develop/concurrency/)
+
+  Agents, programs and your phone write at the same time. Each write is checked on the latest data and applies whole or not at all.
+
+- [Joins, views and bases](/guides/read-and-write/joins-and-aggregates/)
+
+  Filter, join and aggregate rows. Save a query as a view, and share columns through bases.
+
+- [History, time travel and undo](/guides/history/journal-and-undo/)
+
+  The journal records every write through the engine and who made it. Undo a write, or, with history on, read a table as it was last week.
+
+- [Made for agents](/start/connect-agents/)
+
+  Claude, Cursor and Codex call every operation through the Model Context Protocol (MCP). Each refusal says how to fix the call.
+
+- [HTTP API and client](/develop/http-api/)
+
+  Programs call the same operations over HTTP, or from JavaScript with `datanotes/client`.
+
+- [Search by text, meaning and links](/guides/search/text/)
+
+  Search the text of every note, find notes by meaning, and walk the links between them.
+
+- [Git sync and store backup](/administration/git-sync/)
+
+  The engine commits and pushes your vault with git. A private repository backs up undo and history too.
+
+- [Edit notes by hand](/guides/data-quality/hand-edits/)
+
+  Use Obsidian, VS Code or git. The engine checks each edit and reports what it breaks.
+
+</div>
+
+## What you can build
+
+<p class="dn-lead">The guides build one example you can follow: a diary of classic films in the public domain.</p>
+
+<div class="not-content dn-uses">
+
+- [A second brain for your agent](/guides/agents/how-agents-use-datanotes/)
+
+  Tell your agent you watched Metropolis with Anna. It logs the viewing and finds it when you ask next month.
+
+- [Databases in your notes](/guides/database-objects/relations/)
+
+  Keep films, actors, genres and viewings as linked tables. Every row stays a note you can open and edit.
+
+- [Apps over your vault](/develop/build-an-app/)
+
+  Build film night, a TypeScript app that lists the films to watch and logs each viewing.
+
+- [Several agents, one memory](/guides/security/tokens/)
+
+  Give each agent and script its own token. The journal shows which one wrote what.
+
+</div>
+
+## Run it on your notes
+
+<p class="dn-lead">You need Node.js 22 or newer and a folder for your database: an empty one, or a folder of notes.</p>
+
+<div class="dn-start">
+
+<div class="dn-steps">
+
+<Steps>
+
+1. Start the engine on your folder:
+
+   ```bash
+   npx -y datanotes serve --database your_database_folder
+   ```
+
+2. Connect your agent. This command adds Datanotes to Claude Code, and [Connect your agents](/start/connect-agents/) covers Cursor, Codex and others:
+
+   ```bash
+   claude mcp add datanotes -- \
+     npx -y datanotes mcp --database your_database_folder
+   ```
+
+3. Ask in your own words:
+
+   ```text wrap
+   Make a table of the classic films I watch, then add Nosferatu (1922).
+   ```
+
+</Steps>
+
+</div>
+
+<div class="dn-then">
+
+Then read the page that fits what you want to do next:
+
+<div class="not-content dn-cards dn-next">
+
+- [Run Datanotes on your notes](/start/quick-start/)
+
+  Create a table, add a row and see a refusal.
+
+- [Prompts for your agent](/guides/agents/prompts/)
+
+  Prompts to copy, with the tools they call.
+
+- [Build on Datanotes](/develop/build-on-datanotes/)
+
+  Programs, apps and your own MCP server.
+
+- [How it works](/start/how-it-works/)
+
+  Tables, rows, the journal and the store.
+
+</div>
+
+</div>
+
+</div>
+
+<style>{`
+  /* the sections: a heading, one lead line, then cards; every card is one link */
+  .sl-markdown-content h2 { margin-top: clamp(3rem, 7vw, 4.5rem); }
+  .dn-lead { color: var(--sl-color-gray-2); max-width: 46rem; }
+  .dn-cards ul,
+  .dn-uses ul { list-style: none; margin: 1.5rem 0 0; padding: 0; display: grid; gap: 0.75rem; }
+  @media (min-width: 34rem) {
+    .dn-cards ul { gap: 1rem; }
+  }
+  .dn-cards li,
+  .dn-uses li { position: relative; margin: 0; }
+  .dn-cards p,
+  .dn-uses p { margin: 0; }
+  .dn-cards li > p + p,
+  .dn-uses li > p + p { margin-top: 0.4rem; color: var(--sl-color-gray-3); font-size: var(--sl-text-sm); line-height: 1.55; }
+  .dn-cards code,
+  .dn-uses code { font-family: var(--sl-font-mono); font-size: 0.9em; color: var(--sl-color-accent-high); overflow-wrap: anywhere; }
+
+  /* the title is the link; its ::after covers the card, so the whole card is one target */
+  .dn-cards li > p:first-child a,
+  .dn-uses li > p:first-child a { color: var(--sl-color-white); font-weight: 600; text-decoration: none; }
+  .dn-cards li > p:first-child a::after,
+  .dn-uses li > p:first-child a::after { content: ""; position: absolute; inset: 0; }
+  .dn-cards li > p:first-child a::after { border-radius: 0.5rem; }
+  .dn-cards li > p:first-child a:focus-visible,
+  .dn-uses li > p:first-child a:focus-visible { outline: none; }
+  .dn-cards li > p:first-child a:focus-visible::after,
+  .dn-uses li > p:first-child a:focus-visible::after { outline: 2px solid var(--sl-color-accent); outline-offset: 2px; }
+  /* the arrow: a no-break space ties it to the last word of the title */
+  .dn-cards li > p:first-child::after,
+  .dn-uses li > p:first-child::after { content: "\\a0→"; content: "\\a0→" / ""; color: var(--sl-color-accent); }
+
+  /* features and next pages: boxes a step lighter than the page */
+  .dn-cards li { padding: 0.85rem 1rem 0.95rem; border: 1px solid var(--sl-color-gray-6); border-radius: 0.5rem; background: var(--sl-color-gray-7); transition: border-color 0.15s ease; }
+  :root[data-theme="light"] .dn-cards li { border-color: var(--sl-color-gray-7); background: var(--sl-color-bg-sidebar); }
+  .dn-cards li:hover,
+  :root[data-theme="light"] .dn-cards li:hover { border-color: var(--sl-color-accent); }
+  .dn-features ul,
+  .dn-next ul { grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 34rem) {
+    .dn-cards li { padding: 1rem 1.15rem 1.1rem; }
+    .dn-features ul,
+    .dn-next ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* two columns: the ninth feature spans both, so no card stands alone */
+    .dn-features li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  }
+  @media (min-width: 60rem) {
+    .dn-features ul { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .dn-features li:last-child:nth-child(odd) { grid-column: auto; }
+    /* beside the steps, the next pages stack */
+    .dn-next ul { grid-template-columns: minmax(0, 1fr); margin-top: 1rem; gap: 0.75rem; }
+  }
+
+  /* use cases: a strip of four, each under an accent rule */
+  .dn-uses ul { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .dn-uses li { padding-top: 0.9rem; border-top: 2px solid var(--sl-color-accent); }
+  .dn-uses li:hover > p:first-child a { color: var(--sl-color-accent-high); }
+  @media (min-width: 34rem) {
+    .dn-uses ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (min-width: 60rem) {
+    .dn-uses ul { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+
+  /* the steps, then the pages to read next: side by side on wide screens */
+  .dn-start { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem 3rem; margin-top: 1.5rem; }
+  .dn-start > *,
+  .dn-then > p,
+  .sl-markdown-content .dn-steps > .sl-steps { margin: 0; }
+  @media (min-width: 60rem) {
+    .dn-start { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dn-cards li { transition: none; }
+  }
+`}</style>

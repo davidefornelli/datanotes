@@ -1,0 +1,15 @@
+node_modules/
+main.js
+main.js.map
+*.log
+.DS_Store
+dist/
+data.json
+coverage/
+
+# editor and agent folders (local only)
+.cursor/
+.vscode/
+
+# Claude Code: .claude/settings.json is shared (committed); personal settings are not
+.claude/settings.local.json

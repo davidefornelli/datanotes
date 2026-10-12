@@ -1,0 +1,125 @@
+{
+  "name": "datanotes",
+  "version": "3.0.0",
+  "mcpName": "io.github.davidefornelli/datanotes",
+  "description": "The engine of your second brain: Markdown notes as database tables, for you and your agents.",
+  "keywords": [
+    "markdown",
+    "database",
+    "mcp",
+    "model-context-protocol",
+    "second-brain",
+    "agents",
+    "frontmatter",
+    "obsidian-vault",
+    "mcp-server",
+    "agent-memory",
+    "knowledge-base"
+  ],
+  "homepage": "https://datanotes.dev",
+  "bugs": {
+    "url": "https://github.com/davidefornelli/datanotes/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidefornelli/datanotes.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Davide Fornelli",
+  "type": "module",
+  "bin": {
+    "datanotes": "dist/datanotes.cjs"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/api/index.d.ts",
+        "default": "./dist/api/index.js"
+      },
+      "require": {
+        "types": "./dist/api/index.d.cts",
+        "default": "./dist/api/index.cjs"
+      }
+    },
+    "./client": {
+      "import": {
+        "types": "./dist/api/index.d.ts",
+        "default": "./dist/api/index.js"
+      },
+      "require": {
+        "types": "./dist/api/index.d.cts",
+        "default": "./dist/api/index.cjs"
+      }
+    },
+    "./local": {
+      "import": {
+        "types": "./dist/api/local.d.ts",
+        "default": "./dist/api/local.js"
+      },
+      "require": {
+        "types": "./dist/api/local.d.cts",
+        "default": "./dist/api/local.cjs"
+      }
+    },
+    "./mcp": {
+      "import": {
+        "types": "./dist/api/mcp.d.ts",
+        "default": "./dist/api/mcp.js"
+      },
+      "require": {
+        "types": "./dist/api/mcp.d.cts",
+        "default": "./dist/api/mcp.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/datanotes.cjs",
+    "dist/THIRD-PARTY-NOTICES.txt",
+    "dist/api",
+    "dist/docs",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "test:changed": "vitest run --changed",
+    "contract:update": "node scripts/contract-update.mjs",
+    "verify": "node scripts/verify.mjs",
+    "verify:fast": "node scripts/verify.mjs --fast",
+    "verify:no-docs": "node scripts/verify.mjs --no-docs",
+    "bench": "vitest run --config vitest.bench.config.ts",
+    "check:layers": "node scripts/check-layers.mjs",
+    "test:node": "vitest run --config vitest.node.config.ts",
+    "build:service": "node scripts/check-layers.mjs && tsc -noEmit -skipLibCheck && node esbuild.service.mjs && npm run build:api",
+    "prepack": "npm run build:service",
+    "build:api": "tsc -p tsconfig.api.json && node esbuild.api.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "build": "npm run build:service",
+    "dev": "node scripts/dev-vault.mjs",
+    "test-vault:make": "node scripts/make-test-vault.mjs",
+    "test-vault:check": "vitest run tests/test-vault.test.ts",
+    "docs:copy": "node scripts/copy-docs.mjs",
+    "prepublishOnly": "node scripts/copy-docs.mjs --check"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "esbuild": "0.25.5",
+    "publint": "0.3.25",
+    "swagger-ui-dist": "^5.33.1",
+    "tslib": "2.8.1",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.9",
+    "yaml": "^2.7.0"
+  }
+}

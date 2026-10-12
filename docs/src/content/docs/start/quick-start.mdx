@@ -1,0 +1,135 @@
+---
+title: Run Datanotes on your notes
+description: "Start the engine on a folder of notes, create a table, add a row and connect your agents."
+sidebar:
+  label: Run Datanotes on Your Notes
+  order: 1
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+By the end of this page, the engine runs on your folder of notes and your agents can reach it. You’ll also have a table of the classic films you watch, with one row in it.
+
+You need [Node.js](https://nodejs.org) 22 or newer and a folder for your database. It can be an empty folder, or a folder of Markdown notes.
+
+On Windows, use Node.js 24.16 or later, or 26.1 or later. Node.js 24.0 to 24.15 and 26.0 can crash at random on local connections. `datanotes serve` warns at start on those versions.
+
+<Steps>
+
+1. Start the engine on your folder:
+
+   ```bash
+   npx -y datanotes serve --database your_database_folder
+   ```
+
+   The folder is the database: the engine keeps `metastore.yaml` at its root, and serves every note in it. To use an app such as Obsidian on a vault that holds the database, start with `--vault` instead: [Use Datanotes with Obsidian](/administration/use-with-obsidian/) explains it.
+
+   The engine serves the [HTTP API](/develop/http-api/) on `http://127.0.0.1:27150`. It keeps its settings and your owner token in `settings.json`, in its store outside the folder. `npx datanotes store path --database your_database_folder` shows where.
+
+   To check that the engine is running and healthy, run `npx datanotes status --database your_database_folder` (see [Check the engine’s status](/administration/status/#read-the-status-over-http)).
+
+2. Install the package, which includes a client for the HTTP API:
+
+   ```bash
+   npm install datanotes
+   ```
+
+3. Connect to the engine with your owner token. `localEngine` finds the engine that runs on your folder, and reads the token from its settings:
+
+   ```ts
+   import { DatanotesClient } from "datanotes/client";
+   import { localEngine } from "datanotes/local";
+
+   const engine = localEngine("your_database_folder");
+   if (!engine) throw new Error("Start the engine on the folder first");
+   const db = new DatanotesClient({ url: engine.url, token: engine.token });
+   ```
+
+4. Create a table of films with four columns. The table and each column need a `description`, which tells agents and people what they hold. `filename` names each note after the film’s title, `unique` allows one note per title, and `ordered` keeps the statuses in order:
+
+   ```ts
+   const created = await db.call("create_table", {
+     name: "film",
+     description: "Classic films I watched or want to watch",
+     filename: "{title}",
+     columns: [
+       {
+         name: "title",
+         type: "string",
+         required: true,
+         unique: true,
+         description: "The film's title, as on its poster",
+       },
+       {
+         name: "year",
+         type: "integer",
+         description: "Year the film first came out",
+       },
+       {
+         name: "minutes",
+         type: "integer",
+         min: 1,
+         description: "Running time in minutes",
+       },
+       {
+         name: "status",
+         type: "enum",
+         values: ["to watch", "watched"],
+         ordered: true,
+         description: "Where the film is on my list",
+       },
+     ],
+   });
+   if (!created.ok) throw new Error(String(created.value));
+   ```
+
+   The engine writes the table’s definition into `metastore.yaml`, at the root of your folder.
+
+5. Add a film:
+
+   ```ts
+   const r = await db.call("insert_row", {
+     table: "film",
+     values: { title: "Nosferatu", year: 1922, minutes: 94, status: "watched" },
+   });
+   type Planned = { planned_creates: string[] };
+   console.log(r.ok ? (r.value as Planned).planned_creates : r.value);
+   ```
+
+   When the engine accepts the row, `planned_creates` lists the new note. When it refuses the row, `r.value` explains which value broke which rule, and the engine writes nothing. For `Metropolis` with `minutes: 0` and the status `seen`, it answers:
+
+   ```text
+   insert_row refused — nothing was written:
+   invalid main/public/film/Metropolis.md: minutes must be >= 1
+   invalid main/public/film/Metropolis.md: status must be one of: to watch; watched
+   ```
+
+   The film is now a note, `main/public/film/Nosferatu.md`:
+
+   ```markdown
+   ---
+   table: main.public.film
+   id: 01a12230-73ea-7349-83d3-efdcc7cceb61
+   title: Nosferatu
+   year: 1922
+   minutes: 94
+   status: watched
+   ---
+   ```
+
+   Your `id` differs: the engine gives every new row its own.
+
+   You can edit the note by hand at any time. The engine reads your change and checks it against the table; [`check_table`](/reference/operations/auxiliary/#check_table) lists any value that breaks a rule.
+
+6. Connect your agents through the Model Context Protocol (MCP) server, `datanotes mcp`: follow [Connect agents](/start/connect-agents/).
+
+</Steps>
+
+## Learn more about tables, clients and tokens
+
+These pages explain what you used on this page:
+
+- [How it works](/start/how-it-works/): tables, rows and the journal
+- [Operations](/reference/operations/): everything the API can do
+- [JavaScript client](/develop/client/) and [HTTP API](/develop/http-api/): the two ways your code reaches the engine
+- [Security](/guides/security/security-model/): what each token can do

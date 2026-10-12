@@ -1,0 +1,147 @@
+# Publishes the npm package for a GitHub release (tag vX.Y.Z = package.json version), with trusted
+# publishing (no token), as soon as the release is published. Each run publishes the oldest release
+# newer than the version on npm, so a run by hand (gh workflow run release.yml) retries one that
+# failed, and two releases go out in order.
+#
+# Before publishing, the tests run on macOS (the headless Node host: file events, case-insensitive
+# paths), once per release: pull requests test only Linux and Windows (ci.yml). The package ships
+# the docs of its version as Markdown (dist/docs), so the docs are built, and the tests that read
+# them run, before it is published. A failure blocks the release, and the next run tries again.
+#
+# The tested package is packed once (job package) and published by job publish, which runs in the
+# environment `npm`: it waits for a required reviewer to approve, and it alone has id-token: write.
+# server.json (the MCP Registry entry) must carry the version of package.json, as the tag does.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Which release waits to be published.
+  pending:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.pending.outputs.publish }}
+      tag: ${{ steps.pending.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Release waiting to be published
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          onNpm=$(npm view "$name" version 2>/dev/null || echo 0.0.0)
+          # the oldest vX.Y.Z release newer than the version on npm
+          tag=$(gh release list --exclude-drafts --exclude-pre-releases --limit 50 --json tagName -q '.[].tagName' \
+            | node -e '
+              const v = (t) => t.replace(/^v/, "").split(".").map(Number);
+              const cmp = (a, b) => { const x = v(a), y = v(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
+              const tags = require("fs").readFileSync(0, "utf8").split("\n").filter((t) => /^v\d+\.\d+\.\d+$/.test(t));
+              console.log(tags.filter((t) => cmp(t, process.argv[1]) > 0).sort(cmp)[0] ?? "");
+            ' "$onNpm")
+          if [ -z "$tag" ]; then
+            echo "$name $onNpm is on npm, no newer release"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publishing $name ${tag#v} ($onNpm on npm)"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The release on macOS, only when it is about to be published.
+  test-macos:
+    needs: pending
+    if: needs.pending.outputs.publish == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.pending.outputs.tag }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - run: npx vitest run --config vitest.node.config.ts
+
+  # No dependency cache here: a cache written by another workflow must not reach the published package.
+  # Builds and tests the package, and packs it: the publish job publishes this very tarball.
+  package:
+    needs: [pending, test-macos]
+    if: needs.pending.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.pending.outputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      # the docs of this version ship in the package (dist/docs, scripts/copy-docs.mjs): the docs build
+      # copies them there, and prepublishOnly refuses to publish without them. The tests run after
+      # it, so the ones that read the built docs run too.
+      - run: npm ci
+        working-directory: docs
+      - name: Docs build (dist/docs)
+        run: npm run build
+        working-directory: docs
+      - run: npm test
+      - name: Tag matches package.json and server.json
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          test "$v" = "${{ needs.pending.outputs.tag }}"
+          test "$v" = "v$(node -p "require('./server.json').version")"
+          test "$v" = "v$(node -p "require('./server.json').packages[0].version")"
+      # npm pack builds dist/ (prepack); the tarball does not run prepublishOnly, so it runs here
+      - run: npm pack
+      - run: npm run prepublishOnly
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: datanotes-*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  # Publishes the tested tarball. The environment `npm` waits for the approval of its required
+  # reviewers (Settings > Environments); only this job can mint the token of trusted publishing.
+  publish:
+    needs: [pending, package]
+    if: needs.pending.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      # trusted publishing needs npm 11.5.1 or later; an exact version, not a range or "latest"
+      - run: npm install -g npm@11.20.0
+      - run: npm publish ./datanotes-*.tgz --access public

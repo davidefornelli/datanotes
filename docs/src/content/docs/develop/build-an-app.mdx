@@ -1,0 +1,317 @@
+---
+title: Build an app on Datanotes
+description: "Write a small TypeScript app that reads and writes your film diary with its own token, and follows its changes."
+sidebar:
+  label: Build an App
+  order: 4
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+This tutorial builds film night, a small app for the diary of classic films. The app is TypeScript on the [HTTP API](/develop/http-api/), with the [JavaScript client](/develop/client/) and its [own token](/guides/security/tokens/), and every answer on this page comes from a real run against the engine. By the end, film night does three things:
+
+- Reads the films you still want to watch
+- Logs a viewing as one undoable change
+- Prints a line each time a film becomes watched
+
+## Before you start
+
+You need:
+
+- **Node.js 24** or newer, which runs `.ts` files directly
+- **An engine** that runs on your notes, with `npx datanotes serve --database your_database_folder`
+- **The diary’s tables**: `film` and `watch` as in [Read and filter rows](/guides/read-and-write/read-and-filter/), with the films of that page
+- **The `datanotes` package** in the app’s folder: `npm install datanotes`, with `"type": "module"` in its `package.json`
+
+The app reads a view of the films to watch, and the engine refuses a watched film without a rating. Create both once with the owner token:
+
+```ts
+await owner.call("create_view", {
+  name: "vw_to_watch",
+  query: {
+    table: "film",
+    columns: ["title", "year", "minutes", "director"],
+    where: { status: "to watch" },
+    order_by: "minutes",
+  },
+});
+await owner.call("add_constraint", {
+  table: "film",
+  name: "rated_when_watched",
+  check: {
+    or: [{ status: { ne: "watched" } }, { rating: { exists: true } }],
+  },
+});
+```
+
+`owner` is a `DatanotesClient` with the owner token, as in step 1. [Store a query as a view](/guides/database-objects/views/#store-a-query-as-a-view) and [Enforce rules with CHECK constraints](/guides/data-quality/check-constraints/#enforce-rules-with-check-constraints) explain both operations.
+
+## Build film night
+
+The app has four small files in `src/`: the client, the films, the change feed and the entry point.
+
+<Steps>
+
+1. Create the app’s token with the owner token. The engine answers with the token, once, and keeps only its hash:
+
+   ```ts
+   import { DatanotesClient } from "datanotes/client";
+
+   const owner = new DatanotesClient({
+     url: "http://127.0.0.1:27150",
+     token: "your_owner_token",
+   });
+
+   const r = await owner.post<{ token: string }>("/tokens/create/", {
+     name: "film-night",
+     description: "Logs film nights and picks the next film",
+     write: ["main.public.watch", "main.public.film"],
+   });
+   console.log(r.token);
+   ```
+
+   The token can read every table, and write rows of `watch` and `film` only. It can’t change the schema, undo, or touch `actor`. The engine lists it like this:
+
+   ```json
+   {
+     "name": "film-night",
+     "description": "Logs film nights and picks the next film",
+     "write": ["main.public.watch", "main.public.film"],
+     "ddl": false
+   }
+   ```
+
+   Keep the token in an environment variable, `FILM_NIGHT_TOKEN`.
+
+2. Create the client in `src/db.ts`. Every other file imports it:
+
+   ```ts
+   import { DatanotesClient } from "datanotes/client";
+
+   export const db = new DatanotesClient({
+     url: process.env.DATANOTES_URL ?? "http://127.0.0.1:27150",
+     token: process.env.FILM_NIGHT_TOKEN ?? "",
+     actor: { harness: "film-night" },
+   });
+   ```
+
+   The engine records `film-night` as the `auth` of every write this token makes, whatever `actor` says.
+
+3. Read the films to watch in `src/films.ts`. You select a view like a table:
+
+   ```ts
+   import { db } from "./db.ts";
+
+   export interface Film {
+     path: string;
+     title: string;
+     minutes: number;
+   }
+
+   export async function filmsToWatch(): Promise<Film[]> {
+     const r = await db.call("select_rows", { table: "vw_to_watch" });
+     if (!r.ok) throw new Error(String(r.value));
+     return (r.value as { rows: Film[] }).rows;
+   }
+   ```
+
+   The view answers with the two films still to watch, shortest first. Each row includes its note’s `path`, which the next step uses:
+
+   ```json
+   [
+     {
+       "path": "main/public/film/Battleship Potemkin.md",
+       "title": "Battleship Potemkin",
+       "year": 1925,
+       "minutes": 75,
+       "director": "Sergei Eisenstein"
+     },
+     {
+       "path": "main/public/film/Metropolis.md",
+       "title": "Metropolis",
+       "year": 1927,
+       "minutes": 153,
+       "director": "Fritz Lang"
+     }
+   ]
+   ```
+
+4. Log a viewing, also in `src/films.ts`. A [`batch`](/reference/operations/rows/#batch) inserts the `watch` row and updates the film together:
+
+   ```ts
+   export interface Viewing {
+     at: string;
+     where: "cinema" | "home" | "outdoor screening";
+     place: string;
+     rating?: number;
+   }
+
+   export function logViewing(film: Film, v: Viewing) {
+     const { at, where, place, rating } = v;
+     const watch = { film: `[[${film.title}]]`, occurred_at: at, where, place };
+     const seen = { status: "watched", rating, watched_on: at.slice(0, 10) };
+     return db.call("batch", {
+       summary: `Film night: ${film.title}`,
+       operations: [
+         { op: "insert_row", table: "watch", values: watch },
+         { op: "update_row", table: "film", path: film.path, set: seen },
+       ],
+     });
+   }
+   ```
+
+   The engine checks both operations before it writes either. When it refuses one, it writes nothing. The batch is one entry in the journal, so one undo reverts both.
+
+5. Follow the films you mark watched, in `src/feed.ts`. The app long-polls the [change feed](/develop/change-feed-and-webhooks/#choose-how-to-follow-the-feed) with [`list_changes`](/reference/operations/history/#list_changes), keeping only `film` changes to `status` that leave it `watched`:
+
+   ```ts
+   import { db } from "./db.ts";
+
+   interface Change {
+     row: { title: string; rating?: number };
+   }
+   type Page = { events: Change[]; last: number; head: number };
+
+   const watched = {
+     tables: ["film"],
+     columns: ["status"],
+     where: { status: "watched" },
+   };
+
+   async function changes(args: object): Promise<Page> {
+     const r = await db.call("list_changes", { ...watched, ...args });
+     if (!r.ok) throw new Error(String(r.value));
+     return r.value as Page;
+   }
+   ```
+
+   `followWatched` starts at `head`, the feed’s latest change, so it reports only what happens after the app starts. Each call waits up to 20s for a change, and `last` is where the next one starts:
+
+   ```ts
+   export async function followWatched(onWatched: (c: Change) => void) {
+     let since = (await changes({ limit: 1 })).head;
+     for (;;) {
+       const page = await changes({ since, wait_ms: 20_000 });
+       page.events.forEach(onWatched);
+       since = page.last;
+     }
+   }
+   ```
+
+   The feed suits an app better than a webhook here: a named token can read the feed, while only the owner creates webhooks. To pick up where it stopped after a restart, save `last` and start from it.
+
+6. Start the app in `src/main.ts`. It follows the feed and prints each film you mark watched:
+
+   ```ts
+   import { followWatched } from "./feed.ts";
+
+   await followWatched(({ row }) => {
+     console.log(`${row.title} is watched, rated ${row.rating ?? "-"}`);
+   });
+   ```
+
+   Run it and leave it running:
+
+   ```bash
+   node src/main.ts
+   ```
+
+</Steps>
+
+## Let agents pick the film
+
+The engine serves no tools of other programs. For agents to pick tonight’s film with one call, film night serves its own Model Context Protocol (MCP) server, with a `pick_film_for_tonight` tool next to the engine’s read tools and instructions of its own. Agents connect to it as to any MCP server. [Build your own MCP server](/develop/build-on-datanotes/#build-your-own-mcp-server) writes that server for this diary, with `datanotes/mcp`.
+
+## Log tonight’s film
+
+`src/tonight.ts` logs the evening with `logViewing`, and prints the batch’s journal entry:
+
+```ts
+import { filmsToWatch, logViewing } from "./films.ts";
+
+const films = await filmsToWatch();
+console.log(films.map((f) => `${f.title}, ${f.minutes} min`));
+
+const potemkin = films.find((f) => f.title === "Battleship Potemkin")!;
+const r = await logViewing(potemkin, {
+  at: "2026-10-09T21:00:00",
+  where: "cinema",
+  place: "the film club downtown",
+  rating: 5,
+});
+if (!r.ok) console.log(r.value);
+else console.log((r.value as { migration_id: string }).migration_id);
+```
+
+The script prints the films to watch and the batch’s id:
+
+```text
+[ 'Battleship Potemkin, 75 min', 'Metropolis, 153 min' ]
+20261009T215615-batch-film-night-battleship-potemkin
+```
+
+A moment later, the running app prints the change it read from the feed:
+
+```text
+Battleship Potemkin is watched, rated 5
+```
+
+The diary now has a `watch` note, `main/public/watch/2026-10-09T2100.md`, and Metropolis is the only film left to watch.
+
+To revert the whole evening, the owner calls `undo_migration` with the batch’s id. The app can’t: its token answers `token film-night may not call undo_migration (reserved to the owner)`.
+
+## Show the engine’s refusals
+
+When the engine refuses a write, `ok` is `false` and `value` says why, in words a person can read. The app prints it as it is. This script logs Metropolis twice, first without a rating, then with a rating of 6:
+
+```ts
+const metropolis = (await filmsToWatch())
+  .find((f) => f.title === "Metropolis")!;
+const evening = {
+  at: "2026-10-10T20:30:00",
+  where: "home" as const,
+  place: "my living room",
+};
+
+for (const rating of [undefined, 6]) {
+  const r = await logViewing(metropolis, { ...evening, rating });
+  if (!r.ok) console.log(r.value);
+}
+```
+
+The first breaks the `rated_when_watched` CHECK, the second the column’s `max: 5`. In both cases the engine undoes the `watch` row of operation 0, and nothing stays written:
+
+```text
+batch refused at operation 1 — the operations before it were undone, nothing is left written:
+operation 1 (update_row): update_row refused — nothing was written:
+invalid main/public/film/Metropolis.md: rated_when_watched violates CHECK rated_when_watched: {"or":[{"status":{"ne":"watched"}},{"rating":{"exists":true}}]}
+batch refused at operation 1 — the operations before it were undone, nothing is left written:
+operation 1 (update_row): update_row refused — nothing was written:
+invalid main/public/film/Metropolis.md: rating must be <= 5
+```
+
+A write outside the app’s permissions comes back the same way. The app may not write `actor`:
+
+```ts
+const r = await db.call("update_rows", {
+  table: "actor",
+  where: { name: "Brigitte Helm" },
+  set: { born: "1906-03-17" },
+});
+if (!r.ok) console.log(r.value);
+```
+
+The engine answers with 403, and the client turns it into the reason:
+
+```text
+token film-night may not write main.public.actor
+```
+
+## Learn more about tokens, the client and the feed
+
+These pages cover each part of film night in full:
+
+- [Give each program its own token](/guides/security/tokens/): every permission and route of named tokens
+- [Build on Datanotes](/develop/build-on-datanotes/): the ways to build on the engine, your own MCP server included
+- [Call the engine from JavaScript](/develop/client/): the client’s methods and errors
+- [Follow every change with the change feed](/guides/history/change-data-feed/#follow-every-change-with-the-change-feed): the feed’s filters, streaming and webhooks

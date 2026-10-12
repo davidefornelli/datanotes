@@ -1,0 +1,57 @@
+# Builds the site from docs/ and the code it is generated from, and publishes it as a Cloudflare
+# Worker with static assets (docs/wrangler.jsonc: datanotes.dev; www.datanotes.dev and datanote.dev
+# redirect). Needs the repository secrets CLOUDFLARE_API_TOKEN (template "Edit Cloudflare Workers",
+# zones datanotes.dev and datanote.dev) and CLOUDFLARE_ACCOUNT_ID. Pull requests that are not
+# drafts only build (marking a draft "Ready for review" builds it); drafts build nothing.
+# After the build, the tests that read the built docs (dist/docs) run: the CI test jobs build no
+# docs, so these tests skip there.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# one group per ref: a pull request does not cancel the publish of main
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            docs/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: docs
+      - run: npm run build
+        working-directory: docs
+      - name: Tests of the built docs
+        run: npx vitest run tests/docs-search-quality.test.ts tests/package-docs.test.ts
+      - name: Publish to Cloudflare
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        working-directory: docs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice::Cloudflare secrets not set: the site was built, not published."
+            exit 0
+          fi
+          npx -y wrangler@4 deploy

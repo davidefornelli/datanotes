@@ -1,0 +1,640 @@
+---
+// The home hero: the product shown as what it does, read from top to bottom. A deck of three
+// Markdown notes, one dashed connector, the film table they are. When the table comes into view the
+// front note's values light up one at a time and travel down into the first row; the deck turns and
+// the other two notes become rows; then a write to the table (update_row) travels back up into its
+// note. Under 5 s, once; again with the Replay button, or when a mouse comes over the demo a while
+// after a run. Reduced motion or no script: the final state, still, and no button. Sizes are
+// reserved (stacked cards and texts), so nothing moves the page. The visuals are hidden from
+// screen readers: the figcaption is their one text alternative.
+import { LinkButton } from "@astrojs/starlight/components";
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+const columns = ["title", "year", "minutes", "status"] as const;
+type Column = (typeof columns)[number];
+const films: (Record<Column, string> & { body: string })[] = [
+  { title: "Nosferatu", year: "1922", minutes: "94", status: "watched", body: "The shadow on the stairs still works a century later." },
+  { title: "The Gold Rush", year: "1925", minutes: "95", status: "watched", body: "The bread roll dance made me laugh out loud." },
+  { title: "Metropolis", year: "1927", minutes: "153", status: "to watch", body: "Two and a half hours of silent city. Saving it for a rainy Sunday." },
+];
+// the write of the last step, shown as done in the final state: Metropolis to "watched"
+const written = (row: number, column: Column) => row === 2 && column === "status";
+// the final state's deck: Metropolis in front, Nosferatu behind it, The Gold Rush last
+const restDepth = [1, 2, 0];
+// year and minutes are numbers: aligned to the end of their cells
+const num = (c: Column) => (c === "year" || c === "minutes" ? "num" : undefined);
+---
+
+<div class="hero-dn">
+  <div class="copy">
+    <h1 id="_top" data-page-title set:html={title} />
+    {tagline && <p class="tagline" set:html={tagline} />}
+    {
+      actions.length > 0 && (
+        <div class="actions">
+          {actions.map(({ link: href, text, variant }) => (
+            <LinkButton {href} {variant}>
+              {text}
+            </LinkButton>
+          ))}
+        </div>
+      )
+    }
+  </div>
+
+  <figure class="demo" data-dir="both">
+    <div class="deck" aria-hidden="true">
+      {
+        films.map((f, i) => (
+          <div class:list={["note", { front: restDepth[i] === 0 }]} style={`--d: ${restDepth[i]}`} data-note={i}>
+            <p class="path">{f.title}.md</p>
+            <pre><code><span class="key">---</span>{"\n"}<span class="key">table:</span> main.public.film{"\n"}{columns.map((c) => (<><span class="key">{c}:</span> {written(i, c) ? (<span class="v swap done" data-c={c}><span class="mark was">{f[c]}</span><span class="mark now">watched</span></span>) : (<span class="v mark" data-c={c}>{f[c]}</span>)}{"\n"}</>))}<span class="key">---</span>{"\n"}<span class="body">{f.body}</span></code></pre>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="wire" aria-hidden="true">
+      <span class="line"></span>
+      <span class="head up"></span>
+      <span class="head down"></span>
+    </div>
+
+    <div class="table" aria-hidden="true">
+      <p class="path swap ops done">
+        <span class="was">select_rows table: film</span>
+        <span class="now">update_row Metropolis status: watched</span>
+      </p>
+      <table>
+        <thead>
+          <tr>{columns.map((c) => <th scope="col">{c}</th>)}</tr>
+        </thead>
+        <tbody>
+          {
+            films.map((f, i) => (
+              <tr>
+                {columns.map((c) => (
+                  <td class={num(c)}>
+                    {written(i, c) ? (
+                      <span class="cell swap done" data-r={i} data-c={c}><span class="mark was">{f[c]}</span><span class="mark now">watched</span></span>
+                    ) : (
+                      <span class="cell mark" data-r={i} data-c={c}>{f[c]}</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <button type="button" class="replay" hidden>
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12"
+        ><path d="M13 8a5 5 0 1 1-1.46-3.54M13 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round"></path></svg
+      >
+      Replay
+    </button>
+
+    <figcaption class="vh">
+      Three film notes become the three rows of the film table, each front matter value in its column. Then update_row marks
+      Metropolis as watched in the table, and the change reaches Metropolis.md too.
+    </figcaption>
+  </figure>
+
+  <script is:inline>
+    // Inline, so it runs while the page is parsed: the demo is set to its first frame (an empty
+    // table) before it is ever painted, without a flash of the final state. Without it, the HTML
+    // already shows the final state.
+    (() => {
+      const demo = document.currentScript && document.currentScript.parentElement.querySelector(".demo");
+      if (!demo || !demo.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const COLUMNS = ["title", "year", "minutes", "status"];
+      const notes = [...demo.querySelectorAll(".note")];
+      const cells = [...demo.querySelectorAll(".cell")];
+      const swaps = [...demo.querySelectorAll(".swap")];
+      const wire = demo.querySelector(".wire");
+      const value = (r, c) => notes[r].querySelector(`[data-c="${c}"]`);
+      const cell = (r, c) => demo.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+      // the text a value shows now: a swap (Metropolis's status) shows one of its two
+      const shown = (el) => (el.classList.contains("swap") ? el.querySelector(el.classList.contains("done") ? ".now" : ".was") : el);
+
+      const button = demo.querySelector(".replay");
+      let timers = [];
+      let playing = false;
+      // when the last run ended: a mouse over the demo replays it only some time after
+      let ended = 0;
+      const later = (ms, fn) => timers.push(setTimeout(fn, ms));
+
+      // note i in front, the next ones behind it
+      const front = (i) =>
+        notes.forEach((n, j) => {
+          const d = (j - i + notes.length) % notes.length;
+          n.style.setProperty("--d", String(d));
+          n.classList.toggle("front", d === 0);
+        });
+
+      // the final state (rest) or the first frame, at once, without transitions
+      function set(rest) {
+        timers.forEach(clearTimeout);
+        timers = [];
+        playing = false;
+        demo.querySelectorAll(".chip").forEach((chip) => chip.remove());
+        demo.classList.add("instant");
+        demo.classList.toggle("staged", !rest);
+        demo.classList.remove("flowing");
+        demo.dataset.dir = rest ? "both" : "down";
+        front(rest ? 2 : 0);
+        demo.querySelectorAll(".lit, .land").forEach((el) => el.classList.remove("lit", "land"));
+        cells.forEach((el) => el.classList.toggle("off", !rest));
+        swaps.forEach((el) => el.classList.toggle("done", rest));
+        void demo.offsetWidth;
+        demo.classList.remove("instant");
+      }
+
+      // a copy of a value travels from one place to the other through the connector
+      function fly(from, to, ms) {
+        const box = demo.getBoundingClientRect();
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.setAttribute("aria-hidden", "true");
+        chip.textContent = from.textContent.trim();
+        demo.append(chip);
+        const w = chip.offsetWidth;
+        const h = chip.offsetHeight;
+        const centre = (r) => [r.left + r.width / 2 - box.left - w / 2, r.top + r.height / 2 - box.top - h / 2];
+        const [ax, ay] = centre(from.getBoundingClientRect());
+        const [bx, by] = centre(to.getBoundingClientRect());
+        const line = wire.getBoundingClientRect();
+        // x: the connector; y: just above the table
+        const x = line.left + line.width / 2 - box.left - w / 2;
+        const y = line.bottom - box.top - h;
+        // square turns only: in the note along the value's line to the connector, down it, then
+        // along the top of the table and down the column (on the way back, the same reversed)
+        const points =
+          ay < by
+            ? [[ax, ay], [x, ay], [x, y], [bx, y], [bx, by]]
+            : [[ax, ay], [ax, y], [x, y], [x, by], [bx, by]];
+        // one speed along the whole path: each point's offset is its share of the length
+        const lengths = points.slice(1).map((p, k) => Math.hypot(p[0] - points[k][0], p[1] - points[k][1]));
+        const total = lengths.reduce((s, l) => s + l, 0) || 1;
+        let run = 0;
+        const frames = points.map(([px, py], k) => {
+          if (k > 0) run += lengths[k - 1];
+          return { transform: `translate(${px}px, ${py}px)`, offset: run / total };
+        });
+        chip.animate(frames, { duration: ms, easing: "cubic-bezier(0.45, 0, 0.25, 1)", fill: "forwards" });
+        later(ms, () => chip.remove());
+      }
+
+      // values light up; a copy travels (the source lit only until it leaves) and lands in its cell.
+      // One value: its own chip. A whole note: one chip, its title, and the row lands at once.
+      const LEAD = 140;
+      function send(r, cs, at, ms) {
+        const from = cs.map((c) => value(r, c));
+        const to = cs.map((c) => cell(r, c));
+        later(at, () => from.forEach((el) => el.classList.add("lit")));
+        later(at + LEAD, () => {
+          from.forEach((el) => el.classList.remove("lit"));
+          fly(shown(from[0]), shown(to[0]), ms);
+        });
+        later(at + LEAD + ms, () =>
+          to.forEach((el) => {
+            el.classList.remove("off");
+            el.classList.add("land");
+          }),
+        );
+      }
+
+      function play() {
+        set(false);
+        playing = true;
+        demo.classList.add("flowing");
+        // 4.6 s in all (WCAG 2.2.2: under 5 s), at most two chips in the air at any time
+        let t = 0;
+        // a. Nosferatu: its values, one at a time, into the first row (2 chips at most)
+        const STEP = 280;
+        const FLIGHT = 540;
+        COLUMNS.forEach((c, k) => send(0, [c], t + k * STEP, FLIGHT));
+        t += 3 * STEP + LEAD + FLIGHT + 80;
+        // b. the deck turns: The Gold Rush, then Metropolis, each note one chip, a row each
+        for (const r of [1, 2]) {
+          later(t, () => front(r));
+          t += 340;
+          send(r, COLUMNS, t, 520);
+          t += LEAD + 520 + 60;
+        }
+        t += 60;
+        // c. the way back: a write to the table travels up into the note
+        const ops = demo.querySelector(".ops");
+        const row = cell(2, "status");
+        const note = value(2, "status");
+        later(t, () => {
+          ops.classList.add("done");
+          demo.dataset.dir = "up";
+          row.classList.add("done", "lit");
+        });
+        later(t + 200, () => {
+          row.classList.remove("lit");
+          fly(row.querySelector(".now"), note.querySelector(".now"), 600);
+        });
+        // d. rest: the final state stays, the two changed values marked
+        later(t + 800, () => {
+          note.classList.add("done", "land");
+          demo.classList.remove("staged", "flowing");
+          demo.dataset.dir = "both";
+          playing = false;
+          ended = performance.now();
+        });
+      }
+
+      set(false);
+      // once, when the table (where the values land) is in view; again with the button, or when a
+      // mouse comes over the demo 8 s after a run (never on touch: a swipe must not restart it)
+      const view = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((e) => e.isIntersecting)) return;
+          view.disconnect();
+          if (!playing) play();
+        },
+        { threshold: 0.6 },
+      );
+      view.observe(demo.querySelector(".table"));
+      demo.addEventListener("pointerenter", (e) => {
+        if (e.pointerType === "mouse" && !playing && ended && performance.now() - ended > 8000) play();
+      });
+      button.hidden = false;
+      button.addEventListener("click", () => {
+        view.disconnect();
+        play();
+      });
+      // a new width moves every cell: a run in progress jumps to its end
+      let width = innerWidth;
+      addEventListener("resize", () => {
+        if (innerWidth === width) return;
+        width = innerWidth;
+        if (!playing) return;
+        set(true);
+        ended = performance.now();
+      });
+    })();
+  </script>
+</div>
+
+<style>
+  .hero-dn {
+    /* the cards: a step lighter than the page, like the cards below the hero */
+    --dn-card: var(--sl-color-gray-7);
+    --dn-card-head: color-mix(in srgb, var(--sl-color-gray-6) 45%, var(--sl-color-gray-7));
+    --dn-card-line: var(--sl-color-gray-6);
+    --dn-shadow: 0 0.6rem 1.6rem -0.8rem rgb(0 0 0 / 0.7);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(2.5rem, 6vw, 3.5rem);
+    align-items: center;
+    padding-block: clamp(2rem, 6vw, 4.5rem) clamp(1.5rem, 4vw, 3rem);
+  }
+  :global(:root[data-theme="light"]) .hero-dn {
+    --dn-card: var(--sl-color-black);
+    --dn-card-head: var(--sl-color-gray-8);
+    --dn-card-line: var(--sl-color-gray-7);
+    --dn-shadow: 0 0.6rem 1.6rem -0.9rem rgb(0 0 0 / 0.25);
+  }
+  h1 {
+    text-wrap: balance;
+    font-size: clamp(2.5rem, 5.2vw, 3.8rem);
+    line-height: 1.04;
+    color: var(--sl-color-white);
+    margin: 0;
+    max-width: 22ch;
+  }
+  .tagline {
+    margin-top: 1.25rem;
+    font-size: var(--sl-text-lg);
+    line-height: 1.55;
+    color: var(--sl-color-gray-2);
+    max-width: 52ch;
+  }
+  .actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1.75rem;
+  }
+  /* wide screens: the words on the left, the demo beside them */
+  @media (min-width: 64rem) {
+    .hero-dn {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 28rem);
+      column-gap: clamp(3rem, 6vw, 5rem);
+    }
+    h1 {
+      font-size: clamp(2.5rem, 4.4vw, 3.5rem);
+    }
+  }
+
+  /* the demo, from top to bottom: the deck, the connector, the table */
+  .demo {
+    --tab: 1.85rem;
+    position: relative;
+    margin: 0;
+    width: 100%;
+    max-width: 28rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    border-radius: 0.6rem;
+    font-size: 0.8125rem;
+  }
+  .note,
+  .table {
+    border: 1px solid var(--dn-card-line);
+    border-radius: 0.5rem;
+    background: var(--dn-card);
+    overflow: hidden;
+  }
+  .path {
+    margin: 0;
+    padding: 0.4rem 0.8rem;
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-2xs);
+    line-height: 1.5;
+    color: var(--sl-color-gray-3);
+    background: var(--dn-card-head);
+    border-bottom: 1px solid var(--dn-card-line);
+  }
+
+  /* the deck: the notes share one cell, so it is as tall as the tallest; the ones behind show
+     their file names above the front one */
+  .deck {
+    display: grid;
+    width: 100%;
+    max-width: 23rem;
+    justify-self: center;
+    padding-top: calc(var(--tab) * 2);
+  }
+  .note {
+    grid-area: 1 / 1;
+    min-width: 0;
+    z-index: calc(3 - var(--d));
+    transform-origin: 50% 0;
+    transform: translateY(calc(var(--d) * var(--tab) * -1)) scale(calc(1 - var(--d) * 0.06));
+    transition: transform 0.36s cubic-bezier(0.3, 0.7, 0.2, 1);
+  }
+  .note.front {
+    box-shadow: var(--dn-shadow);
+  }
+  .note:not(.front) .path {
+    color: var(--sl-color-gray-4);
+  }
+  .note pre {
+    margin: 0;
+    padding: 0.65rem 0.8rem 0.75rem;
+    border: 0;
+    background: none;
+    font-family: var(--sl-font-mono);
+    font-size: 1em;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--sl-color-gray-2);
+  }
+  .key {
+    color: var(--sl-color-gray-4);
+  }
+  .body {
+    color: var(--sl-color-gray-3);
+  }
+
+  /* the connector: one dashed line, its dashes flowing while the demo plays */
+  .wire {
+    position: relative;
+    height: 4.5rem;
+  }
+  .line {
+    position: absolute;
+    inset: 0.45rem auto 0.45rem 50%;
+    width: 2px;
+    margin-left: -1px;
+    overflow: hidden;
+  }
+  .line::before {
+    content: "";
+    position: absolute;
+    inset: -0.75rem 0;
+    background: repeating-linear-gradient(var(--sl-color-accent) 0 0.375rem, transparent 0.375rem 0.75rem);
+  }
+  .flowing .line::before {
+    animation: dashes 0.5s linear infinite;
+  }
+  .flowing[data-dir="up"] .line::before {
+    animation-direction: reverse;
+  }
+  @keyframes dashes {
+    to {
+      transform: translateY(0.75rem);
+    }
+  }
+  .head {
+    position: absolute;
+    left: 50%;
+    width: 0.75rem;
+    height: 0.5rem;
+    margin-left: -0.375rem;
+    background: var(--sl-color-accent);
+    visibility: hidden;
+    /* above the travelling chips: the direction stays visible while a value passes */
+    z-index: 11;
+  }
+  .head.up {
+    top: 0.1rem;
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+  .head.down {
+    bottom: 0.1rem;
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+  }
+  .demo:not([data-dir="down"]) .head.up,
+  .demo:not([data-dir="up"]) .head.down {
+    visibility: visible;
+  }
+
+  /* the table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1em;
+    font-variant-numeric: tabular-nums;
+  }
+  th,
+  td {
+    text-align: start;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--dn-card-line);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  th {
+    font-family: var(--sl-font-mono);
+    font-weight: 600;
+    color: var(--sl-color-gray-4);
+  }
+  td {
+    color: var(--sl-color-white);
+  }
+  td.num {
+    text-align: end;
+  }
+
+  /* two texts in one place, one shown: the place keeps the size of the longer */
+  .swap {
+    display: inline-grid;
+    justify-items: start;
+  }
+  .swap > * {
+    grid-area: 1 / 1;
+  }
+  .swap.done > .was,
+  .swap:not(.done) > .now {
+    visibility: hidden;
+  }
+  p.swap {
+    display: grid;
+  }
+  .ops > .now {
+    color: var(--sl-color-accent-high);
+  }
+
+  /* a value lit (on its way), landing (fading out) and, at rest, the value the write changed */
+  .mark {
+    border-radius: 0.2rem;
+    padding: 0.1em 0.2em;
+    margin-inline: -0.2em;
+    transition:
+      background-color 0.2s ease,
+      color 0.2s ease;
+  }
+  .lit.mark,
+  .lit > .mark {
+    background-color: var(--sl-color-accent);
+    color: var(--dn-on-accent);
+  }
+  .land.mark,
+  .land > .mark {
+    animation: land 0.6s ease-out;
+  }
+  /* from the lit colours to the soft ones at once, then out: readable on every frame */
+  @keyframes land {
+    from {
+      background-color: var(--sl-color-accent);
+      color: var(--dn-on-accent);
+    }
+    20% {
+      background-color: var(--sl-color-accent-low);
+      color: var(--sl-color-accent-high);
+    }
+  }
+  .demo:not(.staged) .swap.done > .now.mark {
+    background-color: var(--sl-color-accent-low);
+    color: var(--sl-color-accent-high);
+  }
+  @media screen {
+    .cell.off {
+      opacity: 0;
+    }
+  }
+  .demo :global(.chip) {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    padding: 0 0.25em;
+    border-radius: 0.2rem;
+    font-family: var(--sl-font-mono);
+    line-height: 1.6;
+    white-space: nowrap;
+    background: var(--sl-color-accent);
+    color: var(--dn-on-accent);
+    box-shadow: 0 0.3rem 0.8rem -0.3rem rgb(0 0 0 / 0.6);
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  /* the Replay button, under the table: shown only when the demo can play */
+  .replay:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    justify-self: end;
+    margin-top: 0.6rem;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--dn-card-line);
+    border-radius: 999px;
+    background: var(--dn-card);
+    color: var(--sl-color-gray-3);
+    font: inherit;
+    font-size: var(--sl-text-2xs);
+    line-height: 1.5;
+    cursor: pointer;
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+  .replay:hover {
+    color: var(--sl-color-white);
+    border-color: var(--sl-color-gray-5);
+  }
+  .replay:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+
+  /* a jump to a state: no transitions */
+  .instant .note,
+  .instant .mark {
+    transition: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .note,
+    .mark {
+      transition: none;
+    }
+  }
+
+  /* the caption: read by screen readers, not shown */
+  .vh {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (max-width: 34rem) {
+    th,
+    td {
+      padding-inline: 0.55rem;
+    }
+  }
+  @media (max-width: 24rem) {
+    .demo {
+      font-size: 0.75rem;
+    }
+    th,
+    td {
+      padding-inline: 0.45rem;
+    }
+  }
+  @media (max-width: 21rem) {
+    th,
+    td {
+      padding-inline: 0.3rem;
+    }
+  }
+</style>

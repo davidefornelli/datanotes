@@ -1,0 +1,2 @@
+# deleted notes (the engine keeps its own state outside the vault, in its store)
+.trash/

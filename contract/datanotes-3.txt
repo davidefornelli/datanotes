@@ -1,0 +1,3469 @@
+# The public contract of Datanotes 3 (tests/contract.test.ts, tests/helpers/contract.ts).
+# A line never goes: Datanotes 3 adds, never takes away (docs: /reference/compatibility/).
+# Add new lines with npm run contract:update; never remove one by hand.
+answer add_column.ambiguous_mentions: object[]
+answer add_column.ambiguous_mentions[].candidates: string[]
+answer add_column.ambiguous_mentions[].context: string
+answer add_column.ambiguous_mentions[].hint: string
+answer add_column.ambiguous_mentions[].path: string
+answer add_column.ambiguous_mentions[].reason = "adjacent"
+answer add_column.ambiguous_mentions[].reason = "overlap"
+answer add_column.ambiguous_mentions[].reason = "part_of_name"
+answer add_column.ambiguous_mentions[].reason = "same_name"
+answer add_column.ambiguous_mentions[].reason = "sentence_start"
+answer add_column.ambiguous_mentions[].reason: string
+answer add_column.ambiguous_mentions[].text: string
+answer add_column.commits: object[]
+answer add_column.commits[].operation: string
+answer add_column.commits[].table: string
+answer add_column.commits[].version: integer
+answer add_column.conflicts: object[]
+answer add_column.conflicts[].message: string
+answer add_column.conflicts[].path: string
+answer add_column.dry_run: boolean
+answer add_column.failed: object[]
+answer add_column.failed[].error: string
+answer add_column.failed[].path: string
+answer add_column.files_created: integer
+answer add_column.files_deleted: integer
+answer add_column.files_moved: integer
+answer add_column.links_added: object[]
+answer add_column.links_added[].link: string
+answer add_column.links_added[].path: string
+answer add_column.links_added[].target: string
+answer add_column.links_added[].text: string
+answer add_column.migration_id: string
+answer add_column.notes_changed: integer
+answer add_column.ok: boolean
+answer add_column.op: string
+answer add_column.planned_creates: string[]
+answer add_column.planned_deletes: string[]
+answer add_column.planned_edits: object[]
+answer add_column.planned_edits[].body: boolean
+answer add_column.planned_edits[].path: string
+answer add_column.planned_edits[].remove: string[]
+answer add_column.planned_edits[].set: object
+answer add_column.planned_moves: object[]
+answer add_column.planned_moves[].from: string
+answer add_column.planned_moves[].to: string
+answer add_column.planned_texts: string[]
+answer add_column.references_updated: integer
+answer add_column.rolled_back: boolean
+answer add_column.violations: object[]
+answer add_column.violations[].path: string
+answer add_column.violations[].violations: object[]
+answer add_column.violations[].violations[].code = "broken_link"
+answer add_column.violations[].violations[].code = "check"
+answer add_column.violations[].violations[].code = "cycle"
+answer add_column.violations[].violations[].code = "enum"
+answer add_column.violations[].violations[].code = "generated"
+answer add_column.violations[].violations[].code = "inverse"
+answer add_column.violations[].violations[].code = "max"
+answer add_column.violations[].violations[].code = "min"
+answer add_column.violations[].violations[].code = "ref"
+answer add_column.violations[].violations[].code = "required"
+answer add_column.violations[].violations[].code = "step"
+answer add_column.violations[].violations[].code = "type"
+answer add_column.violations[].violations[].code = "unique"
+answer add_column.violations[].violations[].code = "unknown_column"
+answer add_column.violations[].violations[].code = "unreadable"
+answer add_column.violations[].violations[].code = "vocabulary"
+answer add_column.violations[].violations[].code: string
+answer add_column.violations[].violations[].column: string
+answer add_column.violations[].violations[].constraint: string
+answer add_column.violations[].violations[].index: integer
+answer add_column.violations[].violations[].message: string
+answer add_column.violations[].violations[].value: any
+answer add_constraint.ambiguous_mentions: object[]
+answer add_constraint.ambiguous_mentions[].candidates: string[]
+answer add_constraint.ambiguous_mentions[].context: string
+answer add_constraint.ambiguous_mentions[].hint: string
+answer add_constraint.ambiguous_mentions[].path: string
+answer add_constraint.ambiguous_mentions[].reason = "adjacent"
+answer add_constraint.ambiguous_mentions[].reason = "overlap"
+answer add_constraint.ambiguous_mentions[].reason = "part_of_name"
+answer add_constraint.ambiguous_mentions[].reason = "same_name"
+answer add_constraint.ambiguous_mentions[].reason = "sentence_start"
+answer add_constraint.ambiguous_mentions[].reason: string
+answer add_constraint.ambiguous_mentions[].text: string
+answer add_constraint.commits: object[]
+answer add_constraint.commits[].operation: string
+answer add_constraint.commits[].table: string
+answer add_constraint.commits[].version: integer
+answer add_constraint.conflicts: object[]
+answer add_constraint.conflicts[].message: string
+answer add_constraint.conflicts[].path: string
+answer add_constraint.dry_run: boolean
+answer add_constraint.failed: object[]
+answer add_constraint.failed[].error: string
+answer add_constraint.failed[].path: string
+answer add_constraint.files_created: integer
+answer add_constraint.files_deleted: integer
+answer add_constraint.files_moved: integer
+answer add_constraint.links_added: object[]
+answer add_constraint.links_added[].link: string
+answer add_constraint.links_added[].path: string
+answer add_constraint.links_added[].target: string
+answer add_constraint.links_added[].text: string
+answer add_constraint.migration_id: string
+answer add_constraint.notes_changed: integer
+answer add_constraint.ok: boolean
+answer add_constraint.op: string
+answer add_constraint.planned_creates: string[]
+answer add_constraint.planned_deletes: string[]
+answer add_constraint.planned_edits: object[]
+answer add_constraint.planned_edits[].body: boolean
+answer add_constraint.planned_edits[].path: string
+answer add_constraint.planned_edits[].remove: string[]
+answer add_constraint.planned_edits[].set: object
+answer add_constraint.planned_moves: object[]
+answer add_constraint.planned_moves[].from: string
+answer add_constraint.planned_moves[].to: string
+answer add_constraint.planned_texts: string[]
+answer add_constraint.references_updated: integer
+answer add_constraint.rolled_back: boolean
+answer add_constraint.violations: object[]
+answer add_constraint.violations[].path: string
+answer add_constraint.violations[].violations: object[]
+answer add_constraint.violations[].violations[].code = "broken_link"
+answer add_constraint.violations[].violations[].code = "check"
+answer add_constraint.violations[].violations[].code = "cycle"
+answer add_constraint.violations[].violations[].code = "enum"
+answer add_constraint.violations[].violations[].code = "generated"
+answer add_constraint.violations[].violations[].code = "inverse"
+answer add_constraint.violations[].violations[].code = "max"
+answer add_constraint.violations[].violations[].code = "min"
+answer add_constraint.violations[].violations[].code = "ref"
+answer add_constraint.violations[].violations[].code = "required"
+answer add_constraint.violations[].violations[].code = "step"
+answer add_constraint.violations[].violations[].code = "type"
+answer add_constraint.violations[].violations[].code = "unique"
+answer add_constraint.violations[].violations[].code = "unknown_column"
+answer add_constraint.violations[].violations[].code = "unreadable"
+answer add_constraint.violations[].violations[].code = "vocabulary"
+answer add_constraint.violations[].violations[].code: string
+answer add_constraint.violations[].violations[].column: string
+answer add_constraint.violations[].violations[].constraint: string
+answer add_constraint.violations[].violations[].index: integer
+answer add_constraint.violations[].violations[].message: string
+answer add_constraint.violations[].violations[].value: any
+answer adopt_rows.ambiguous_mentions: object[]
+answer adopt_rows.ambiguous_mentions[].candidates: string[]
+answer adopt_rows.ambiguous_mentions[].context: string
+answer adopt_rows.ambiguous_mentions[].hint: string
+answer adopt_rows.ambiguous_mentions[].path: string
+answer adopt_rows.ambiguous_mentions[].reason = "adjacent"
+answer adopt_rows.ambiguous_mentions[].reason = "overlap"
+answer adopt_rows.ambiguous_mentions[].reason = "part_of_name"
+answer adopt_rows.ambiguous_mentions[].reason = "same_name"
+answer adopt_rows.ambiguous_mentions[].reason = "sentence_start"
+answer adopt_rows.ambiguous_mentions[].reason: string
+answer adopt_rows.ambiguous_mentions[].text: string
+answer adopt_rows.commits: object[]
+answer adopt_rows.commits[].operation: string
+answer adopt_rows.commits[].table: string
+answer adopt_rows.commits[].version: integer
+answer adopt_rows.conflicts: object[]
+answer adopt_rows.conflicts[].message: string
+answer adopt_rows.conflicts[].path: string
+answer adopt_rows.dry_run: boolean
+answer adopt_rows.failed: object[]
+answer adopt_rows.failed[].error: string
+answer adopt_rows.failed[].path: string
+answer adopt_rows.files_created: integer
+answer adopt_rows.files_deleted: integer
+answer adopt_rows.files_moved: integer
+answer adopt_rows.links_added: object[]
+answer adopt_rows.links_added[].link: string
+answer adopt_rows.links_added[].path: string
+answer adopt_rows.links_added[].target: string
+answer adopt_rows.links_added[].text: string
+answer adopt_rows.migration_id: string
+answer adopt_rows.notes_changed: integer
+answer adopt_rows.ok: boolean
+answer adopt_rows.op: string
+answer adopt_rows.planned_creates: string[]
+answer adopt_rows.planned_deletes: string[]
+answer adopt_rows.planned_edits: object[]
+answer adopt_rows.planned_edits[].body: boolean
+answer adopt_rows.planned_edits[].path: string
+answer adopt_rows.planned_edits[].remove: string[]
+answer adopt_rows.planned_edits[].set: object
+answer adopt_rows.planned_moves: object[]
+answer adopt_rows.planned_moves[].from: string
+answer adopt_rows.planned_moves[].to: string
+answer adopt_rows.planned_texts: string[]
+answer adopt_rows.references_updated: integer
+answer adopt_rows.rolled_back: boolean
+answer adopt_rows.violations: object[]
+answer adopt_rows.violations[].path: string
+answer adopt_rows.violations[].violations: object[]
+answer adopt_rows.violations[].violations[].code = "broken_link"
+answer adopt_rows.violations[].violations[].code = "check"
+answer adopt_rows.violations[].violations[].code = "cycle"
+answer adopt_rows.violations[].violations[].code = "enum"
+answer adopt_rows.violations[].violations[].code = "generated"
+answer adopt_rows.violations[].violations[].code = "inverse"
+answer adopt_rows.violations[].violations[].code = "max"
+answer adopt_rows.violations[].violations[].code = "min"
+answer adopt_rows.violations[].violations[].code = "ref"
+answer adopt_rows.violations[].violations[].code = "required"
+answer adopt_rows.violations[].violations[].code = "step"
+answer adopt_rows.violations[].violations[].code = "type"
+answer adopt_rows.violations[].violations[].code = "unique"
+answer adopt_rows.violations[].violations[].code = "unknown_column"
+answer adopt_rows.violations[].violations[].code = "unreadable"
+answer adopt_rows.violations[].violations[].code = "vocabulary"
+answer adopt_rows.violations[].violations[].code: string
+answer adopt_rows.violations[].violations[].column: string
+answer adopt_rows.violations[].violations[].constraint: string
+answer adopt_rows.violations[].violations[].index: integer
+answer adopt_rows.violations[].violations[].message: string
+answer adopt_rows.violations[].violations[].value: any
+answer align_relations.ambiguous_mentions: object[]
+answer align_relations.ambiguous_mentions[].candidates: string[]
+answer align_relations.ambiguous_mentions[].context: string
+answer align_relations.ambiguous_mentions[].hint: string
+answer align_relations.ambiguous_mentions[].path: string
+answer align_relations.ambiguous_mentions[].reason = "adjacent"
+answer align_relations.ambiguous_mentions[].reason = "overlap"
+answer align_relations.ambiguous_mentions[].reason = "part_of_name"
+answer align_relations.ambiguous_mentions[].reason = "same_name"
+answer align_relations.ambiguous_mentions[].reason = "sentence_start"
+answer align_relations.ambiguous_mentions[].reason: string
+answer align_relations.ambiguous_mentions[].text: string
+answer align_relations.commits: object[]
+answer align_relations.commits[].operation: string
+answer align_relations.commits[].table: string
+answer align_relations.commits[].version: integer
+answer align_relations.conflicts: object[]
+answer align_relations.conflicts[].message: string
+answer align_relations.conflicts[].path: string
+answer align_relations.dry_run: boolean
+answer align_relations.failed: object[]
+answer align_relations.failed[].error: string
+answer align_relations.failed[].path: string
+answer align_relations.files_created: integer
+answer align_relations.files_deleted: integer
+answer align_relations.files_moved: integer
+answer align_relations.links_added: object[]
+answer align_relations.links_added[].link: string
+answer align_relations.links_added[].path: string
+answer align_relations.links_added[].target: string
+answer align_relations.links_added[].text: string
+answer align_relations.migration_id: string
+answer align_relations.notes_changed: integer
+answer align_relations.ok: boolean
+answer align_relations.op: string
+answer align_relations.planned_creates: string[]
+answer align_relations.planned_deletes: string[]
+answer align_relations.planned_edits: object[]
+answer align_relations.planned_edits[].body: boolean
+answer align_relations.planned_edits[].path: string
+answer align_relations.planned_edits[].remove: string[]
+answer align_relations.planned_edits[].set: object
+answer align_relations.planned_moves: object[]
+answer align_relations.planned_moves[].from: string
+answer align_relations.planned_moves[].to: string
+answer align_relations.planned_texts: string[]
+answer align_relations.references_updated: integer
+answer align_relations.rolled_back: boolean
+answer align_relations.violations: object[]
+answer align_relations.violations[].path: string
+answer align_relations.violations[].violations: object[]
+answer align_relations.violations[].violations[].code = "broken_link"
+answer align_relations.violations[].violations[].code = "check"
+answer align_relations.violations[].violations[].code = "cycle"
+answer align_relations.violations[].violations[].code = "enum"
+answer align_relations.violations[].violations[].code = "generated"
+answer align_relations.violations[].violations[].code = "inverse"
+answer align_relations.violations[].violations[].code = "max"
+answer align_relations.violations[].violations[].code = "min"
+answer align_relations.violations[].violations[].code = "ref"
+answer align_relations.violations[].violations[].code = "required"
+answer align_relations.violations[].violations[].code = "step"
+answer align_relations.violations[].violations[].code = "type"
+answer align_relations.violations[].violations[].code = "unique"
+answer align_relations.violations[].violations[].code = "unknown_column"
+answer align_relations.violations[].violations[].code = "unreadable"
+answer align_relations.violations[].violations[].code = "vocabulary"
+answer align_relations.violations[].violations[].code: string
+answer align_relations.violations[].violations[].column: string
+answer align_relations.violations[].violations[].constraint: string
+answer align_relations.violations[].violations[].index: integer
+answer align_relations.violations[].violations[].message: string
+answer align_relations.violations[].violations[].value: any
+answer alter_column.ambiguous_mentions: object[]
+answer alter_column.ambiguous_mentions[].candidates: string[]
+answer alter_column.ambiguous_mentions[].context: string
+answer alter_column.ambiguous_mentions[].hint: string
+answer alter_column.ambiguous_mentions[].path: string
+answer alter_column.ambiguous_mentions[].reason = "adjacent"
+answer alter_column.ambiguous_mentions[].reason = "overlap"
+answer alter_column.ambiguous_mentions[].reason = "part_of_name"
+answer alter_column.ambiguous_mentions[].reason = "same_name"
+answer alter_column.ambiguous_mentions[].reason = "sentence_start"
+answer alter_column.ambiguous_mentions[].reason: string
+answer alter_column.ambiguous_mentions[].text: string
+answer alter_column.commits: object[]
+answer alter_column.commits[].operation: string
+answer alter_column.commits[].table: string
+answer alter_column.commits[].version: integer
+answer alter_column.conflicts: object[]
+answer alter_column.conflicts[].message: string
+answer alter_column.conflicts[].path: string
+answer alter_column.dry_run: boolean
+answer alter_column.failed: object[]
+answer alter_column.failed[].error: string
+answer alter_column.failed[].path: string
+answer alter_column.files_created: integer
+answer alter_column.files_deleted: integer
+answer alter_column.files_moved: integer
+answer alter_column.links_added: object[]
+answer alter_column.links_added[].link: string
+answer alter_column.links_added[].path: string
+answer alter_column.links_added[].target: string
+answer alter_column.links_added[].text: string
+answer alter_column.migration_id: string
+answer alter_column.notes_changed: integer
+answer alter_column.ok: boolean
+answer alter_column.op: string
+answer alter_column.planned_creates: string[]
+answer alter_column.planned_deletes: string[]
+answer alter_column.planned_edits: object[]
+answer alter_column.planned_edits[].body: boolean
+answer alter_column.planned_edits[].path: string
+answer alter_column.planned_edits[].remove: string[]
+answer alter_column.planned_edits[].set: object
+answer alter_column.planned_moves: object[]
+answer alter_column.planned_moves[].from: string
+answer alter_column.planned_moves[].to: string
+answer alter_column.planned_texts: string[]
+answer alter_column.references_updated: integer
+answer alter_column.rolled_back: boolean
+answer alter_column.violations: object[]
+answer alter_column.violations[].path: string
+answer alter_column.violations[].violations: object[]
+answer alter_column.violations[].violations[].code = "broken_link"
+answer alter_column.violations[].violations[].code = "check"
+answer alter_column.violations[].violations[].code = "cycle"
+answer alter_column.violations[].violations[].code = "enum"
+answer alter_column.violations[].violations[].code = "generated"
+answer alter_column.violations[].violations[].code = "inverse"
+answer alter_column.violations[].violations[].code = "max"
+answer alter_column.violations[].violations[].code = "min"
+answer alter_column.violations[].violations[].code = "ref"
+answer alter_column.violations[].violations[].code = "required"
+answer alter_column.violations[].violations[].code = "step"
+answer alter_column.violations[].violations[].code = "type"
+answer alter_column.violations[].violations[].code = "unique"
+answer alter_column.violations[].violations[].code = "unknown_column"
+answer alter_column.violations[].violations[].code = "unreadable"
+answer alter_column.violations[].violations[].code = "vocabulary"
+answer alter_column.violations[].violations[].code: string
+answer alter_column.violations[].violations[].column: string
+answer alter_column.violations[].violations[].constraint: string
+answer alter_column.violations[].violations[].index: integer
+answer alter_column.violations[].violations[].message: string
+answer alter_column.violations[].violations[].value: any
+answer alter_table.ambiguous_mentions: object[]
+answer alter_table.ambiguous_mentions[].candidates: string[]
+answer alter_table.ambiguous_mentions[].context: string
+answer alter_table.ambiguous_mentions[].hint: string
+answer alter_table.ambiguous_mentions[].path: string
+answer alter_table.ambiguous_mentions[].reason = "adjacent"
+answer alter_table.ambiguous_mentions[].reason = "overlap"
+answer alter_table.ambiguous_mentions[].reason = "part_of_name"
+answer alter_table.ambiguous_mentions[].reason = "same_name"
+answer alter_table.ambiguous_mentions[].reason = "sentence_start"
+answer alter_table.ambiguous_mentions[].reason: string
+answer alter_table.ambiguous_mentions[].text: string
+answer alter_table.commits: object[]
+answer alter_table.commits[].operation: string
+answer alter_table.commits[].table: string
+answer alter_table.commits[].version: integer
+answer alter_table.conflicts: object[]
+answer alter_table.conflicts[].message: string
+answer alter_table.conflicts[].path: string
+answer alter_table.dry_run: boolean
+answer alter_table.failed: object[]
+answer alter_table.failed[].error: string
+answer alter_table.failed[].path: string
+answer alter_table.files_created: integer
+answer alter_table.files_deleted: integer
+answer alter_table.files_moved: integer
+answer alter_table.links_added: object[]
+answer alter_table.links_added[].link: string
+answer alter_table.links_added[].path: string
+answer alter_table.links_added[].target: string
+answer alter_table.links_added[].text: string
+answer alter_table.migration_id: string
+answer alter_table.notes_changed: integer
+answer alter_table.ok: boolean
+answer alter_table.op: string
+answer alter_table.planned_creates: string[]
+answer alter_table.planned_deletes: string[]
+answer alter_table.planned_edits: object[]
+answer alter_table.planned_edits[].body: boolean
+answer alter_table.planned_edits[].path: string
+answer alter_table.planned_edits[].remove: string[]
+answer alter_table.planned_edits[].set: object
+answer alter_table.planned_moves: object[]
+answer alter_table.planned_moves[].from: string
+answer alter_table.planned_moves[].to: string
+answer alter_table.planned_texts: string[]
+answer alter_table.references_updated: integer
+answer alter_table.rolled_back: boolean
+answer alter_table.violations: object[]
+answer alter_table.violations[].path: string
+answer alter_table.violations[].violations: object[]
+answer alter_table.violations[].violations[].code = "broken_link"
+answer alter_table.violations[].violations[].code = "check"
+answer alter_table.violations[].violations[].code = "cycle"
+answer alter_table.violations[].violations[].code = "enum"
+answer alter_table.violations[].violations[].code = "generated"
+answer alter_table.violations[].violations[].code = "inverse"
+answer alter_table.violations[].violations[].code = "max"
+answer alter_table.violations[].violations[].code = "min"
+answer alter_table.violations[].violations[].code = "ref"
+answer alter_table.violations[].violations[].code = "required"
+answer alter_table.violations[].violations[].code = "step"
+answer alter_table.violations[].violations[].code = "type"
+answer alter_table.violations[].violations[].code = "unique"
+answer alter_table.violations[].violations[].code = "unknown_column"
+answer alter_table.violations[].violations[].code = "unreadable"
+answer alter_table.violations[].violations[].code = "vocabulary"
+answer alter_table.violations[].violations[].code: string
+answer alter_table.violations[].violations[].column: string
+answer alter_table.violations[].violations[].constraint: string
+answer alter_table.violations[].violations[].index: integer
+answer alter_table.violations[].violations[].message: string
+answer alter_table.violations[].violations[].value: any
+answer batch.dry_run: boolean
+answer batch.failed_at: integer
+answer batch.migration_id: string
+answer batch.ok: boolean
+answer batch.op: string
+answer batch.rollback: object[]
+answer batch.rolled_back: boolean
+answer batch.steps: object[]
+answer batch.steps[].error: string
+answer batch.steps[].index: integer
+answer batch.steps[].migration_id: string
+answer batch.steps[].ok: boolean
+answer batch.steps[].op: string
+answer batch.steps[].result.ambiguous_mentions: object[]
+answer batch.steps[].result.ambiguous_mentions[].candidates: string[]
+answer batch.steps[].result.ambiguous_mentions[].context: string
+answer batch.steps[].result.ambiguous_mentions[].hint: string
+answer batch.steps[].result.ambiguous_mentions[].path: string
+answer batch.steps[].result.ambiguous_mentions[].reason = "adjacent"
+answer batch.steps[].result.ambiguous_mentions[].reason = "overlap"
+answer batch.steps[].result.ambiguous_mentions[].reason = "part_of_name"
+answer batch.steps[].result.ambiguous_mentions[].reason = "same_name"
+answer batch.steps[].result.ambiguous_mentions[].reason = "sentence_start"
+answer batch.steps[].result.ambiguous_mentions[].reason: string
+answer batch.steps[].result.ambiguous_mentions[].text: string
+answer batch.steps[].result.commits: object[]
+answer batch.steps[].result.commits[].operation: string
+answer batch.steps[].result.commits[].table: string
+answer batch.steps[].result.commits[].version: integer
+answer batch.steps[].result.conflicts: object[]
+answer batch.steps[].result.conflicts[].message: string
+answer batch.steps[].result.conflicts[].path: string
+answer batch.steps[].result.dry_run: boolean
+answer batch.steps[].result.failed: object[]
+answer batch.steps[].result.failed[].error: string
+answer batch.steps[].result.failed[].path: string
+answer batch.steps[].result.files_created: integer
+answer batch.steps[].result.files_deleted: integer
+answer batch.steps[].result.files_moved: integer
+answer batch.steps[].result.links_added: object[]
+answer batch.steps[].result.links_added[].link: string
+answer batch.steps[].result.links_added[].path: string
+answer batch.steps[].result.links_added[].target: string
+answer batch.steps[].result.links_added[].text: string
+answer batch.steps[].result.migration_id: string
+answer batch.steps[].result.notes_changed: integer
+answer batch.steps[].result.ok: boolean
+answer batch.steps[].result.op: string
+answer batch.steps[].result.planned_creates: string[]
+answer batch.steps[].result.planned_deletes: string[]
+answer batch.steps[].result.planned_edits: object[]
+answer batch.steps[].result.planned_edits[].body: boolean
+answer batch.steps[].result.planned_edits[].path: string
+answer batch.steps[].result.planned_edits[].remove: string[]
+answer batch.steps[].result.planned_edits[].set: object
+answer batch.steps[].result.planned_moves: object[]
+answer batch.steps[].result.planned_moves[].from: string
+answer batch.steps[].result.planned_moves[].to: string
+answer batch.steps[].result.planned_texts: string[]
+answer batch.steps[].result.references_updated: integer
+answer batch.steps[].result.rolled_back: boolean
+answer batch.steps[].result.violations: object[]
+answer batch.steps[].result.violations[].path: string
+answer batch.steps[].result.violations[].violations: object[]
+answer batch.steps[].result.violations[].violations[].code = "broken_link"
+answer batch.steps[].result.violations[].violations[].code = "check"
+answer batch.steps[].result.violations[].violations[].code = "cycle"
+answer batch.steps[].result.violations[].violations[].code = "enum"
+answer batch.steps[].result.violations[].violations[].code = "generated"
+answer batch.steps[].result.violations[].violations[].code = "inverse"
+answer batch.steps[].result.violations[].violations[].code = "max"
+answer batch.steps[].result.violations[].violations[].code = "min"
+answer batch.steps[].result.violations[].violations[].code = "ref"
+answer batch.steps[].result.violations[].violations[].code = "required"
+answer batch.steps[].result.violations[].violations[].code = "step"
+answer batch.steps[].result.violations[].violations[].code = "type"
+answer batch.steps[].result.violations[].violations[].code = "unique"
+answer batch.steps[].result.violations[].violations[].code = "unknown_column"
+answer batch.steps[].result.violations[].violations[].code = "unreadable"
+answer batch.steps[].result.violations[].violations[].code = "vocabulary"
+answer batch.steps[].result.violations[].violations[].code: string
+answer batch.steps[].result.violations[].violations[].column: string
+answer batch.steps[].result.violations[].violations[].constraint: string
+answer batch.steps[].result.violations[].violations[].index: integer
+answer batch.steps[].result.violations[].violations[].message: string
+answer batch.steps[].result.violations[].violations[].value: any
+answer batch.steps[].result: object
+answer check_table.errors: object[]
+answer check_table.errors[].error: string
+answer check_table.errors[].table: string
+answer check_table.rows_checked: integer
+answer check_table.table: null
+answer check_table.table: string
+answer check_table.tables_checked: integer
+answer check_table.total: integer
+answer check_table.violations: object[]
+answer check_table.violations[].path: string
+answer check_table.violations[].table: string
+answer check_table.violations[].violations: object[]
+answer check_table.violations[].violations[].code = "broken_link"
+answer check_table.violations[].violations[].code = "check"
+answer check_table.violations[].violations[].code = "cycle"
+answer check_table.violations[].violations[].code = "enum"
+answer check_table.violations[].violations[].code = "generated"
+answer check_table.violations[].violations[].code = "inverse"
+answer check_table.violations[].violations[].code = "max"
+answer check_table.violations[].violations[].code = "min"
+answer check_table.violations[].violations[].code = "ref"
+answer check_table.violations[].violations[].code = "required"
+answer check_table.violations[].violations[].code = "step"
+answer check_table.violations[].violations[].code = "type"
+answer check_table.violations[].violations[].code = "unique"
+answer check_table.violations[].violations[].code = "unknown_column"
+answer check_table.violations[].violations[].code = "unreadable"
+answer check_table.violations[].violations[].code = "vocabulary"
+answer check_table.violations[].violations[].code: string
+answer check_table.violations[].violations[].column: string
+answer check_table.violations[].violations[].constraint: string
+answer check_table.violations[].violations[].index: integer
+answer check_table.violations[].violations[].message: string
+answer check_table.violations[].violations[].value: any
+answer clone_table.ambiguous_mentions: object[]
+answer clone_table.ambiguous_mentions[].candidates: string[]
+answer clone_table.ambiguous_mentions[].context: string
+answer clone_table.ambiguous_mentions[].hint: string
+answer clone_table.ambiguous_mentions[].path: string
+answer clone_table.ambiguous_mentions[].reason = "adjacent"
+answer clone_table.ambiguous_mentions[].reason = "overlap"
+answer clone_table.ambiguous_mentions[].reason = "part_of_name"
+answer clone_table.ambiguous_mentions[].reason = "same_name"
+answer clone_table.ambiguous_mentions[].reason = "sentence_start"
+answer clone_table.ambiguous_mentions[].reason: string
+answer clone_table.ambiguous_mentions[].text: string
+answer clone_table.commits: object[]
+answer clone_table.commits[].operation: string
+answer clone_table.commits[].table: string
+answer clone_table.commits[].version: integer
+answer clone_table.conflicts: object[]
+answer clone_table.conflicts[].message: string
+answer clone_table.conflicts[].path: string
+answer clone_table.dry_run: boolean
+answer clone_table.failed: object[]
+answer clone_table.failed[].error: string
+answer clone_table.failed[].path: string
+answer clone_table.files_created: integer
+answer clone_table.files_deleted: integer
+answer clone_table.files_moved: integer
+answer clone_table.links_added: object[]
+answer clone_table.links_added[].link: string
+answer clone_table.links_added[].path: string
+answer clone_table.links_added[].target: string
+answer clone_table.links_added[].text: string
+answer clone_table.migration_id: string
+answer clone_table.notes_changed: integer
+answer clone_table.ok: boolean
+answer clone_table.op: string
+answer clone_table.planned_creates: string[]
+answer clone_table.planned_deletes: string[]
+answer clone_table.planned_edits: object[]
+answer clone_table.planned_edits[].body: boolean
+answer clone_table.planned_edits[].path: string
+answer clone_table.planned_edits[].remove: string[]
+answer clone_table.planned_edits[].set: object
+answer clone_table.planned_moves: object[]
+answer clone_table.planned_moves[].from: string
+answer clone_table.planned_moves[].to: string
+answer clone_table.planned_texts: string[]
+answer clone_table.references_updated: integer
+answer clone_table.rolled_back: boolean
+answer clone_table.violations: object[]
+answer clone_table.violations[].path: string
+answer clone_table.violations[].violations: object[]
+answer clone_table.violations[].violations[].code = "broken_link"
+answer clone_table.violations[].violations[].code = "check"
+answer clone_table.violations[].violations[].code = "cycle"
+answer clone_table.violations[].violations[].code = "enum"
+answer clone_table.violations[].violations[].code = "generated"
+answer clone_table.violations[].violations[].code = "inverse"
+answer clone_table.violations[].violations[].code = "max"
+answer clone_table.violations[].violations[].code = "min"
+answer clone_table.violations[].violations[].code = "ref"
+answer clone_table.violations[].violations[].code = "required"
+answer clone_table.violations[].violations[].code = "step"
+answer clone_table.violations[].violations[].code = "type"
+answer clone_table.violations[].violations[].code = "unique"
+answer clone_table.violations[].violations[].code = "unknown_column"
+answer clone_table.violations[].violations[].code = "unreadable"
+answer clone_table.violations[].violations[].code = "vocabulary"
+answer clone_table.violations[].violations[].code: string
+answer clone_table.violations[].violations[].column: string
+answer clone_table.violations[].violations[].constraint: string
+answer clone_table.violations[].violations[].index: integer
+answer clone_table.violations[].violations[].message: string
+answer clone_table.violations[].violations[].value: any
+answer comment_on.ambiguous_mentions: object[]
+answer comment_on.ambiguous_mentions[].candidates: string[]
+answer comment_on.ambiguous_mentions[].context: string
+answer comment_on.ambiguous_mentions[].hint: string
+answer comment_on.ambiguous_mentions[].path: string
+answer comment_on.ambiguous_mentions[].reason = "adjacent"
+answer comment_on.ambiguous_mentions[].reason = "overlap"
+answer comment_on.ambiguous_mentions[].reason = "part_of_name"
+answer comment_on.ambiguous_mentions[].reason = "same_name"
+answer comment_on.ambiguous_mentions[].reason = "sentence_start"
+answer comment_on.ambiguous_mentions[].reason: string
+answer comment_on.ambiguous_mentions[].text: string
+answer comment_on.commits: object[]
+answer comment_on.commits[].operation: string
+answer comment_on.commits[].table: string
+answer comment_on.commits[].version: integer
+answer comment_on.conflicts: object[]
+answer comment_on.conflicts[].message: string
+answer comment_on.conflicts[].path: string
+answer comment_on.dry_run: boolean
+answer comment_on.failed: object[]
+answer comment_on.failed[].error: string
+answer comment_on.failed[].path: string
+answer comment_on.files_created: integer
+answer comment_on.files_deleted: integer
+answer comment_on.files_moved: integer
+answer comment_on.links_added: object[]
+answer comment_on.links_added[].link: string
+answer comment_on.links_added[].path: string
+answer comment_on.links_added[].target: string
+answer comment_on.links_added[].text: string
+answer comment_on.migration_id: string
+answer comment_on.notes_changed: integer
+answer comment_on.ok: boolean
+answer comment_on.op: string
+answer comment_on.planned_creates: string[]
+answer comment_on.planned_deletes: string[]
+answer comment_on.planned_edits: object[]
+answer comment_on.planned_edits[].body: boolean
+answer comment_on.planned_edits[].path: string
+answer comment_on.planned_edits[].remove: string[]
+answer comment_on.planned_edits[].set: object
+answer comment_on.planned_moves: object[]
+answer comment_on.planned_moves[].from: string
+answer comment_on.planned_moves[].to: string
+answer comment_on.planned_texts: string[]
+answer comment_on.references_updated: integer
+answer comment_on.rolled_back: boolean
+answer comment_on.violations: object[]
+answer comment_on.violations[].path: string
+answer comment_on.violations[].violations: object[]
+answer comment_on.violations[].violations[].code = "broken_link"
+answer comment_on.violations[].violations[].code = "check"
+answer comment_on.violations[].violations[].code = "cycle"
+answer comment_on.violations[].violations[].code = "enum"
+answer comment_on.violations[].violations[].code = "generated"
+answer comment_on.violations[].violations[].code = "inverse"
+answer comment_on.violations[].violations[].code = "max"
+answer comment_on.violations[].violations[].code = "min"
+answer comment_on.violations[].violations[].code = "ref"
+answer comment_on.violations[].violations[].code = "required"
+answer comment_on.violations[].violations[].code = "step"
+answer comment_on.violations[].violations[].code = "type"
+answer comment_on.violations[].violations[].code = "unique"
+answer comment_on.violations[].violations[].code = "unknown_column"
+answer comment_on.violations[].violations[].code = "unreadable"
+answer comment_on.violations[].violations[].code = "vocabulary"
+answer comment_on.violations[].violations[].code: string
+answer comment_on.violations[].violations[].column: string
+answer comment_on.violations[].violations[].constraint: string
+answer comment_on.violations[].violations[].index: integer
+answer comment_on.violations[].violations[].message: string
+answer comment_on.violations[].violations[].value: any
+answer configure_database.bases: object[]
+answer configure_database.bases[].bases: string[]
+answer configure_database.bases[].columns: string[]
+answer configure_database.bases[].description: string
+answer configure_database.bases[].missing_descriptions.base: boolean
+answer configure_database.bases[].missing_descriptions.columns: string[]
+answer configure_database.bases[].missing_descriptions: object
+answer configure_database.bases[].name: string
+answer configure_database.bases[].tables: string[]
+answer configure_database.catalogs: object[]
+answer configure_database.catalogs[].catalog: string
+answer configure_database.catalogs[].default: boolean
+answer configure_database.catalogs[].description: string
+answer configure_database.catalogs[].schemas: object[]
+answer configure_database.catalogs[].schemas[].description: string
+answer configure_database.catalogs[].schemas[].schema: string
+answer configure_database.catalogs[].schemas[].tables: object[]
+answer configure_database.catalogs[].schemas[].tables[].description: string
+answer configure_database.catalogs[].schemas[].tables[].missing_descriptions.columns: string[]
+answer configure_database.catalogs[].schemas[].tables[].missing_descriptions.table: boolean
+answer configure_database.catalogs[].schemas[].tables[].missing_descriptions: object
+answer configure_database.catalogs[].schemas[].tables[].name: string
+answer configure_database.catalogs[].schemas[].tables[].qualified: string
+answer configure_database.catalogs[].schemas[].tables[].row_count: integer
+answer configure_database.catalogs[].schemas[].tables[].tags: object
+answer configure_database.catalogs[].schemas[].tables[].unreadable_count: integer
+answer configure_database.catalogs[].schemas[].views: object[]
+answer configure_database.catalogs[].schemas[].views[].description: string
+answer configure_database.catalogs[].schemas[].views[].name: string
+answer configure_database.catalogs[].schemas[].views[].qualified: string
+answer configure_database.config.archive_folder: string
+answer configure_database.config.autolink: boolean
+answer configure_database.config.default_catalog: string
+answer configure_database.config.default_filename: string
+answer configure_database.config.default_partition: string
+answer configure_database.config.default_schema: string
+answer configure_database.config.history: boolean
+answer configure_database.config.timezone: string
+answer configure_database.config: object
+answer configure_database.journal: string
+answer configure_database.metastore: string
+answer configure_database.root: string
+answer create_table.ambiguous_mentions: object[]
+answer create_table.ambiguous_mentions[].candidates: string[]
+answer create_table.ambiguous_mentions[].context: string
+answer create_table.ambiguous_mentions[].hint: string
+answer create_table.ambiguous_mentions[].path: string
+answer create_table.ambiguous_mentions[].reason = "adjacent"
+answer create_table.ambiguous_mentions[].reason = "overlap"
+answer create_table.ambiguous_mentions[].reason = "part_of_name"
+answer create_table.ambiguous_mentions[].reason = "same_name"
+answer create_table.ambiguous_mentions[].reason = "sentence_start"
+answer create_table.ambiguous_mentions[].reason: string
+answer create_table.ambiguous_mentions[].text: string
+answer create_table.commits: object[]
+answer create_table.commits[].operation: string
+answer create_table.commits[].table: string
+answer create_table.commits[].version: integer
+answer create_table.conflicts: object[]
+answer create_table.conflicts[].message: string
+answer create_table.conflicts[].path: string
+answer create_table.dry_run: boolean
+answer create_table.failed: object[]
+answer create_table.failed[].error: string
+answer create_table.failed[].path: string
+answer create_table.files_created: integer
+answer create_table.files_deleted: integer
+answer create_table.files_moved: integer
+answer create_table.links_added: object[]
+answer create_table.links_added[].link: string
+answer create_table.links_added[].path: string
+answer create_table.links_added[].target: string
+answer create_table.links_added[].text: string
+answer create_table.migration_id: string
+answer create_table.notes_changed: integer
+answer create_table.ok: boolean
+answer create_table.op: string
+answer create_table.planned_creates: string[]
+answer create_table.planned_deletes: string[]
+answer create_table.planned_edits: object[]
+answer create_table.planned_edits[].body: boolean
+answer create_table.planned_edits[].path: string
+answer create_table.planned_edits[].remove: string[]
+answer create_table.planned_edits[].set: object
+answer create_table.planned_moves: object[]
+answer create_table.planned_moves[].from: string
+answer create_table.planned_moves[].to: string
+answer create_table.planned_texts: string[]
+answer create_table.references_updated: integer
+answer create_table.rolled_back: boolean
+answer create_table.violations: object[]
+answer create_table.violations[].path: string
+answer create_table.violations[].violations: object[]
+answer create_table.violations[].violations[].code = "broken_link"
+answer create_table.violations[].violations[].code = "check"
+answer create_table.violations[].violations[].code = "cycle"
+answer create_table.violations[].violations[].code = "enum"
+answer create_table.violations[].violations[].code = "generated"
+answer create_table.violations[].violations[].code = "inverse"
+answer create_table.violations[].violations[].code = "max"
+answer create_table.violations[].violations[].code = "min"
+answer create_table.violations[].violations[].code = "ref"
+answer create_table.violations[].violations[].code = "required"
+answer create_table.violations[].violations[].code = "step"
+answer create_table.violations[].violations[].code = "type"
+answer create_table.violations[].violations[].code = "unique"
+answer create_table.violations[].violations[].code = "unknown_column"
+answer create_table.violations[].violations[].code = "unreadable"
+answer create_table.violations[].violations[].code = "vocabulary"
+answer create_table.violations[].violations[].code: string
+answer create_table.violations[].violations[].column: string
+answer create_table.violations[].violations[].constraint: string
+answer create_table.violations[].violations[].index: integer
+answer create_table.violations[].violations[].message: string
+answer create_table.violations[].violations[].value: any
+answer create_view.ambiguous_mentions: object[]
+answer create_view.ambiguous_mentions[].candidates: string[]
+answer create_view.ambiguous_mentions[].context: string
+answer create_view.ambiguous_mentions[].hint: string
+answer create_view.ambiguous_mentions[].path: string
+answer create_view.ambiguous_mentions[].reason = "adjacent"
+answer create_view.ambiguous_mentions[].reason = "overlap"
+answer create_view.ambiguous_mentions[].reason = "part_of_name"
+answer create_view.ambiguous_mentions[].reason = "same_name"
+answer create_view.ambiguous_mentions[].reason = "sentence_start"
+answer create_view.ambiguous_mentions[].reason: string
+answer create_view.ambiguous_mentions[].text: string
+answer create_view.commits: object[]
+answer create_view.commits[].operation: string
+answer create_view.commits[].table: string
+answer create_view.commits[].version: integer
+answer create_view.conflicts: object[]
+answer create_view.conflicts[].message: string
+answer create_view.conflicts[].path: string
+answer create_view.dry_run: boolean
+answer create_view.failed: object[]
+answer create_view.failed[].error: string
+answer create_view.failed[].path: string
+answer create_view.files_created: integer
+answer create_view.files_deleted: integer
+answer create_view.files_moved: integer
+answer create_view.links_added: object[]
+answer create_view.links_added[].link: string
+answer create_view.links_added[].path: string
+answer create_view.links_added[].target: string
+answer create_view.links_added[].text: string
+answer create_view.migration_id: string
+answer create_view.notes_changed: integer
+answer create_view.ok: boolean
+answer create_view.op: string
+answer create_view.planned_creates: string[]
+answer create_view.planned_deletes: string[]
+answer create_view.planned_edits: object[]
+answer create_view.planned_edits[].body: boolean
+answer create_view.planned_edits[].path: string
+answer create_view.planned_edits[].remove: string[]
+answer create_view.planned_edits[].set: object
+answer create_view.planned_moves: object[]
+answer create_view.planned_moves[].from: string
+answer create_view.planned_moves[].to: string
+answer create_view.planned_texts: string[]
+answer create_view.references_updated: integer
+answer create_view.rolled_back: boolean
+answer create_view.violations: object[]
+answer create_view.violations[].path: string
+answer create_view.violations[].violations: object[]
+answer create_view.violations[].violations[].code = "broken_link"
+answer create_view.violations[].violations[].code = "check"
+answer create_view.violations[].violations[].code = "cycle"
+answer create_view.violations[].violations[].code = "enum"
+answer create_view.violations[].violations[].code = "generated"
+answer create_view.violations[].violations[].code = "inverse"
+answer create_view.violations[].violations[].code = "max"
+answer create_view.violations[].violations[].code = "min"
+answer create_view.violations[].violations[].code = "ref"
+answer create_view.violations[].violations[].code = "required"
+answer create_view.violations[].violations[].code = "step"
+answer create_view.violations[].violations[].code = "type"
+answer create_view.violations[].violations[].code = "unique"
+answer create_view.violations[].violations[].code = "unknown_column"
+answer create_view.violations[].violations[].code = "unreadable"
+answer create_view.violations[].violations[].code = "vocabulary"
+answer create_view.violations[].violations[].code: string
+answer create_view.violations[].violations[].column: string
+answer create_view.violations[].violations[].constraint: string
+answer create_view.violations[].violations[].index: integer
+answer create_view.violations[].violations[].message: string
+answer create_view.violations[].violations[].value: any
+answer create_webhook.columns: string[]
+answer create_webhook.created_at: string
+answer create_webhook.cursor: integer
+answer create_webhook.enabled: boolean
+answer create_webhook.exclude_actor: string
+answer create_webhook.failures: integer
+answer create_webhook.id: string
+answer create_webhook.kinds = "delete"
+answer create_webhook.kinds = "insert"
+answer create_webhook.kinds = "metastore"
+answer create_webhook.kinds = "move"
+answer create_webhook.kinds = "tool_call"
+answer create_webhook.kinds = "unreadable"
+answer create_webhook.kinds = "update"
+answer create_webhook.kinds: string[]
+answer create_webhook.last_delivery: string
+answer create_webhook.last_error: string
+answer create_webhook.secret: string
+answer create_webhook.status = "disabled"
+answer create_webhook.status = "failing"
+answer create_webhook.status = "ok"
+answer create_webhook.status: string
+answer create_webhook.tables: string[]
+answer create_webhook.url: string
+answer create_webhook.where: object
+answer define_base.ambiguous_mentions: object[]
+answer define_base.ambiguous_mentions[].candidates: string[]
+answer define_base.ambiguous_mentions[].context: string
+answer define_base.ambiguous_mentions[].hint: string
+answer define_base.ambiguous_mentions[].path: string
+answer define_base.ambiguous_mentions[].reason = "adjacent"
+answer define_base.ambiguous_mentions[].reason = "overlap"
+answer define_base.ambiguous_mentions[].reason = "part_of_name"
+answer define_base.ambiguous_mentions[].reason = "same_name"
+answer define_base.ambiguous_mentions[].reason = "sentence_start"
+answer define_base.ambiguous_mentions[].reason: string
+answer define_base.ambiguous_mentions[].text: string
+answer define_base.commits: object[]
+answer define_base.commits[].operation: string
+answer define_base.commits[].table: string
+answer define_base.commits[].version: integer
+answer define_base.conflicts: object[]
+answer define_base.conflicts[].message: string
+answer define_base.conflicts[].path: string
+answer define_base.dry_run: boolean
+answer define_base.failed: object[]
+answer define_base.failed[].error: string
+answer define_base.failed[].path: string
+answer define_base.files_created: integer
+answer define_base.files_deleted: integer
+answer define_base.files_moved: integer
+answer define_base.links_added: object[]
+answer define_base.links_added[].link: string
+answer define_base.links_added[].path: string
+answer define_base.links_added[].target: string
+answer define_base.links_added[].text: string
+answer define_base.migration_id: string
+answer define_base.notes_changed: integer
+answer define_base.ok: boolean
+answer define_base.op: string
+answer define_base.planned_creates: string[]
+answer define_base.planned_deletes: string[]
+answer define_base.planned_edits: object[]
+answer define_base.planned_edits[].body: boolean
+answer define_base.planned_edits[].path: string
+answer define_base.planned_edits[].remove: string[]
+answer define_base.planned_edits[].set: object
+answer define_base.planned_moves: object[]
+answer define_base.planned_moves[].from: string
+answer define_base.planned_moves[].to: string
+answer define_base.planned_texts: string[]
+answer define_base.references_updated: integer
+answer define_base.rolled_back: boolean
+answer define_base.violations: object[]
+answer define_base.violations[].path: string
+answer define_base.violations[].violations: object[]
+answer define_base.violations[].violations[].code = "broken_link"
+answer define_base.violations[].violations[].code = "check"
+answer define_base.violations[].violations[].code = "cycle"
+answer define_base.violations[].violations[].code = "enum"
+answer define_base.violations[].violations[].code = "generated"
+answer define_base.violations[].violations[].code = "inverse"
+answer define_base.violations[].violations[].code = "max"
+answer define_base.violations[].violations[].code = "min"
+answer define_base.violations[].violations[].code = "ref"
+answer define_base.violations[].violations[].code = "required"
+answer define_base.violations[].violations[].code = "step"
+answer define_base.violations[].violations[].code = "type"
+answer define_base.violations[].violations[].code = "unique"
+answer define_base.violations[].violations[].code = "unknown_column"
+answer define_base.violations[].violations[].code = "unreadable"
+answer define_base.violations[].violations[].code = "vocabulary"
+answer define_base.violations[].violations[].code: string
+answer define_base.violations[].violations[].column: string
+answer define_base.violations[].violations[].constraint: string
+answer define_base.violations[].violations[].index: integer
+answer define_base.violations[].violations[].message: string
+answer define_base.violations[].violations[].value: any
+answer delete_rows.ambiguous_mentions: object[]
+answer delete_rows.ambiguous_mentions[].candidates: string[]
+answer delete_rows.ambiguous_mentions[].context: string
+answer delete_rows.ambiguous_mentions[].hint: string
+answer delete_rows.ambiguous_mentions[].path: string
+answer delete_rows.ambiguous_mentions[].reason = "adjacent"
+answer delete_rows.ambiguous_mentions[].reason = "overlap"
+answer delete_rows.ambiguous_mentions[].reason = "part_of_name"
+answer delete_rows.ambiguous_mentions[].reason = "same_name"
+answer delete_rows.ambiguous_mentions[].reason = "sentence_start"
+answer delete_rows.ambiguous_mentions[].reason: string
+answer delete_rows.ambiguous_mentions[].text: string
+answer delete_rows.commits: object[]
+answer delete_rows.commits[].operation: string
+answer delete_rows.commits[].table: string
+answer delete_rows.commits[].version: integer
+answer delete_rows.conflicts: object[]
+answer delete_rows.conflicts[].message: string
+answer delete_rows.conflicts[].path: string
+answer delete_rows.dry_run: boolean
+answer delete_rows.failed: object[]
+answer delete_rows.failed[].error: string
+answer delete_rows.failed[].path: string
+answer delete_rows.files_created: integer
+answer delete_rows.files_deleted: integer
+answer delete_rows.files_moved: integer
+answer delete_rows.links_added: object[]
+answer delete_rows.links_added[].link: string
+answer delete_rows.links_added[].path: string
+answer delete_rows.links_added[].target: string
+answer delete_rows.links_added[].text: string
+answer delete_rows.migration_id: string
+answer delete_rows.notes_changed: integer
+answer delete_rows.ok: boolean
+answer delete_rows.op: string
+answer delete_rows.planned_creates: string[]
+answer delete_rows.planned_deletes: string[]
+answer delete_rows.planned_edits: object[]
+answer delete_rows.planned_edits[].body: boolean
+answer delete_rows.planned_edits[].path: string
+answer delete_rows.planned_edits[].remove: string[]
+answer delete_rows.planned_edits[].set: object
+answer delete_rows.planned_moves: object[]
+answer delete_rows.planned_moves[].from: string
+answer delete_rows.planned_moves[].to: string
+answer delete_rows.planned_texts: string[]
+answer delete_rows.references_updated: integer
+answer delete_rows.rolled_back: boolean
+answer delete_rows.violations: object[]
+answer delete_rows.violations[].path: string
+answer delete_rows.violations[].violations: object[]
+answer delete_rows.violations[].violations[].code = "broken_link"
+answer delete_rows.violations[].violations[].code = "check"
+answer delete_rows.violations[].violations[].code = "cycle"
+answer delete_rows.violations[].violations[].code = "enum"
+answer delete_rows.violations[].violations[].code = "generated"
+answer delete_rows.violations[].violations[].code = "inverse"
+answer delete_rows.violations[].violations[].code = "max"
+answer delete_rows.violations[].violations[].code = "min"
+answer delete_rows.violations[].violations[].code = "ref"
+answer delete_rows.violations[].violations[].code = "required"
+answer delete_rows.violations[].violations[].code = "step"
+answer delete_rows.violations[].violations[].code = "type"
+answer delete_rows.violations[].violations[].code = "unique"
+answer delete_rows.violations[].violations[].code = "unknown_column"
+answer delete_rows.violations[].violations[].code = "unreadable"
+answer delete_rows.violations[].violations[].code = "vocabulary"
+answer delete_rows.violations[].violations[].code: string
+answer delete_rows.violations[].violations[].column: string
+answer delete_rows.violations[].violations[].constraint: string
+answer delete_rows.violations[].violations[].index: integer
+answer delete_rows.violations[].violations[].message: string
+answer delete_rows.violations[].violations[].value: any
+answer delete_webhook.deleted: boolean
+answer describe_database.bases: object[]
+answer describe_database.bases[].bases: string[]
+answer describe_database.bases[].columns: string[]
+answer describe_database.bases[].description: string
+answer describe_database.bases[].missing_descriptions.base: boolean
+answer describe_database.bases[].missing_descriptions.columns: string[]
+answer describe_database.bases[].missing_descriptions: object
+answer describe_database.bases[].name: string
+answer describe_database.bases[].tables: string[]
+answer describe_database.catalogs: object[]
+answer describe_database.catalogs[].catalog: string
+answer describe_database.catalogs[].default: boolean
+answer describe_database.catalogs[].description: string
+answer describe_database.catalogs[].schemas: object[]
+answer describe_database.catalogs[].schemas[].description: string
+answer describe_database.catalogs[].schemas[].schema: string
+answer describe_database.catalogs[].schemas[].tables: object[]
+answer describe_database.catalogs[].schemas[].tables[].description: string
+answer describe_database.catalogs[].schemas[].tables[].missing_descriptions.columns: string[]
+answer describe_database.catalogs[].schemas[].tables[].missing_descriptions.table: boolean
+answer describe_database.catalogs[].schemas[].tables[].missing_descriptions: object
+answer describe_database.catalogs[].schemas[].tables[].name: string
+answer describe_database.catalogs[].schemas[].tables[].qualified: string
+answer describe_database.catalogs[].schemas[].tables[].row_count: integer
+answer describe_database.catalogs[].schemas[].tables[].tags: object
+answer describe_database.catalogs[].schemas[].tables[].unreadable_count: integer
+answer describe_database.catalogs[].schemas[].views: object[]
+answer describe_database.catalogs[].schemas[].views[].description: string
+answer describe_database.catalogs[].schemas[].views[].name: string
+answer describe_database.catalogs[].schemas[].views[].qualified: string
+answer describe_database.config.archive_folder: string
+answer describe_database.config.autolink: boolean
+answer describe_database.config.default_catalog: string
+answer describe_database.config.default_filename: string
+answer describe_database.config.default_partition: string
+answer describe_database.config.default_schema: string
+answer describe_database.config.history: boolean
+answer describe_database.config.timezone: string
+answer describe_database.config: object
+answer describe_database.journal: string
+answer describe_database.metastore: string
+answer describe_database.root: string
+answer describe_history.history: object[]
+answer describe_history.history[].actor.auth: string
+answer describe_history.history[].actor.harness: string
+answer describe_history.history[].actor.harness_version: string
+answer describe_history.history[].actor.model: string
+answer describe_history.history[].actor.session: string
+answer describe_history.history[].actor.tool: string
+answer describe_history.history[].actor: object
+answer describe_history.history[].batch: string
+answer describe_history.history[].engine_info: string
+answer describe_history.history[].migration_id: string
+answer describe_history.history[].operation: string
+answer describe_history.history[].operation_metrics.metadata_changed: boolean
+answer describe_history.history[].operation_metrics.num_added_files: integer
+answer describe_history.history[].operation_metrics.num_removed_files: integer
+answer describe_history.history[].operation_metrics.violations: integer
+answer describe_history.history[].operation_metrics: object
+answer describe_history.history[].operation_parameters: object
+answer describe_history.history[].table: string
+answer describe_history.history[].tables: string[]
+answer describe_history.history[].timestamp: string
+answer describe_history.history[].user_name: string
+answer describe_history.history[].version: integer
+answer describe_history.table: string
+answer describe_history.tables: string[]
+answer describe_semantic_index.enabled: boolean
+answer describe_semantic_index.files: integer
+answer describe_semantic_index.last_error: string
+answer describe_semantic_index.last_sync: string
+answer describe_semantic_index.model: string
+answer describe_semantic_index.passages: integer
+answer describe_semantic_index.pending: integer
+answer describe_semantic_index.provider: string
+answer describe_semantic_index.running: boolean
+answer describe_table.aliases: string[]
+answer describe_table.autolink_target: boolean
+answer describe_table.bases: string[]
+answer describe_table.catalog: string
+answer describe_table.columns: object[]
+answer describe_table.columns[].aliases: string[]
+answer describe_table.columns[].default: any
+answer describe_table.columns[].dense: boolean
+answer describe_table.columns[].description: string
+answer describe_table.columns[].generated: string
+answer describe_table.columns[].identity = "created"
+answer describe_table.columns[].identity = "filename"
+answer describe_table.columns[].identity = "uuid"
+answer describe_table.columns[].identity: string
+answer describe_table.columns[].inverse: string
+answer describe_table.columns[].items: string
+answer describe_table.columns[].max: number
+answer describe_table.columns[].min: number
+answer describe_table.columns[].name: string
+answer describe_table.columns[].ref: string
+answer describe_table.columns[].ref_by: object
+answer describe_table.columns[].ref_where: object
+answer describe_table.columns[].required: boolean
+answer describe_table.columns[].step: number
+answer describe_table.columns[].type: string
+answer describe_table.columns[].unique: boolean
+answer describe_table.columns[].value_descriptions: object
+answer describe_table.columns[].values: string[]
+answer describe_table.constraints: object
+answer describe_table.description: string
+answer describe_table.fields: object
+answer describe_table.history: boolean
+answer describe_table.layout.archive: string
+answer describe_table.layout.folder: string
+answer describe_table.layout.row_folder: string
+answer describe_table.layout: object
+answer describe_table.missing_descriptions.columns: string[]
+answer describe_table.missing_descriptions.table: boolean
+answer describe_table.missing_descriptions: object
+answer describe_table.name: string
+answer describe_table.options: object
+answer describe_table.qualified: string
+answer describe_table.row_count: integer
+answer describe_table.row_template: string
+answer describe_table.schema: string
+answer describe_table.tags: object
+answer describe_table.untyped_fields: string[]
+answer drop_column.ambiguous_mentions: object[]
+answer drop_column.ambiguous_mentions[].candidates: string[]
+answer drop_column.ambiguous_mentions[].context: string
+answer drop_column.ambiguous_mentions[].hint: string
+answer drop_column.ambiguous_mentions[].path: string
+answer drop_column.ambiguous_mentions[].reason = "adjacent"
+answer drop_column.ambiguous_mentions[].reason = "overlap"
+answer drop_column.ambiguous_mentions[].reason = "part_of_name"
+answer drop_column.ambiguous_mentions[].reason = "same_name"
+answer drop_column.ambiguous_mentions[].reason = "sentence_start"
+answer drop_column.ambiguous_mentions[].reason: string
+answer drop_column.ambiguous_mentions[].text: string
+answer drop_column.commits: object[]
+answer drop_column.commits[].operation: string
+answer drop_column.commits[].table: string
+answer drop_column.commits[].version: integer
+answer drop_column.conflicts: object[]
+answer drop_column.conflicts[].message: string
+answer drop_column.conflicts[].path: string
+answer drop_column.dry_run: boolean
+answer drop_column.failed: object[]
+answer drop_column.failed[].error: string
+answer drop_column.failed[].path: string
+answer drop_column.files_created: integer
+answer drop_column.files_deleted: integer
+answer drop_column.files_moved: integer
+answer drop_column.links_added: object[]
+answer drop_column.links_added[].link: string
+answer drop_column.links_added[].path: string
+answer drop_column.links_added[].target: string
+answer drop_column.links_added[].text: string
+answer drop_column.migration_id: string
+answer drop_column.notes_changed: integer
+answer drop_column.ok: boolean
+answer drop_column.op: string
+answer drop_column.planned_creates: string[]
+answer drop_column.planned_deletes: string[]
+answer drop_column.planned_edits: object[]
+answer drop_column.planned_edits[].body: boolean
+answer drop_column.planned_edits[].path: string
+answer drop_column.planned_edits[].remove: string[]
+answer drop_column.planned_edits[].set: object
+answer drop_column.planned_moves: object[]
+answer drop_column.planned_moves[].from: string
+answer drop_column.planned_moves[].to: string
+answer drop_column.planned_texts: string[]
+answer drop_column.references_updated: integer
+answer drop_column.rolled_back: boolean
+answer drop_column.violations: object[]
+answer drop_column.violations[].path: string
+answer drop_column.violations[].violations: object[]
+answer drop_column.violations[].violations[].code = "broken_link"
+answer drop_column.violations[].violations[].code = "check"
+answer drop_column.violations[].violations[].code = "cycle"
+answer drop_column.violations[].violations[].code = "enum"
+answer drop_column.violations[].violations[].code = "generated"
+answer drop_column.violations[].violations[].code = "inverse"
+answer drop_column.violations[].violations[].code = "max"
+answer drop_column.violations[].violations[].code = "min"
+answer drop_column.violations[].violations[].code = "ref"
+answer drop_column.violations[].violations[].code = "required"
+answer drop_column.violations[].violations[].code = "step"
+answer drop_column.violations[].violations[].code = "type"
+answer drop_column.violations[].violations[].code = "unique"
+answer drop_column.violations[].violations[].code = "unknown_column"
+answer drop_column.violations[].violations[].code = "unreadable"
+answer drop_column.violations[].violations[].code = "vocabulary"
+answer drop_column.violations[].violations[].code: string
+answer drop_column.violations[].violations[].column: string
+answer drop_column.violations[].violations[].constraint: string
+answer drop_column.violations[].violations[].index: integer
+answer drop_column.violations[].violations[].message: string
+answer drop_column.violations[].violations[].value: any
+answer drop_constraint.ambiguous_mentions: object[]
+answer drop_constraint.ambiguous_mentions[].candidates: string[]
+answer drop_constraint.ambiguous_mentions[].context: string
+answer drop_constraint.ambiguous_mentions[].hint: string
+answer drop_constraint.ambiguous_mentions[].path: string
+answer drop_constraint.ambiguous_mentions[].reason = "adjacent"
+answer drop_constraint.ambiguous_mentions[].reason = "overlap"
+answer drop_constraint.ambiguous_mentions[].reason = "part_of_name"
+answer drop_constraint.ambiguous_mentions[].reason = "same_name"
+answer drop_constraint.ambiguous_mentions[].reason = "sentence_start"
+answer drop_constraint.ambiguous_mentions[].reason: string
+answer drop_constraint.ambiguous_mentions[].text: string
+answer drop_constraint.commits: object[]
+answer drop_constraint.commits[].operation: string
+answer drop_constraint.commits[].table: string
+answer drop_constraint.commits[].version: integer
+answer drop_constraint.conflicts: object[]
+answer drop_constraint.conflicts[].message: string
+answer drop_constraint.conflicts[].path: string
+answer drop_constraint.dry_run: boolean
+answer drop_constraint.failed: object[]
+answer drop_constraint.failed[].error: string
+answer drop_constraint.failed[].path: string
+answer drop_constraint.files_created: integer
+answer drop_constraint.files_deleted: integer
+answer drop_constraint.files_moved: integer
+answer drop_constraint.links_added: object[]
+answer drop_constraint.links_added[].link: string
+answer drop_constraint.links_added[].path: string
+answer drop_constraint.links_added[].target: string
+answer drop_constraint.links_added[].text: string
+answer drop_constraint.migration_id: string
+answer drop_constraint.notes_changed: integer
+answer drop_constraint.ok: boolean
+answer drop_constraint.op: string
+answer drop_constraint.planned_creates: string[]
+answer drop_constraint.planned_deletes: string[]
+answer drop_constraint.planned_edits: object[]
+answer drop_constraint.planned_edits[].body: boolean
+answer drop_constraint.planned_edits[].path: string
+answer drop_constraint.planned_edits[].remove: string[]
+answer drop_constraint.planned_edits[].set: object
+answer drop_constraint.planned_moves: object[]
+answer drop_constraint.planned_moves[].from: string
+answer drop_constraint.planned_moves[].to: string
+answer drop_constraint.planned_texts: string[]
+answer drop_constraint.references_updated: integer
+answer drop_constraint.rolled_back: boolean
+answer drop_constraint.violations: object[]
+answer drop_constraint.violations[].path: string
+answer drop_constraint.violations[].violations: object[]
+answer drop_constraint.violations[].violations[].code = "broken_link"
+answer drop_constraint.violations[].violations[].code = "check"
+answer drop_constraint.violations[].violations[].code = "cycle"
+answer drop_constraint.violations[].violations[].code = "enum"
+answer drop_constraint.violations[].violations[].code = "generated"
+answer drop_constraint.violations[].violations[].code = "inverse"
+answer drop_constraint.violations[].violations[].code = "max"
+answer drop_constraint.violations[].violations[].code = "min"
+answer drop_constraint.violations[].violations[].code = "ref"
+answer drop_constraint.violations[].violations[].code = "required"
+answer drop_constraint.violations[].violations[].code = "step"
+answer drop_constraint.violations[].violations[].code = "type"
+answer drop_constraint.violations[].violations[].code = "unique"
+answer drop_constraint.violations[].violations[].code = "unknown_column"
+answer drop_constraint.violations[].violations[].code = "unreadable"
+answer drop_constraint.violations[].violations[].code = "vocabulary"
+answer drop_constraint.violations[].violations[].code: string
+answer drop_constraint.violations[].violations[].column: string
+answer drop_constraint.violations[].violations[].constraint: string
+answer drop_constraint.violations[].violations[].index: integer
+answer drop_constraint.violations[].violations[].message: string
+answer drop_constraint.violations[].violations[].value: any
+answer drop_table.ambiguous_mentions: object[]
+answer drop_table.ambiguous_mentions[].candidates: string[]
+answer drop_table.ambiguous_mentions[].context: string
+answer drop_table.ambiguous_mentions[].hint: string
+answer drop_table.ambiguous_mentions[].path: string
+answer drop_table.ambiguous_mentions[].reason = "adjacent"
+answer drop_table.ambiguous_mentions[].reason = "overlap"
+answer drop_table.ambiguous_mentions[].reason = "part_of_name"
+answer drop_table.ambiguous_mentions[].reason = "same_name"
+answer drop_table.ambiguous_mentions[].reason = "sentence_start"
+answer drop_table.ambiguous_mentions[].reason: string
+answer drop_table.ambiguous_mentions[].text: string
+answer drop_table.commits: object[]
+answer drop_table.commits[].operation: string
+answer drop_table.commits[].table: string
+answer drop_table.commits[].version: integer
+answer drop_table.conflicts: object[]
+answer drop_table.conflicts[].message: string
+answer drop_table.conflicts[].path: string
+answer drop_table.dry_run: boolean
+answer drop_table.failed: object[]
+answer drop_table.failed[].error: string
+answer drop_table.failed[].path: string
+answer drop_table.files_created: integer
+answer drop_table.files_deleted: integer
+answer drop_table.files_moved: integer
+answer drop_table.links_added: object[]
+answer drop_table.links_added[].link: string
+answer drop_table.links_added[].path: string
+answer drop_table.links_added[].target: string
+answer drop_table.links_added[].text: string
+answer drop_table.migration_id: string
+answer drop_table.notes_changed: integer
+answer drop_table.ok: boolean
+answer drop_table.op: string
+answer drop_table.planned_creates: string[]
+answer drop_table.planned_deletes: string[]
+answer drop_table.planned_edits: object[]
+answer drop_table.planned_edits[].body: boolean
+answer drop_table.planned_edits[].path: string
+answer drop_table.planned_edits[].remove: string[]
+answer drop_table.planned_edits[].set: object
+answer drop_table.planned_moves: object[]
+answer drop_table.planned_moves[].from: string
+answer drop_table.planned_moves[].to: string
+answer drop_table.planned_texts: string[]
+answer drop_table.references_updated: integer
+answer drop_table.rolled_back: boolean
+answer drop_table.violations: object[]
+answer drop_table.violations[].path: string
+answer drop_table.violations[].violations: object[]
+answer drop_table.violations[].violations[].code = "broken_link"
+answer drop_table.violations[].violations[].code = "check"
+answer drop_table.violations[].violations[].code = "cycle"
+answer drop_table.violations[].violations[].code = "enum"
+answer drop_table.violations[].violations[].code = "generated"
+answer drop_table.violations[].violations[].code = "inverse"
+answer drop_table.violations[].violations[].code = "max"
+answer drop_table.violations[].violations[].code = "min"
+answer drop_table.violations[].violations[].code = "ref"
+answer drop_table.violations[].violations[].code = "required"
+answer drop_table.violations[].violations[].code = "step"
+answer drop_table.violations[].violations[].code = "type"
+answer drop_table.violations[].violations[].code = "unique"
+answer drop_table.violations[].violations[].code = "unknown_column"
+answer drop_table.violations[].violations[].code = "unreadable"
+answer drop_table.violations[].violations[].code = "vocabulary"
+answer drop_table.violations[].violations[].code: string
+answer drop_table.violations[].violations[].column: string
+answer drop_table.violations[].violations[].constraint: string
+answer drop_table.violations[].violations[].index: integer
+answer drop_table.violations[].violations[].message: string
+answer drop_table.violations[].violations[].value: any
+answer drop_view.ambiguous_mentions: object[]
+answer drop_view.ambiguous_mentions[].candidates: string[]
+answer drop_view.ambiguous_mentions[].context: string
+answer drop_view.ambiguous_mentions[].hint: string
+answer drop_view.ambiguous_mentions[].path: string
+answer drop_view.ambiguous_mentions[].reason = "adjacent"
+answer drop_view.ambiguous_mentions[].reason = "overlap"
+answer drop_view.ambiguous_mentions[].reason = "part_of_name"
+answer drop_view.ambiguous_mentions[].reason = "same_name"
+answer drop_view.ambiguous_mentions[].reason = "sentence_start"
+answer drop_view.ambiguous_mentions[].reason: string
+answer drop_view.ambiguous_mentions[].text: string
+answer drop_view.commits: object[]
+answer drop_view.commits[].operation: string
+answer drop_view.commits[].table: string
+answer drop_view.commits[].version: integer
+answer drop_view.conflicts: object[]
+answer drop_view.conflicts[].message: string
+answer drop_view.conflicts[].path: string
+answer drop_view.dry_run: boolean
+answer drop_view.failed: object[]
+answer drop_view.failed[].error: string
+answer drop_view.failed[].path: string
+answer drop_view.files_created: integer
+answer drop_view.files_deleted: integer
+answer drop_view.files_moved: integer
+answer drop_view.links_added: object[]
+answer drop_view.links_added[].link: string
+answer drop_view.links_added[].path: string
+answer drop_view.links_added[].target: string
+answer drop_view.links_added[].text: string
+answer drop_view.migration_id: string
+answer drop_view.notes_changed: integer
+answer drop_view.ok: boolean
+answer drop_view.op: string
+answer drop_view.planned_creates: string[]
+answer drop_view.planned_deletes: string[]
+answer drop_view.planned_edits: object[]
+answer drop_view.planned_edits[].body: boolean
+answer drop_view.planned_edits[].path: string
+answer drop_view.planned_edits[].remove: string[]
+answer drop_view.planned_edits[].set: object
+answer drop_view.planned_moves: object[]
+answer drop_view.planned_moves[].from: string
+answer drop_view.planned_moves[].to: string
+answer drop_view.planned_texts: string[]
+answer drop_view.references_updated: integer
+answer drop_view.rolled_back: boolean
+answer drop_view.violations: object[]
+answer drop_view.violations[].path: string
+answer drop_view.violations[].violations: object[]
+answer drop_view.violations[].violations[].code = "broken_link"
+answer drop_view.violations[].violations[].code = "check"
+answer drop_view.violations[].violations[].code = "cycle"
+answer drop_view.violations[].violations[].code = "enum"
+answer drop_view.violations[].violations[].code = "generated"
+answer drop_view.violations[].violations[].code = "inverse"
+answer drop_view.violations[].violations[].code = "max"
+answer drop_view.violations[].violations[].code = "min"
+answer drop_view.violations[].violations[].code = "ref"
+answer drop_view.violations[].violations[].code = "required"
+answer drop_view.violations[].violations[].code = "step"
+answer drop_view.violations[].violations[].code = "type"
+answer drop_view.violations[].violations[].code = "unique"
+answer drop_view.violations[].violations[].code = "unknown_column"
+answer drop_view.violations[].violations[].code = "unreadable"
+answer drop_view.violations[].violations[].code = "vocabulary"
+answer drop_view.violations[].violations[].code: string
+answer drop_view.violations[].violations[].column: string
+answer drop_view.violations[].violations[].constraint: string
+answer drop_view.violations[].violations[].index: integer
+answer drop_view.violations[].violations[].message: string
+answer drop_view.violations[].violations[].value: any
+answer graph_neighbors.nodes: object[]
+answer graph_neighbors.nodes[].counts: object
+answer graph_neighbors.nodes[].edges: object[]
+answer graph_neighbors.nodes[].edges[].direction = "in"
+answer graph_neighbors.nodes[].edges[].direction = "out"
+answer graph_neighbors.nodes[].edges[].direction: string
+answer graph_neighbors.nodes[].edges[].label: string
+answer graph_neighbors.nodes[].edges[].path: string
+answer graph_neighbors.nodes[].edges[].table: string
+answer graph_neighbors.nodes[].path: string
+answer graph_neighbors.nodes[].table: string
+answer graph_path.found: boolean
+answer graph_path.from: string
+answer graph_path.length: integer
+answer graph_path.length: null
+answer graph_path.to: string
+answer graph_path.via: object[]
+answer graph_path.via[].direction = "in"
+answer graph_path.via[].direction = "out"
+answer graph_path.via[].direction: string
+answer graph_path.via[].from: string
+answer graph_path.via[].label: string
+answer graph_path.via[].to: string
+answer graph_traverse.nodes: object[]
+answer graph_traverse.nodes[].depth: integer
+answer graph_traverse.nodes[].path: string
+answer graph_traverse.nodes[].table: string
+answer graph_traverse.nodes[].via: object[]
+answer graph_traverse.nodes[].via[].direction = "in"
+answer graph_traverse.nodes[].via[].direction = "out"
+answer graph_traverse.nodes[].via[].direction: string
+answer graph_traverse.nodes[].via[].from: string
+answer graph_traverse.nodes[].via[].label: string
+answer graph_traverse.nodes[].via[].to: string
+answer graph_traverse.start: string[]
+answer graph_traverse.truncated: boolean
+answer infer_table.adopt.paths: string[]
+answer infer_table.adopt.relocate: boolean
+answer infer_table.adopt.rename: object
+answer infer_table.adopt: object
+answer infer_table.columns: object[]
+answer infer_table.columns[].dense: boolean
+answer infer_table.columns[].description: null
+answer infer_table.columns[].from: string
+answer infer_table.columns[].items: string
+answer infer_table.columns[].name: string
+answer infer_table.columns[].ref: string
+answer infer_table.columns[].required: boolean
+answer infer_table.columns[].stats.distinct: integer
+answer infer_table.columns[].stats.examples: any[]
+answer infer_table.columns[].stats.filled: integer
+answer infer_table.columns[].stats.present: integer
+answer infer_table.columns[].stats.types: object
+answer infer_table.columns[].stats: object
+answer infer_table.columns[].type: string
+answer infer_table.columns[].unique: boolean
+answer infer_table.columns[].values: string[]
+answer infer_table.files: integer
+answer infer_table.hints: string[]
+answer infer_table.paths: string[]
+answer infer_table.proposal.columns: object[]
+answer infer_table.proposal.description: null
+answer infer_table.proposal.filename: string
+answer infer_table.proposal.name: string
+answer infer_table.proposal.time_column: string
+answer infer_table.proposal: object
+answer infer_table.skipped: object[]
+answer infer_table.skipped[].path: string
+answer infer_table.skipped[].reason: string
+answer insert_row.ambiguous_mentions: object[]
+answer insert_row.ambiguous_mentions[].candidates: string[]
+answer insert_row.ambiguous_mentions[].context: string
+answer insert_row.ambiguous_mentions[].hint: string
+answer insert_row.ambiguous_mentions[].path: string
+answer insert_row.ambiguous_mentions[].reason = "adjacent"
+answer insert_row.ambiguous_mentions[].reason = "overlap"
+answer insert_row.ambiguous_mentions[].reason = "part_of_name"
+answer insert_row.ambiguous_mentions[].reason = "same_name"
+answer insert_row.ambiguous_mentions[].reason = "sentence_start"
+answer insert_row.ambiguous_mentions[].reason: string
+answer insert_row.ambiguous_mentions[].text: string
+answer insert_row.commits: object[]
+answer insert_row.commits[].operation: string
+answer insert_row.commits[].table: string
+answer insert_row.commits[].version: integer
+answer insert_row.conflicts: object[]
+answer insert_row.conflicts[].message: string
+answer insert_row.conflicts[].path: string
+answer insert_row.dry_run: boolean
+answer insert_row.failed: object[]
+answer insert_row.failed[].error: string
+answer insert_row.failed[].path: string
+answer insert_row.files_created: integer
+answer insert_row.files_deleted: integer
+answer insert_row.files_moved: integer
+answer insert_row.links_added: object[]
+answer insert_row.links_added[].link: string
+answer insert_row.links_added[].path: string
+answer insert_row.links_added[].target: string
+answer insert_row.links_added[].text: string
+answer insert_row.migration_id: string
+answer insert_row.notes_changed: integer
+answer insert_row.ok: boolean
+answer insert_row.op: string
+answer insert_row.planned_creates: string[]
+answer insert_row.planned_deletes: string[]
+answer insert_row.planned_edits: object[]
+answer insert_row.planned_edits[].body: boolean
+answer insert_row.planned_edits[].path: string
+answer insert_row.planned_edits[].remove: string[]
+answer insert_row.planned_edits[].set: object
+answer insert_row.planned_moves: object[]
+answer insert_row.planned_moves[].from: string
+answer insert_row.planned_moves[].to: string
+answer insert_row.planned_texts: string[]
+answer insert_row.references_updated: integer
+answer insert_row.rolled_back: boolean
+answer insert_row.violations: object[]
+answer insert_row.violations[].path: string
+answer insert_row.violations[].violations: object[]
+answer insert_row.violations[].violations[].code = "broken_link"
+answer insert_row.violations[].violations[].code = "check"
+answer insert_row.violations[].violations[].code = "cycle"
+answer insert_row.violations[].violations[].code = "enum"
+answer insert_row.violations[].violations[].code = "generated"
+answer insert_row.violations[].violations[].code = "inverse"
+answer insert_row.violations[].violations[].code = "max"
+answer insert_row.violations[].violations[].code = "min"
+answer insert_row.violations[].violations[].code = "ref"
+answer insert_row.violations[].violations[].code = "required"
+answer insert_row.violations[].violations[].code = "step"
+answer insert_row.violations[].violations[].code = "type"
+answer insert_row.violations[].violations[].code = "unique"
+answer insert_row.violations[].violations[].code = "unknown_column"
+answer insert_row.violations[].violations[].code = "unreadable"
+answer insert_row.violations[].violations[].code = "vocabulary"
+answer insert_row.violations[].violations[].code: string
+answer insert_row.violations[].violations[].column: string
+answer insert_row.violations[].violations[].constraint: string
+answer insert_row.violations[].violations[].index: integer
+answer insert_row.violations[].violations[].message: string
+answer insert_row.violations[].violations[].value: any
+answer list_changes.events: object[]
+answer list_changes.events[].actor.auth: string
+answer list_changes.events[].actor.harness: string
+answer list_changes.events[].actor.harness_version: string
+answer list_changes.events[].actor.model: string
+answer list_changes.events[].actor.session: string
+answer list_changes.events[].actor.tool: string
+answer list_changes.events[].actor: object
+answer list_changes.events[].at: string
+answer list_changes.events[].call.args: object
+answer list_changes.events[].call.duration_ms: number
+answer list_changes.events[].call.ok: boolean
+answer list_changes.events[].call.result_chars: integer
+answer list_changes.events[].call.result_tokens: integer
+answer list_changes.events[].call.served_by: string
+answer list_changes.events[].call.session: string
+answer list_changes.events[].call.summary: object
+answer list_changes.events[].call.tool: string
+answer list_changes.events[].call.value: any
+answer list_changes.events[].call: object
+answer list_changes.events[].cause: object[]
+answer list_changes.events[].cause[].old_path: string
+answer list_changes.events[].cause[].path: string
+answer list_changes.events[].cause[].seq: integer
+answer list_changes.events[].changes: object
+answer list_changes.events[].kind = "delete"
+answer list_changes.events[].kind = "insert"
+answer list_changes.events[].kind = "metastore"
+answer list_changes.events[].kind = "move"
+answer list_changes.events[].kind = "tool_call"
+answer list_changes.events[].kind = "unreadable"
+answer list_changes.events[].kind = "update"
+answer list_changes.events[].kind: string
+answer list_changes.events[].migration_id: string
+answer list_changes.events[].old_path: string
+answer list_changes.events[].op: string
+answer list_changes.events[].path: string
+answer list_changes.events[].row: object
+answer list_changes.events[].row_id: string
+answer list_changes.events[].seq: integer
+answer list_changes.events[].source = "engine"
+answer list_changes.events[].source = "external"
+answer list_changes.events[].source: string
+answer list_changes.events[].table: null
+answer list_changes.events[].table: string
+answer list_changes.events[].violations: object[]
+answer list_changes.events[].violations[].path: string
+answer list_changes.events[].violations[].violations: object[]
+answer list_changes.events[].violations[].violations[].code = "broken_link"
+answer list_changes.events[].violations[].violations[].code = "check"
+answer list_changes.events[].violations[].violations[].code = "cycle"
+answer list_changes.events[].violations[].violations[].code = "enum"
+answer list_changes.events[].violations[].violations[].code = "max"
+answer list_changes.events[].violations[].violations[].code = "min"
+answer list_changes.events[].violations[].violations[].code = "ref"
+answer list_changes.events[].violations[].violations[].code = "required"
+answer list_changes.events[].violations[].violations[].code = "step"
+answer list_changes.events[].violations[].violations[].code = "type"
+answer list_changes.events[].violations[].violations[].code = "unique"
+answer list_changes.events[].violations[].violations[].code = "unknown_column"
+answer list_changes.events[].violations[].violations[].code = "unreadable"
+answer list_changes.events[].violations[].violations[].code = "vocabulary"
+answer list_changes.events[].violations[].violations[].code: string
+answer list_changes.events[].violations[].violations[].column: string
+answer list_changes.events[].violations[].violations[].constraint: string
+answer list_changes.events[].violations[].violations[].index: integer
+answer list_changes.events[].violations[].violations[].message: string
+answer list_changes.events[].violations_total: integer
+answer list_changes.gap: boolean
+answer list_changes.head: integer
+answer list_changes.last: integer
+answer list_folder.files: string[]
+answer list_folder.folder: string
+answer list_folder.folders: string[]
+answer list_link_targets.column: string
+answer list_link_targets.empty: boolean
+answer list_link_targets.reason: string
+answer list_link_targets.ref: string
+answer list_link_targets.required: boolean
+answer list_link_targets.rows: object[]
+answer list_link_targets.rows[].link: string
+answer list_link_targets.rows[].name: string
+answer list_link_targets.rows[].path: string
+answer list_link_targets.table: string
+answer list_link_targets.total: integer
+answer list_migrations.migrations: object[]
+answer list_migrations.migrations[].batch: string
+answer list_migrations.migrations[].by: string
+answer list_migrations.migrations[].executed_at: string
+answer list_migrations.migrations[].files_changed: integer
+answer list_migrations.migrations[].files_failed: integer
+answer list_migrations.migrations[].members: string[]
+answer list_migrations.migrations[].migration_id: string
+answer list_migrations.migrations[].notes_changed: integer
+answer list_migrations.migrations[].op: string
+answer list_migrations.migrations[].summary: string
+answer list_migrations.migrations[].table: string
+answer list_migrations.migrations[].undoes: string
+answer list_migrations.migrations[].undone: boolean
+answer list_migrations.total: integer
+answer list_tables.tables: object[]
+answer list_tables.tables[].aliases: string[]
+answer list_tables.tables[].catalog: string
+answer list_tables.tables[].description: string
+answer list_tables.tables[].name: string
+answer list_tables.tables[].qualified: string
+answer list_tables.tables[].schema: string
+answer list_tables.tables[].tags: object
+answer list_tables.views: object[]
+answer list_tables.views[].aliases: string[]
+answer list_tables.views[].catalog: string
+answer list_tables.views[].description: string
+answer list_tables.views[].name: string
+answer list_tables.views[].qualified: string
+answer list_tables.views[].schema: string
+answer list_webhooks.webhooks: object[]
+answer list_webhooks.webhooks[].columns: string[]
+answer list_webhooks.webhooks[].created_at: string
+answer list_webhooks.webhooks[].cursor: integer
+answer list_webhooks.webhooks[].enabled: boolean
+answer list_webhooks.webhooks[].exclude_actor: string
+answer list_webhooks.webhooks[].failures: integer
+answer list_webhooks.webhooks[].id: string
+answer list_webhooks.webhooks[].kinds = "delete"
+answer list_webhooks.webhooks[].kinds = "insert"
+answer list_webhooks.webhooks[].kinds = "metastore"
+answer list_webhooks.webhooks[].kinds = "move"
+answer list_webhooks.webhooks[].kinds = "tool_call"
+answer list_webhooks.webhooks[].kinds = "unreadable"
+answer list_webhooks.webhooks[].kinds = "update"
+answer list_webhooks.webhooks[].kinds: string[]
+answer list_webhooks.webhooks[].last_delivery: string
+answer list_webhooks.webhooks[].last_error: string
+answer list_webhooks.webhooks[].status = "disabled"
+answer list_webhooks.webhooks[].status = "failing"
+answer list_webhooks.webhooks[].status = "ok"
+answer list_webhooks.webhooks[].status: string
+answer list_webhooks.webhooks[].tables: string[]
+answer list_webhooks.webhooks[].url: string
+answer list_webhooks.webhooks[].where: object
+answer merge_rows.ambiguous_mentions: object[]
+answer merge_rows.ambiguous_mentions[].candidates: string[]
+answer merge_rows.ambiguous_mentions[].context: string
+answer merge_rows.ambiguous_mentions[].hint: string
+answer merge_rows.ambiguous_mentions[].path: string
+answer merge_rows.ambiguous_mentions[].reason = "adjacent"
+answer merge_rows.ambiguous_mentions[].reason = "overlap"
+answer merge_rows.ambiguous_mentions[].reason = "part_of_name"
+answer merge_rows.ambiguous_mentions[].reason = "same_name"
+answer merge_rows.ambiguous_mentions[].reason = "sentence_start"
+answer merge_rows.ambiguous_mentions[].reason: string
+answer merge_rows.ambiguous_mentions[].text: string
+answer merge_rows.commits: object[]
+answer merge_rows.commits[].operation: string
+answer merge_rows.commits[].table: string
+answer merge_rows.commits[].version: integer
+answer merge_rows.conflicts: object[]
+answer merge_rows.conflicts[].message: string
+answer merge_rows.conflicts[].path: string
+answer merge_rows.dry_run: boolean
+answer merge_rows.failed: object[]
+answer merge_rows.failed[].error: string
+answer merge_rows.failed[].path: string
+answer merge_rows.files_created: integer
+answer merge_rows.files_deleted: integer
+answer merge_rows.files_moved: integer
+answer merge_rows.links_added: object[]
+answer merge_rows.links_added[].link: string
+answer merge_rows.links_added[].path: string
+answer merge_rows.links_added[].target: string
+answer merge_rows.links_added[].text: string
+answer merge_rows.migration_id: string
+answer merge_rows.notes_changed: integer
+answer merge_rows.ok: boolean
+answer merge_rows.op: string
+answer merge_rows.planned_creates: string[]
+answer merge_rows.planned_deletes: string[]
+answer merge_rows.planned_edits: object[]
+answer merge_rows.planned_edits[].body: boolean
+answer merge_rows.planned_edits[].path: string
+answer merge_rows.planned_edits[].remove: string[]
+answer merge_rows.planned_edits[].set: object
+answer merge_rows.planned_moves: object[]
+answer merge_rows.planned_moves[].from: string
+answer merge_rows.planned_moves[].to: string
+answer merge_rows.planned_texts: string[]
+answer merge_rows.references_updated: integer
+answer merge_rows.rolled_back: boolean
+answer merge_rows.violations: object[]
+answer merge_rows.violations[].path: string
+answer merge_rows.violations[].violations: object[]
+answer merge_rows.violations[].violations[].code = "broken_link"
+answer merge_rows.violations[].violations[].code = "check"
+answer merge_rows.violations[].violations[].code = "cycle"
+answer merge_rows.violations[].violations[].code = "enum"
+answer merge_rows.violations[].violations[].code = "generated"
+answer merge_rows.violations[].violations[].code = "inverse"
+answer merge_rows.violations[].violations[].code = "max"
+answer merge_rows.violations[].violations[].code = "min"
+answer merge_rows.violations[].violations[].code = "ref"
+answer merge_rows.violations[].violations[].code = "required"
+answer merge_rows.violations[].violations[].code = "step"
+answer merge_rows.violations[].violations[].code = "type"
+answer merge_rows.violations[].violations[].code = "unique"
+answer merge_rows.violations[].violations[].code = "unknown_column"
+answer merge_rows.violations[].violations[].code = "unreadable"
+answer merge_rows.violations[].violations[].code = "vocabulary"
+answer merge_rows.violations[].violations[].code: string
+answer merge_rows.violations[].violations[].column: string
+answer merge_rows.violations[].violations[].constraint: string
+answer merge_rows.violations[].violations[].index: integer
+answer merge_rows.violations[].violations[].message: string
+answer merge_rows.violations[].violations[].value: any
+answer move_rows.ambiguous_mentions: object[]
+answer move_rows.ambiguous_mentions[].candidates: string[]
+answer move_rows.ambiguous_mentions[].context: string
+answer move_rows.ambiguous_mentions[].hint: string
+answer move_rows.ambiguous_mentions[].path: string
+answer move_rows.ambiguous_mentions[].reason = "adjacent"
+answer move_rows.ambiguous_mentions[].reason = "overlap"
+answer move_rows.ambiguous_mentions[].reason = "part_of_name"
+answer move_rows.ambiguous_mentions[].reason = "same_name"
+answer move_rows.ambiguous_mentions[].reason = "sentence_start"
+answer move_rows.ambiguous_mentions[].reason: string
+answer move_rows.ambiguous_mentions[].text: string
+answer move_rows.commits: object[]
+answer move_rows.commits[].operation: string
+answer move_rows.commits[].table: string
+answer move_rows.commits[].version: integer
+answer move_rows.conflicts: object[]
+answer move_rows.conflicts[].message: string
+answer move_rows.conflicts[].path: string
+answer move_rows.dry_run: boolean
+answer move_rows.failed: object[]
+answer move_rows.failed[].error: string
+answer move_rows.failed[].path: string
+answer move_rows.files_created: integer
+answer move_rows.files_deleted: integer
+answer move_rows.files_moved: integer
+answer move_rows.links_added: object[]
+answer move_rows.links_added[].link: string
+answer move_rows.links_added[].path: string
+answer move_rows.links_added[].target: string
+answer move_rows.links_added[].text: string
+answer move_rows.migration_id: string
+answer move_rows.notes_changed: integer
+answer move_rows.ok: boolean
+answer move_rows.op: string
+answer move_rows.planned_creates: string[]
+answer move_rows.planned_deletes: string[]
+answer move_rows.planned_edits: object[]
+answer move_rows.planned_edits[].body: boolean
+answer move_rows.planned_edits[].path: string
+answer move_rows.planned_edits[].remove: string[]
+answer move_rows.planned_edits[].set: object
+answer move_rows.planned_moves: object[]
+answer move_rows.planned_moves[].from: string
+answer move_rows.planned_moves[].to: string
+answer move_rows.planned_texts: string[]
+answer move_rows.references_updated: integer
+answer move_rows.rolled_back: boolean
+answer move_rows.violations: object[]
+answer move_rows.violations[].path: string
+answer move_rows.violations[].violations: object[]
+answer move_rows.violations[].violations[].code = "broken_link"
+answer move_rows.violations[].violations[].code = "check"
+answer move_rows.violations[].violations[].code = "cycle"
+answer move_rows.violations[].violations[].code = "enum"
+answer move_rows.violations[].violations[].code = "generated"
+answer move_rows.violations[].violations[].code = "inverse"
+answer move_rows.violations[].violations[].code = "max"
+answer move_rows.violations[].violations[].code = "min"
+answer move_rows.violations[].violations[].code = "ref"
+answer move_rows.violations[].violations[].code = "required"
+answer move_rows.violations[].violations[].code = "step"
+answer move_rows.violations[].violations[].code = "type"
+answer move_rows.violations[].violations[].code = "unique"
+answer move_rows.violations[].violations[].code = "unknown_column"
+answer move_rows.violations[].violations[].code = "unreadable"
+answer move_rows.violations[].violations[].code = "vocabulary"
+answer move_rows.violations[].violations[].code: string
+answer move_rows.violations[].violations[].column: string
+answer move_rows.violations[].violations[].constraint: string
+answer move_rows.violations[].violations[].index: integer
+answer move_rows.violations[].violations[].message: string
+answer move_rows.violations[].violations[].value: any
+answer read_note.content: string
+answer read_note.created_at: null
+answer read_note.created_at: string
+answer read_note.front_matter: object
+answer read_note.modified_at: null
+answer read_note.modified_at: string
+answer read_note.path: string
+answer read_note.size: integer
+answer read_note.size: null
+answer read_note.tags: string[]
+answer recompute_columns.ambiguous_mentions: object[]
+answer recompute_columns.ambiguous_mentions[].candidates: string[]
+answer recompute_columns.ambiguous_mentions[].context: string
+answer recompute_columns.ambiguous_mentions[].hint: string
+answer recompute_columns.ambiguous_mentions[].path: string
+answer recompute_columns.ambiguous_mentions[].reason = "adjacent"
+answer recompute_columns.ambiguous_mentions[].reason = "overlap"
+answer recompute_columns.ambiguous_mentions[].reason = "part_of_name"
+answer recompute_columns.ambiguous_mentions[].reason = "same_name"
+answer recompute_columns.ambiguous_mentions[].reason = "sentence_start"
+answer recompute_columns.ambiguous_mentions[].reason: string
+answer recompute_columns.ambiguous_mentions[].text: string
+answer recompute_columns.commits: object[]
+answer recompute_columns.commits[].operation: string
+answer recompute_columns.commits[].table: string
+answer recompute_columns.commits[].version: integer
+answer recompute_columns.conflicts: object[]
+answer recompute_columns.conflicts[].message: string
+answer recompute_columns.conflicts[].path: string
+answer recompute_columns.dry_run: boolean
+answer recompute_columns.failed: object[]
+answer recompute_columns.failed[].error: string
+answer recompute_columns.failed[].path: string
+answer recompute_columns.files_created: integer
+answer recompute_columns.files_deleted: integer
+answer recompute_columns.files_moved: integer
+answer recompute_columns.links_added: object[]
+answer recompute_columns.links_added[].link: string
+answer recompute_columns.links_added[].path: string
+answer recompute_columns.links_added[].target: string
+answer recompute_columns.links_added[].text: string
+answer recompute_columns.migration_id: string
+answer recompute_columns.notes_changed: integer
+answer recompute_columns.ok: boolean
+answer recompute_columns.op: string
+answer recompute_columns.planned_creates: string[]
+answer recompute_columns.planned_deletes: string[]
+answer recompute_columns.planned_edits: object[]
+answer recompute_columns.planned_edits[].body: boolean
+answer recompute_columns.planned_edits[].path: string
+answer recompute_columns.planned_edits[].remove: string[]
+answer recompute_columns.planned_edits[].set: object
+answer recompute_columns.planned_moves: object[]
+answer recompute_columns.planned_moves[].from: string
+answer recompute_columns.planned_moves[].to: string
+answer recompute_columns.planned_texts: string[]
+answer recompute_columns.references_updated: integer
+answer recompute_columns.rolled_back: boolean
+answer recompute_columns.violations: object[]
+answer recompute_columns.violations[].path: string
+answer recompute_columns.violations[].violations: object[]
+answer recompute_columns.violations[].violations[].code = "broken_link"
+answer recompute_columns.violations[].violations[].code = "check"
+answer recompute_columns.violations[].violations[].code = "cycle"
+answer recompute_columns.violations[].violations[].code = "enum"
+answer recompute_columns.violations[].violations[].code = "generated"
+answer recompute_columns.violations[].violations[].code = "inverse"
+answer recompute_columns.violations[].violations[].code = "max"
+answer recompute_columns.violations[].violations[].code = "min"
+answer recompute_columns.violations[].violations[].code = "ref"
+answer recompute_columns.violations[].violations[].code = "required"
+answer recompute_columns.violations[].violations[].code = "step"
+answer recompute_columns.violations[].violations[].code = "type"
+answer recompute_columns.violations[].violations[].code = "unique"
+answer recompute_columns.violations[].violations[].code = "unknown_column"
+answer recompute_columns.violations[].violations[].code = "unreadable"
+answer recompute_columns.violations[].violations[].code = "vocabulary"
+answer recompute_columns.violations[].violations[].code: string
+answer recompute_columns.violations[].violations[].column: string
+answer recompute_columns.violations[].violations[].constraint: string
+answer recompute_columns.violations[].violations[].index: integer
+answer recompute_columns.violations[].violations[].message: string
+answer recompute_columns.violations[].violations[].value: any
+answer rename_column.ambiguous_mentions: object[]
+answer rename_column.ambiguous_mentions[].candidates: string[]
+answer rename_column.ambiguous_mentions[].context: string
+answer rename_column.ambiguous_mentions[].hint: string
+answer rename_column.ambiguous_mentions[].path: string
+answer rename_column.ambiguous_mentions[].reason = "adjacent"
+answer rename_column.ambiguous_mentions[].reason = "overlap"
+answer rename_column.ambiguous_mentions[].reason = "part_of_name"
+answer rename_column.ambiguous_mentions[].reason = "same_name"
+answer rename_column.ambiguous_mentions[].reason = "sentence_start"
+answer rename_column.ambiguous_mentions[].reason: string
+answer rename_column.ambiguous_mentions[].text: string
+answer rename_column.commits: object[]
+answer rename_column.commits[].operation: string
+answer rename_column.commits[].table: string
+answer rename_column.commits[].version: integer
+answer rename_column.conflicts: object[]
+answer rename_column.conflicts[].message: string
+answer rename_column.conflicts[].path: string
+answer rename_column.dry_run: boolean
+answer rename_column.failed: object[]
+answer rename_column.failed[].error: string
+answer rename_column.failed[].path: string
+answer rename_column.files_created: integer
+answer rename_column.files_deleted: integer
+answer rename_column.files_moved: integer
+answer rename_column.links_added: object[]
+answer rename_column.links_added[].link: string
+answer rename_column.links_added[].path: string
+answer rename_column.links_added[].target: string
+answer rename_column.links_added[].text: string
+answer rename_column.migration_id: string
+answer rename_column.notes_changed: integer
+answer rename_column.ok: boolean
+answer rename_column.op: string
+answer rename_column.planned_creates: string[]
+answer rename_column.planned_deletes: string[]
+answer rename_column.planned_edits: object[]
+answer rename_column.planned_edits[].body: boolean
+answer rename_column.planned_edits[].path: string
+answer rename_column.planned_edits[].remove: string[]
+answer rename_column.planned_edits[].set: object
+answer rename_column.planned_moves: object[]
+answer rename_column.planned_moves[].from: string
+answer rename_column.planned_moves[].to: string
+answer rename_column.planned_texts: string[]
+answer rename_column.references_updated: integer
+answer rename_column.rolled_back: boolean
+answer rename_column.violations: object[]
+answer rename_column.violations[].path: string
+answer rename_column.violations[].violations: object[]
+answer rename_column.violations[].violations[].code = "broken_link"
+answer rename_column.violations[].violations[].code = "check"
+answer rename_column.violations[].violations[].code = "cycle"
+answer rename_column.violations[].violations[].code = "enum"
+answer rename_column.violations[].violations[].code = "generated"
+answer rename_column.violations[].violations[].code = "inverse"
+answer rename_column.violations[].violations[].code = "max"
+answer rename_column.violations[].violations[].code = "min"
+answer rename_column.violations[].violations[].code = "ref"
+answer rename_column.violations[].violations[].code = "required"
+answer rename_column.violations[].violations[].code = "step"
+answer rename_column.violations[].violations[].code = "type"
+answer rename_column.violations[].violations[].code = "unique"
+answer rename_column.violations[].violations[].code = "unknown_column"
+answer rename_column.violations[].violations[].code = "unreadable"
+answer rename_column.violations[].violations[].code = "vocabulary"
+answer rename_column.violations[].violations[].code: string
+answer rename_column.violations[].violations[].column: string
+answer rename_column.violations[].violations[].constraint: string
+answer rename_column.violations[].violations[].index: integer
+answer rename_column.violations[].violations[].message: string
+answer rename_column.violations[].violations[].value: any
+answer rename_value.ambiguous_mentions: object[]
+answer rename_value.ambiguous_mentions[].candidates: string[]
+answer rename_value.ambiguous_mentions[].context: string
+answer rename_value.ambiguous_mentions[].hint: string
+answer rename_value.ambiguous_mentions[].path: string
+answer rename_value.ambiguous_mentions[].reason = "adjacent"
+answer rename_value.ambiguous_mentions[].reason = "overlap"
+answer rename_value.ambiguous_mentions[].reason = "part_of_name"
+answer rename_value.ambiguous_mentions[].reason = "same_name"
+answer rename_value.ambiguous_mentions[].reason = "sentence_start"
+answer rename_value.ambiguous_mentions[].reason: string
+answer rename_value.ambiguous_mentions[].text: string
+answer rename_value.commits: object[]
+answer rename_value.commits[].operation: string
+answer rename_value.commits[].table: string
+answer rename_value.commits[].version: integer
+answer rename_value.conflicts: object[]
+answer rename_value.conflicts[].message: string
+answer rename_value.conflicts[].path: string
+answer rename_value.dry_run: boolean
+answer rename_value.failed: object[]
+answer rename_value.failed[].error: string
+answer rename_value.failed[].path: string
+answer rename_value.files_created: integer
+answer rename_value.files_deleted: integer
+answer rename_value.files_moved: integer
+answer rename_value.links_added: object[]
+answer rename_value.links_added[].link: string
+answer rename_value.links_added[].path: string
+answer rename_value.links_added[].target: string
+answer rename_value.links_added[].text: string
+answer rename_value.migration_id: string
+answer rename_value.notes_changed: integer
+answer rename_value.ok: boolean
+answer rename_value.op: string
+answer rename_value.planned_creates: string[]
+answer rename_value.planned_deletes: string[]
+answer rename_value.planned_edits: object[]
+answer rename_value.planned_edits[].body: boolean
+answer rename_value.planned_edits[].path: string
+answer rename_value.planned_edits[].remove: string[]
+answer rename_value.planned_edits[].set: object
+answer rename_value.planned_moves: object[]
+answer rename_value.planned_moves[].from: string
+answer rename_value.planned_moves[].to: string
+answer rename_value.planned_texts: string[]
+answer rename_value.references_updated: integer
+answer rename_value.rolled_back: boolean
+answer rename_value.violations: object[]
+answer rename_value.violations[].path: string
+answer rename_value.violations[].violations: object[]
+answer rename_value.violations[].violations[].code = "broken_link"
+answer rename_value.violations[].violations[].code = "check"
+answer rename_value.violations[].violations[].code = "cycle"
+answer rename_value.violations[].violations[].code = "enum"
+answer rename_value.violations[].violations[].code = "generated"
+answer rename_value.violations[].violations[].code = "inverse"
+answer rename_value.violations[].violations[].code = "max"
+answer rename_value.violations[].violations[].code = "min"
+answer rename_value.violations[].violations[].code = "ref"
+answer rename_value.violations[].violations[].code = "required"
+answer rename_value.violations[].violations[].code = "step"
+answer rename_value.violations[].violations[].code = "type"
+answer rename_value.violations[].violations[].code = "unique"
+answer rename_value.violations[].violations[].code = "unknown_column"
+answer rename_value.violations[].violations[].code = "unreadable"
+answer rename_value.violations[].violations[].code = "vocabulary"
+answer rename_value.violations[].violations[].code: string
+answer rename_value.violations[].violations[].column: string
+answer rename_value.violations[].violations[].constraint: string
+answer rename_value.violations[].violations[].index: integer
+answer rename_value.violations[].violations[].message: string
+answer rename_value.violations[].violations[].value: any
+answer restore_database.ambiguous_mentions: object[]
+answer restore_database.ambiguous_mentions[].candidates: string[]
+answer restore_database.ambiguous_mentions[].context: string
+answer restore_database.ambiguous_mentions[].hint: string
+answer restore_database.ambiguous_mentions[].path: string
+answer restore_database.ambiguous_mentions[].reason = "adjacent"
+answer restore_database.ambiguous_mentions[].reason = "overlap"
+answer restore_database.ambiguous_mentions[].reason = "part_of_name"
+answer restore_database.ambiguous_mentions[].reason = "same_name"
+answer restore_database.ambiguous_mentions[].reason = "sentence_start"
+answer restore_database.ambiguous_mentions[].reason: string
+answer restore_database.ambiguous_mentions[].text: string
+answer restore_database.commits: object[]
+answer restore_database.commits[].operation: string
+answer restore_database.commits[].table: string
+answer restore_database.commits[].version: integer
+answer restore_database.conflicts: object[]
+answer restore_database.conflicts[].message: string
+answer restore_database.conflicts[].path: string
+answer restore_database.dry_run: boolean
+answer restore_database.failed: object[]
+answer restore_database.failed[].error: string
+answer restore_database.failed[].path: string
+answer restore_database.files_created: integer
+answer restore_database.files_deleted: integer
+answer restore_database.files_moved: integer
+answer restore_database.links_added: object[]
+answer restore_database.links_added[].link: string
+answer restore_database.links_added[].path: string
+answer restore_database.links_added[].target: string
+answer restore_database.links_added[].text: string
+answer restore_database.migration_id: string
+answer restore_database.notes_changed: integer
+answer restore_database.ok: boolean
+answer restore_database.op: string
+answer restore_database.planned_creates: string[]
+answer restore_database.planned_deletes: string[]
+answer restore_database.planned_edits: object[]
+answer restore_database.planned_edits[].body: boolean
+answer restore_database.planned_edits[].path: string
+answer restore_database.planned_edits[].remove: string[]
+answer restore_database.planned_edits[].set: object
+answer restore_database.planned_moves: object[]
+answer restore_database.planned_moves[].from: string
+answer restore_database.planned_moves[].to: string
+answer restore_database.planned_texts: string[]
+answer restore_database.references_updated: integer
+answer restore_database.restored_to: string
+answer restore_database.rolled_back: boolean
+answer restore_database.skipped: object[]
+answer restore_database.skipped[].reason: string
+answer restore_database.skipped[].table: string
+answer restore_database.tables: object[]
+answer restore_database.tables[].action = "drop"
+answer restore_database.tables[].action = "recreate"
+answer restore_database.tables[].action = "restore"
+answer restore_database.tables[].action: string
+answer restore_database.tables[].archived: object[]
+answer restore_database.tables[].archived[].from: string
+answer restore_database.tables[].archived[].to: string
+answer restore_database.tables[].creates: string[]
+answer restore_database.tables[].definition_changed: boolean
+answer restore_database.tables[].deletes: string[]
+answer restore_database.tables[].table: string
+answer restore_database.tables[].texts: string[]
+answer restore_database.tables[].version: integer
+answer restore_database.tables[].version: null
+answer restore_database.unchanged: string[]
+answer restore_database.violations: object[]
+answer restore_database.violations[].path: string
+answer restore_database.violations[].violations: object[]
+answer restore_database.violations[].violations[].code = "broken_link"
+answer restore_database.violations[].violations[].code = "check"
+answer restore_database.violations[].violations[].code = "cycle"
+answer restore_database.violations[].violations[].code = "enum"
+answer restore_database.violations[].violations[].code = "generated"
+answer restore_database.violations[].violations[].code = "inverse"
+answer restore_database.violations[].violations[].code = "max"
+answer restore_database.violations[].violations[].code = "min"
+answer restore_database.violations[].violations[].code = "ref"
+answer restore_database.violations[].violations[].code = "required"
+answer restore_database.violations[].violations[].code = "step"
+answer restore_database.violations[].violations[].code = "type"
+answer restore_database.violations[].violations[].code = "unique"
+answer restore_database.violations[].violations[].code = "unknown_column"
+answer restore_database.violations[].violations[].code = "unreadable"
+answer restore_database.violations[].violations[].code = "vocabulary"
+answer restore_database.violations[].violations[].code: string
+answer restore_database.violations[].violations[].column: string
+answer restore_database.violations[].violations[].constraint: string
+answer restore_database.violations[].violations[].index: integer
+answer restore_database.violations[].violations[].message: string
+answer restore_database.violations[].violations[].value: any
+answer restore_table.ambiguous_mentions: object[]
+answer restore_table.ambiguous_mentions[].candidates: string[]
+answer restore_table.ambiguous_mentions[].context: string
+answer restore_table.ambiguous_mentions[].hint: string
+answer restore_table.ambiguous_mentions[].path: string
+answer restore_table.ambiguous_mentions[].reason = "adjacent"
+answer restore_table.ambiguous_mentions[].reason = "overlap"
+answer restore_table.ambiguous_mentions[].reason = "part_of_name"
+answer restore_table.ambiguous_mentions[].reason = "same_name"
+answer restore_table.ambiguous_mentions[].reason = "sentence_start"
+answer restore_table.ambiguous_mentions[].reason: string
+answer restore_table.ambiguous_mentions[].text: string
+answer restore_table.commits: object[]
+answer restore_table.commits[].operation: string
+answer restore_table.commits[].table: string
+answer restore_table.commits[].version: integer
+answer restore_table.conflicts: object[]
+answer restore_table.conflicts[].message: string
+answer restore_table.conflicts[].path: string
+answer restore_table.dry_run: boolean
+answer restore_table.failed: object[]
+answer restore_table.failed[].error: string
+answer restore_table.failed[].path: string
+answer restore_table.files_created: integer
+answer restore_table.files_deleted: integer
+answer restore_table.files_moved: integer
+answer restore_table.links_added: object[]
+answer restore_table.links_added[].link: string
+answer restore_table.links_added[].path: string
+answer restore_table.links_added[].target: string
+answer restore_table.links_added[].text: string
+answer restore_table.migration_id: string
+answer restore_table.notes_changed: integer
+answer restore_table.ok: boolean
+answer restore_table.op: string
+answer restore_table.planned_creates: string[]
+answer restore_table.planned_deletes: string[]
+answer restore_table.planned_edits: object[]
+answer restore_table.planned_edits[].body: boolean
+answer restore_table.planned_edits[].path: string
+answer restore_table.planned_edits[].remove: string[]
+answer restore_table.planned_edits[].set: object
+answer restore_table.planned_moves: object[]
+answer restore_table.planned_moves[].from: string
+answer restore_table.planned_moves[].to: string
+answer restore_table.planned_texts: string[]
+answer restore_table.references_updated: integer
+answer restore_table.rolled_back: boolean
+answer restore_table.violations: object[]
+answer restore_table.violations[].path: string
+answer restore_table.violations[].violations: object[]
+answer restore_table.violations[].violations[].code = "broken_link"
+answer restore_table.violations[].violations[].code = "check"
+answer restore_table.violations[].violations[].code = "cycle"
+answer restore_table.violations[].violations[].code = "enum"
+answer restore_table.violations[].violations[].code = "generated"
+answer restore_table.violations[].violations[].code = "inverse"
+answer restore_table.violations[].violations[].code = "max"
+answer restore_table.violations[].violations[].code = "min"
+answer restore_table.violations[].violations[].code = "ref"
+answer restore_table.violations[].violations[].code = "required"
+answer restore_table.violations[].violations[].code = "step"
+answer restore_table.violations[].violations[].code = "type"
+answer restore_table.violations[].violations[].code = "unique"
+answer restore_table.violations[].violations[].code = "unknown_column"
+answer restore_table.violations[].violations[].code = "unreadable"
+answer restore_table.violations[].violations[].code = "vocabulary"
+answer restore_table.violations[].violations[].code: string
+answer restore_table.violations[].violations[].column: string
+answer restore_table.violations[].violations[].constraint: string
+answer restore_table.violations[].violations[].index: integer
+answer restore_table.violations[].violations[].message: string
+answer restore_table.violations[].violations[].value: any
+answer search_notes.query: string
+answer search_notes.results: object[]
+answer search_notes.results[].matches: object[]
+answer search_notes.results[].matches[].context: string
+answer search_notes.results[].matches[].end: integer
+answer search_notes.results[].matches[].start: integer
+answer search_notes.results[].path: string
+answer search_notes.results[].score: number
+answer search_notes.total: integer
+answer select_rows.rows: object[]
+answer select_rows.table: string
+answer select_rows.timestamp: string
+answer select_rows.total: integer
+answer select_rows.version: integer
+answer select_rows.versions: object
+answer select_rows.view: string
+answer semantic_search.query: string
+answer semantic_search.results: object[]
+answer semantic_search.results[].heading: string
+answer semantic_search.results[].path: string
+answer semantic_search.results[].score: number
+answer semantic_search.results[].snippet: string
+answer semantic_search.results[].table: string
+answer set_table_bases.ambiguous_mentions: object[]
+answer set_table_bases.ambiguous_mentions[].candidates: string[]
+answer set_table_bases.ambiguous_mentions[].context: string
+answer set_table_bases.ambiguous_mentions[].hint: string
+answer set_table_bases.ambiguous_mentions[].path: string
+answer set_table_bases.ambiguous_mentions[].reason = "adjacent"
+answer set_table_bases.ambiguous_mentions[].reason = "overlap"
+answer set_table_bases.ambiguous_mentions[].reason = "part_of_name"
+answer set_table_bases.ambiguous_mentions[].reason = "same_name"
+answer set_table_bases.ambiguous_mentions[].reason = "sentence_start"
+answer set_table_bases.ambiguous_mentions[].reason: string
+answer set_table_bases.ambiguous_mentions[].text: string
+answer set_table_bases.commits: object[]
+answer set_table_bases.commits[].operation: string
+answer set_table_bases.commits[].table: string
+answer set_table_bases.commits[].version: integer
+answer set_table_bases.conflicts: object[]
+answer set_table_bases.conflicts[].message: string
+answer set_table_bases.conflicts[].path: string
+answer set_table_bases.dry_run: boolean
+answer set_table_bases.failed: object[]
+answer set_table_bases.failed[].error: string
+answer set_table_bases.failed[].path: string
+answer set_table_bases.files_created: integer
+answer set_table_bases.files_deleted: integer
+answer set_table_bases.files_moved: integer
+answer set_table_bases.links_added: object[]
+answer set_table_bases.links_added[].link: string
+answer set_table_bases.links_added[].path: string
+answer set_table_bases.links_added[].target: string
+answer set_table_bases.links_added[].text: string
+answer set_table_bases.migration_id: string
+answer set_table_bases.notes_changed: integer
+answer set_table_bases.ok: boolean
+answer set_table_bases.op: string
+answer set_table_bases.planned_creates: string[]
+answer set_table_bases.planned_deletes: string[]
+answer set_table_bases.planned_edits: object[]
+answer set_table_bases.planned_edits[].body: boolean
+answer set_table_bases.planned_edits[].path: string
+answer set_table_bases.planned_edits[].remove: string[]
+answer set_table_bases.planned_edits[].set: object
+answer set_table_bases.planned_moves: object[]
+answer set_table_bases.planned_moves[].from: string
+answer set_table_bases.planned_moves[].to: string
+answer set_table_bases.planned_texts: string[]
+answer set_table_bases.references_updated: integer
+answer set_table_bases.rolled_back: boolean
+answer set_table_bases.violations: object[]
+answer set_table_bases.violations[].path: string
+answer set_table_bases.violations[].violations: object[]
+answer set_table_bases.violations[].violations[].code = "broken_link"
+answer set_table_bases.violations[].violations[].code = "check"
+answer set_table_bases.violations[].violations[].code = "cycle"
+answer set_table_bases.violations[].violations[].code = "enum"
+answer set_table_bases.violations[].violations[].code = "generated"
+answer set_table_bases.violations[].violations[].code = "inverse"
+answer set_table_bases.violations[].violations[].code = "max"
+answer set_table_bases.violations[].violations[].code = "min"
+answer set_table_bases.violations[].violations[].code = "ref"
+answer set_table_bases.violations[].violations[].code = "required"
+answer set_table_bases.violations[].violations[].code = "step"
+answer set_table_bases.violations[].violations[].code = "type"
+answer set_table_bases.violations[].violations[].code = "unique"
+answer set_table_bases.violations[].violations[].code = "unknown_column"
+answer set_table_bases.violations[].violations[].code = "unreadable"
+answer set_table_bases.violations[].violations[].code = "vocabulary"
+answer set_table_bases.violations[].violations[].code: string
+answer set_table_bases.violations[].violations[].column: string
+answer set_table_bases.violations[].violations[].constraint: string
+answer set_table_bases.violations[].violations[].index: integer
+answer set_table_bases.violations[].violations[].message: string
+answer set_table_bases.violations[].violations[].value: any
+answer sync_semantic_index.embedded: integer
+answer sync_semantic_index.failed: object[]
+answer sync_semantic_index.failed[].error: string
+answer sync_semantic_index.failed[].path: string
+answer sync_semantic_index.removed: integer
+answer sync_semantic_index.unchanged: integer
+answer table_changes.changes: object[]
+answer table_changes.changes[]._change_type = "delete"
+answer table_changes.changes[]._change_type = "insert"
+answer table_changes.changes[]._change_type = "metadata"
+answer table_changes.changes[]._change_type = "update_postimage"
+answer table_changes.changes[]._change_type = "update_preimage"
+answer table_changes.changes[]._change_type: string
+answer table_changes.changes[]._commit_timestamp: string
+answer table_changes.changes[]._commit_version: integer
+answer table_changes.changes[]._operation: string
+answer table_changes.changes[].path: string
+answer table_changes.table: string
+answer undo_migration.conflicts: object[]
+answer undo_migration.conflicts[].message: string
+answer undo_migration.conflicts[].path: string
+answer undo_migration.failed: object[]
+answer undo_migration.failed[].error: string
+answer undo_migration.failed[].path: string
+answer undo_migration.migration_id: string
+answer undo_migration.ok: boolean
+answer undo_migration.op: string
+answer undo_migration.undoes: string
+answer update_row.ambiguous_mentions: object[]
+answer update_row.ambiguous_mentions[].candidates: string[]
+answer update_row.ambiguous_mentions[].context: string
+answer update_row.ambiguous_mentions[].hint: string
+answer update_row.ambiguous_mentions[].path: string
+answer update_row.ambiguous_mentions[].reason = "adjacent"
+answer update_row.ambiguous_mentions[].reason = "overlap"
+answer update_row.ambiguous_mentions[].reason = "part_of_name"
+answer update_row.ambiguous_mentions[].reason = "same_name"
+answer update_row.ambiguous_mentions[].reason = "sentence_start"
+answer update_row.ambiguous_mentions[].reason: string
+answer update_row.ambiguous_mentions[].text: string
+answer update_row.commits: object[]
+answer update_row.commits[].operation: string
+answer update_row.commits[].table: string
+answer update_row.commits[].version: integer
+answer update_row.conflicts: object[]
+answer update_row.conflicts[].message: string
+answer update_row.conflicts[].path: string
+answer update_row.dry_run: boolean
+answer update_row.failed: object[]
+answer update_row.failed[].error: string
+answer update_row.failed[].path: string
+answer update_row.files_created: integer
+answer update_row.files_deleted: integer
+answer update_row.files_moved: integer
+answer update_row.links_added: object[]
+answer update_row.links_added[].link: string
+answer update_row.links_added[].path: string
+answer update_row.links_added[].target: string
+answer update_row.links_added[].text: string
+answer update_row.migration_id: string
+answer update_row.notes_changed: integer
+answer update_row.ok: boolean
+answer update_row.op: string
+answer update_row.planned_creates: string[]
+answer update_row.planned_deletes: string[]
+answer update_row.planned_edits: object[]
+answer update_row.planned_edits[].body: boolean
+answer update_row.planned_edits[].path: string
+answer update_row.planned_edits[].remove: string[]
+answer update_row.planned_edits[].set: object
+answer update_row.planned_moves: object[]
+answer update_row.planned_moves[].from: string
+answer update_row.planned_moves[].to: string
+answer update_row.planned_texts: string[]
+answer update_row.references_updated: integer
+answer update_row.rolled_back: boolean
+answer update_row.violations: object[]
+answer update_row.violations[].path: string
+answer update_row.violations[].violations: object[]
+answer update_row.violations[].violations[].code = "broken_link"
+answer update_row.violations[].violations[].code = "check"
+answer update_row.violations[].violations[].code = "cycle"
+answer update_row.violations[].violations[].code = "enum"
+answer update_row.violations[].violations[].code = "generated"
+answer update_row.violations[].violations[].code = "inverse"
+answer update_row.violations[].violations[].code = "max"
+answer update_row.violations[].violations[].code = "min"
+answer update_row.violations[].violations[].code = "ref"
+answer update_row.violations[].violations[].code = "required"
+answer update_row.violations[].violations[].code = "step"
+answer update_row.violations[].violations[].code = "type"
+answer update_row.violations[].violations[].code = "unique"
+answer update_row.violations[].violations[].code = "unknown_column"
+answer update_row.violations[].violations[].code = "unreadable"
+answer update_row.violations[].violations[].code = "vocabulary"
+answer update_row.violations[].violations[].code: string
+answer update_row.violations[].violations[].column: string
+answer update_row.violations[].violations[].constraint: string
+answer update_row.violations[].violations[].index: integer
+answer update_row.violations[].violations[].message: string
+answer update_row.violations[].violations[].value: any
+answer update_rows.ambiguous_mentions: object[]
+answer update_rows.ambiguous_mentions[].candidates: string[]
+answer update_rows.ambiguous_mentions[].context: string
+answer update_rows.ambiguous_mentions[].hint: string
+answer update_rows.ambiguous_mentions[].path: string
+answer update_rows.ambiguous_mentions[].reason = "adjacent"
+answer update_rows.ambiguous_mentions[].reason = "overlap"
+answer update_rows.ambiguous_mentions[].reason = "part_of_name"
+answer update_rows.ambiguous_mentions[].reason = "same_name"
+answer update_rows.ambiguous_mentions[].reason = "sentence_start"
+answer update_rows.ambiguous_mentions[].reason: string
+answer update_rows.ambiguous_mentions[].text: string
+answer update_rows.commits: object[]
+answer update_rows.commits[].operation: string
+answer update_rows.commits[].table: string
+answer update_rows.commits[].version: integer
+answer update_rows.conflicts: object[]
+answer update_rows.conflicts[].message: string
+answer update_rows.conflicts[].path: string
+answer update_rows.dry_run: boolean
+answer update_rows.failed: object[]
+answer update_rows.failed[].error: string
+answer update_rows.failed[].path: string
+answer update_rows.files_created: integer
+answer update_rows.files_deleted: integer
+answer update_rows.files_moved: integer
+answer update_rows.links_added: object[]
+answer update_rows.links_added[].link: string
+answer update_rows.links_added[].path: string
+answer update_rows.links_added[].target: string
+answer update_rows.links_added[].text: string
+answer update_rows.migration_id: string
+answer update_rows.notes_changed: integer
+answer update_rows.ok: boolean
+answer update_rows.op: string
+answer update_rows.planned_creates: string[]
+answer update_rows.planned_deletes: string[]
+answer update_rows.planned_edits: object[]
+answer update_rows.planned_edits[].body: boolean
+answer update_rows.planned_edits[].path: string
+answer update_rows.planned_edits[].remove: string[]
+answer update_rows.planned_edits[].set: object
+answer update_rows.planned_moves: object[]
+answer update_rows.planned_moves[].from: string
+answer update_rows.planned_moves[].to: string
+answer update_rows.planned_texts: string[]
+answer update_rows.references_updated: integer
+answer update_rows.rolled_back: boolean
+answer update_rows.violations: object[]
+answer update_rows.violations[].path: string
+answer update_rows.violations[].violations: object[]
+answer update_rows.violations[].violations[].code = "broken_link"
+answer update_rows.violations[].violations[].code = "check"
+answer update_rows.violations[].violations[].code = "cycle"
+answer update_rows.violations[].violations[].code = "enum"
+answer update_rows.violations[].violations[].code = "generated"
+answer update_rows.violations[].violations[].code = "inverse"
+answer update_rows.violations[].violations[].code = "max"
+answer update_rows.violations[].violations[].code = "min"
+answer update_rows.violations[].violations[].code = "ref"
+answer update_rows.violations[].violations[].code = "required"
+answer update_rows.violations[].violations[].code = "step"
+answer update_rows.violations[].violations[].code = "type"
+answer update_rows.violations[].violations[].code = "unique"
+answer update_rows.violations[].violations[].code = "unknown_column"
+answer update_rows.violations[].violations[].code = "unreadable"
+answer update_rows.violations[].violations[].code = "vocabulary"
+answer update_rows.violations[].violations[].code: string
+answer update_rows.violations[].violations[].column: string
+answer update_rows.violations[].violations[].constraint: string
+answer update_rows.violations[].violations[].index: integer
+answer update_rows.violations[].violations[].message: string
+answer update_rows.violations[].violations[].value: any
+answer vacuum_table.deleted: string[]
+answer vacuum_table.dry_run: boolean
+answer vacuum_table.retained_from: integer
+answer vacuum_table.table: string
+argument add_column.column: object
+argument add_column.dry_run optional
+argument add_column.dry_run: boolean
+argument add_column.table: string
+argument add_constraint.check: object
+argument add_constraint.dry_run optional
+argument add_constraint.dry_run: boolean
+argument add_constraint.name: string
+argument add_constraint.table: string
+argument adopt_rows.drop optional
+argument adopt_rows.drop: null
+argument adopt_rows.drop: string[]
+argument adopt_rows.dry_run optional
+argument adopt_rows.dry_run: boolean
+argument adopt_rows.paths: string[]
+argument adopt_rows.per_row optional
+argument adopt_rows.per_row: null
+argument adopt_rows.per_row: object
+argument adopt_rows.relocate optional
+argument adopt_rows.relocate: boolean
+argument adopt_rows.rename optional
+argument adopt_rows.rename: null
+argument adopt_rows.rename: object
+argument adopt_rows.set optional
+argument adopt_rows.set: null
+argument adopt_rows.set: object
+argument adopt_rows.table: string
+argument align_relations.dry_run optional
+argument align_relations.dry_run: boolean
+argument align_relations.paths optional
+argument align_relations.paths: null
+argument align_relations.paths: string[]
+argument align_relations.table: string
+argument alter_column.changes: object
+argument alter_column.column: string
+argument alter_column.dry_run optional
+argument alter_column.dry_run: boolean
+argument alter_column.table: string
+argument alter_table.aliases optional
+argument alter_table.aliases: null
+argument alter_table.aliases: string[]
+argument alter_table.archive optional
+argument alter_table.archive: null
+argument alter_table.archive: string
+argument alter_table.autolink_target = "default"
+argument alter_table.autolink_target optional
+argument alter_table.autolink_target: boolean
+argument alter_table.autolink_target: null
+argument alter_table.autolink_target: string
+argument alter_table.catalog optional
+argument alter_table.catalog: null
+argument alter_table.catalog: string
+argument alter_table.clear_tags optional
+argument alter_table.clear_tags: boolean
+argument alter_table.description optional
+argument alter_table.description: null
+argument alter_table.description: string
+argument alter_table.dry_run optional
+argument alter_table.dry_run: boolean
+argument alter_table.exclude optional
+argument alter_table.exclude: null
+argument alter_table.exclude: string[]
+argument alter_table.fields optional
+argument alter_table.fields: null
+argument alter_table.fields: object
+argument alter_table.filename optional
+argument alter_table.filename: null
+argument alter_table.filename: string
+argument alter_table.history = "default"
+argument alter_table.history optional
+argument alter_table.history: boolean
+argument alter_table.history: null
+argument alter_table.history: string
+argument alter_table.name optional
+argument alter_table.name: null
+argument alter_table.name: string
+argument alter_table.partition optional
+argument alter_table.partition: null
+argument alter_table.partition: string
+argument alter_table.row_template optional
+argument alter_table.row_template: null
+argument alter_table.row_template: string
+argument alter_table.schema optional
+argument alter_table.schema: null
+argument alter_table.schema: string
+argument alter_table.table: string
+argument alter_table.tags optional
+argument alter_table.tags: null
+argument alter_table.tags: object
+argument batch.dry_run optional
+argument batch.dry_run: boolean
+argument batch.operations: object[]
+argument batch.summary optional
+argument batch.summary: null
+argument batch.summary: string
+argument check_table.limit optional
+argument check_table.limit: integer
+argument check_table.offset optional
+argument check_table.offset: integer
+argument check_table.table optional
+argument check_table.table: null
+argument check_table.table: string
+argument clone_table.copy_rows optional
+argument clone_table.copy_rows: boolean
+argument clone_table.dry_run optional
+argument clone_table.dry_run: boolean
+argument clone_table.source: string
+argument clone_table.target: string
+argument clone_table.timestamp optional
+argument clone_table.timestamp: null
+argument clone_table.timestamp: string
+argument clone_table.version optional
+argument clone_table.version: integer
+argument clone_table.version: null
+argument comment_on.catalog: string
+argument comment_on.description: string
+argument comment_on.dry_run optional
+argument comment_on.dry_run: boolean
+argument comment_on.schema optional
+argument comment_on.schema: null
+argument comment_on.schema: string
+argument configure_database.archive_folder optional
+argument configure_database.archive_folder: null
+argument configure_database.archive_folder: string
+argument configure_database.autolink optional
+argument configure_database.autolink: boolean
+argument configure_database.autolink: null
+argument configure_database.default_catalog optional
+argument configure_database.default_catalog: null
+argument configure_database.default_catalog: string
+argument configure_database.default_filename optional
+argument configure_database.default_filename: null
+argument configure_database.default_filename: string
+argument configure_database.default_partition optional
+argument configure_database.default_partition: null
+argument configure_database.default_partition: string
+argument configure_database.default_schema optional
+argument configure_database.default_schema: null
+argument configure_database.default_schema: string
+argument configure_database.history optional
+argument configure_database.history: boolean
+argument configure_database.history: null
+argument configure_database.root optional
+argument configure_database.root: null
+argument configure_database.root: string
+argument configure_database.timezone optional
+argument configure_database.timezone: null
+argument configure_database.timezone: string
+argument create_table.aliases optional
+argument create_table.aliases: null
+argument create_table.aliases: string[]
+argument create_table.archive optional
+argument create_table.archive: null
+argument create_table.archive: string
+argument create_table.autolink_target optional
+argument create_table.autolink_target: boolean
+argument create_table.autolink_target: null
+argument create_table.catalog optional
+argument create_table.catalog: null
+argument create_table.catalog: string
+argument create_table.columns: object[]
+argument create_table.description optional
+argument create_table.description: null
+argument create_table.description: string
+argument create_table.dry_run optional
+argument create_table.dry_run: boolean
+argument create_table.exclude optional
+argument create_table.exclude: null
+argument create_table.exclude: string[]
+argument create_table.fields optional
+argument create_table.fields: null
+argument create_table.fields: object
+argument create_table.filename optional
+argument create_table.filename: null
+argument create_table.filename: string
+argument create_table.history optional
+argument create_table.history: boolean
+argument create_table.history: null
+argument create_table.name: string
+argument create_table.partition optional
+argument create_table.partition: null
+argument create_table.partition: string
+argument create_table.row_template optional
+argument create_table.row_template: null
+argument create_table.row_template: string
+argument create_table.schema optional
+argument create_table.schema: null
+argument create_table.schema: string
+argument create_table.tags optional
+argument create_table.tags: null
+argument create_table.tags: object
+argument create_table.time_column optional
+argument create_table.time_column: null
+argument create_table.time_column: string
+argument create_view.aliases optional
+argument create_view.aliases: null
+argument create_view.aliases: string[]
+argument create_view.catalog optional
+argument create_view.catalog: null
+argument create_view.catalog: string
+argument create_view.description optional
+argument create_view.description: null
+argument create_view.description: string
+argument create_view.dry_run optional
+argument create_view.dry_run: boolean
+argument create_view.labels optional
+argument create_view.labels: null
+argument create_view.labels: object
+argument create_view.name: string
+argument create_view.query: object
+argument create_view.replace optional
+argument create_view.replace: boolean
+argument create_view.schema optional
+argument create_view.schema: null
+argument create_view.schema: string
+argument create_webhook.columns optional
+argument create_webhook.columns: null
+argument create_webhook.columns: string[]
+argument create_webhook.exclude_actor optional
+argument create_webhook.exclude_actor: null
+argument create_webhook.exclude_actor: string
+argument create_webhook.kinds = "delete"
+argument create_webhook.kinds = "insert"
+argument create_webhook.kinds = "metastore"
+argument create_webhook.kinds = "move"
+argument create_webhook.kinds = "tool_call"
+argument create_webhook.kinds = "unreadable"
+argument create_webhook.kinds = "update"
+argument create_webhook.kinds optional
+argument create_webhook.kinds: null
+argument create_webhook.kinds: string[]
+argument create_webhook.since optional
+argument create_webhook.since: integer
+argument create_webhook.since: null
+argument create_webhook.tables optional
+argument create_webhook.tables: null
+argument create_webhook.tables: string[]
+argument create_webhook.url: string
+argument create_webhook.where optional
+argument create_webhook.where: null
+argument create_webhook.where: object
+argument define_base.bases optional
+argument define_base.bases: null
+argument define_base.bases: string[]
+argument define_base.columns: object[]
+argument define_base.description optional
+argument define_base.description: null
+argument define_base.description: string
+argument define_base.drop_columns optional
+argument define_base.drop_columns: null
+argument define_base.drop_columns: string[]
+argument define_base.dry_run optional
+argument define_base.dry_run: boolean
+argument define_base.name: string
+argument define_base.rename_columns optional
+argument define_base.rename_columns: null
+argument define_base.rename_columns: object
+argument delete_rows.dry_run optional
+argument delete_rows.dry_run: boolean
+argument delete_rows.mode = "archive"
+argument delete_rows.mode = "delete"
+argument delete_rows.mode optional
+argument delete_rows.mode: null
+argument delete_rows.mode: string
+argument delete_rows.on_referenced = "ignore"
+argument delete_rows.on_referenced = "restrict"
+argument delete_rows.on_referenced = "set_null"
+argument delete_rows.on_referenced optional
+argument delete_rows.on_referenced: null
+argument delete_rows.on_referenced: string
+argument delete_rows.table: string
+argument delete_rows.where: object
+argument delete_webhook.id: string
+argument describe_history.limit optional
+argument describe_history.limit: integer
+argument describe_history.limit: null
+argument describe_history.since optional
+argument describe_history.since: null
+argument describe_history.since: string
+argument describe_history.table optional
+argument describe_history.table: null
+argument describe_history.table: string
+argument describe_table.table: string
+argument drop_column.column: string
+argument drop_column.dry_run optional
+argument drop_column.dry_run: boolean
+argument drop_column.table: string
+argument drop_constraint.dry_run optional
+argument drop_constraint.dry_run: boolean
+argument drop_constraint.name: string
+argument drop_constraint.table: string
+argument drop_table.dry_run optional
+argument drop_table.dry_run: boolean
+argument drop_table.mode = "archive"
+argument drop_table.mode optional
+argument drop_table.mode: null
+argument drop_table.mode: string
+argument drop_table.table: string
+argument drop_view.dry_run optional
+argument drop_view.dry_run: boolean
+argument drop_view.view: string
+argument graph_neighbors.direction = "both"
+argument graph_neighbors.direction = "in"
+argument graph_neighbors.direction = "out"
+argument graph_neighbors.direction optional
+argument graph_neighbors.direction: null
+argument graph_neighbors.direction: string
+argument graph_neighbors.edges optional
+argument graph_neighbors.edges: null
+argument graph_neighbors.edges: string[]
+argument graph_neighbors.from_nodes: object
+argument graph_path.direction = "both"
+argument graph_path.direction = "in"
+argument graph_path.direction = "out"
+argument graph_path.direction optional
+argument graph_path.direction: null
+argument graph_path.direction: string
+argument graph_path.edges optional
+argument graph_path.edges: null
+argument graph_path.edges: string[]
+argument graph_path.from_nodes: object
+argument graph_path.max_depth optional
+argument graph_path.max_depth: integer
+argument graph_path.max_depth: null
+argument graph_path.to_nodes: object
+argument graph_traverse.direction = "both"
+argument graph_traverse.direction = "in"
+argument graph_traverse.direction = "out"
+argument graph_traverse.direction optional
+argument graph_traverse.direction: null
+argument graph_traverse.direction: string
+argument graph_traverse.edges optional
+argument graph_traverse.edges: null
+argument graph_traverse.edges: string[]
+argument graph_traverse.from_nodes: object
+argument graph_traverse.limit optional
+argument graph_traverse.limit: integer
+argument graph_traverse.limit: null
+argument graph_traverse.max_depth optional
+argument graph_traverse.max_depth: integer
+argument graph_traverse.max_depth: null
+argument graph_traverse.min_depth optional
+argument graph_traverse.min_depth: integer
+argument graph_traverse.min_depth: null
+argument graph_traverse.tables optional
+argument graph_traverse.tables: null
+argument graph_traverse.tables: string[]
+argument graph_traverse.through optional
+argument graph_traverse.through: null
+argument graph_traverse.through: string[]
+argument infer_table.folder optional
+argument infer_table.folder: null
+argument infer_table.folder: string
+argument infer_table.max_enum_values optional
+argument infer_table.max_enum_values: integer
+argument infer_table.max_enum_values: null
+argument infer_table.name optional
+argument infer_table.name: null
+argument infer_table.name: string
+argument infer_table.paths optional
+argument infer_table.paths: null
+argument infer_table.paths: string[]
+argument infer_table.table optional
+argument infer_table.table: null
+argument infer_table.table: string
+argument insert_row.autolink optional
+argument insert_row.autolink: boolean
+argument insert_row.autolink: null
+argument insert_row.body optional
+argument insert_row.body: null
+argument insert_row.body: string
+argument insert_row.dry_run optional
+argument insert_row.dry_run: boolean
+argument insert_row.path optional
+argument insert_row.path: null
+argument insert_row.path: string
+argument insert_row.table: string
+argument insert_row.values: object
+argument list_changes.columns optional
+argument list_changes.columns: null
+argument list_changes.columns: string[]
+argument list_changes.exclude_actor optional
+argument list_changes.exclude_actor: null
+argument list_changes.exclude_actor: string
+argument list_changes.kinds = "delete"
+argument list_changes.kinds = "insert"
+argument list_changes.kinds = "metastore"
+argument list_changes.kinds = "move"
+argument list_changes.kinds = "tool_call"
+argument list_changes.kinds = "unreadable"
+argument list_changes.kinds = "update"
+argument list_changes.kinds optional
+argument list_changes.kinds: null
+argument list_changes.kinds: string[]
+argument list_changes.limit optional
+argument list_changes.limit: integer
+argument list_changes.since optional
+argument list_changes.since: integer
+argument list_changes.tables optional
+argument list_changes.tables: null
+argument list_changes.tables: string[]
+argument list_changes.wait_ms optional
+argument list_changes.wait_ms: integer
+argument list_changes.where optional
+argument list_changes.where: null
+argument list_changes.where: object
+argument list_folder.folder optional
+argument list_folder.folder: string
+argument list_link_targets.column: string
+argument list_link_targets.limit optional
+argument list_link_targets.limit: integer
+argument list_link_targets.limit: null
+argument list_link_targets.row optional
+argument list_link_targets.row: null
+argument list_link_targets.row: string
+argument list_link_targets.table: string
+argument list_link_targets.values optional
+argument list_link_targets.values: null
+argument list_link_targets.values: object
+argument list_migrations.limit optional
+argument list_migrations.limit: integer
+argument list_migrations.limit: null
+argument list_migrations.op optional
+argument list_migrations.op: null
+argument list_migrations.op: string
+argument list_migrations.since optional
+argument list_migrations.since: null
+argument list_migrations.since: string
+argument list_migrations.table optional
+argument list_migrations.table: null
+argument list_migrations.table: string
+argument merge_rows.dry_run optional
+argument merge_rows.dry_run: boolean
+argument merge_rows.on: string[]
+argument merge_rows.rows: object[]
+argument merge_rows.table: string
+argument merge_rows.when_matched = "ignore"
+argument merge_rows.when_matched = "update"
+argument merge_rows.when_matched optional
+argument merge_rows.when_matched: null
+argument merge_rows.when_matched: string
+argument merge_rows.when_not_matched = "ignore"
+argument merge_rows.when_not_matched = "insert"
+argument merge_rows.when_not_matched optional
+argument merge_rows.when_not_matched: null
+argument merge_rows.when_not_matched: string
+argument move_rows.drop optional
+argument move_rows.drop: null
+argument move_rows.drop: string[]
+argument move_rows.dry_run optional
+argument move_rows.dry_run: boolean
+argument move_rows.relocate optional
+argument move_rows.relocate: boolean
+argument move_rows.rename optional
+argument move_rows.rename: null
+argument move_rows.rename: object
+argument move_rows.set optional
+argument move_rows.set: null
+argument move_rows.set: object
+argument move_rows.table: string
+argument move_rows.to_table: string
+argument move_rows.where: object
+argument read_note.path: string
+argument recompute_columns.dry_run optional
+argument recompute_columns.dry_run: boolean
+argument recompute_columns.new_ids optional
+argument recompute_columns.new_ids: boolean
+argument recompute_columns.paths optional
+argument recompute_columns.paths: null
+argument recompute_columns.paths: string[]
+argument recompute_columns.table: string
+argument rename_column.dry_run optional
+argument rename_column.dry_run: boolean
+argument rename_column.from_column: string
+argument rename_column.table: string
+argument rename_column.to_column: string
+argument rename_value.column: string
+argument rename_value.dry_run optional
+argument rename_value.dry_run: boolean
+argument rename_value.from_value: string
+argument rename_value.table: string
+argument rename_value.to_value: string
+argument restore_database.before_migration optional
+argument restore_database.before_migration: null
+argument restore_database.before_migration: string
+argument restore_database.dry_run optional
+argument restore_database.dry_run: boolean
+argument restore_database.timestamp optional
+argument restore_database.timestamp: null
+argument restore_database.timestamp: string
+argument restore_table.dry_run optional
+argument restore_table.dry_run: boolean
+argument restore_table.table: string
+argument restore_table.timestamp optional
+argument restore_table.timestamp: null
+argument restore_table.timestamp: string
+argument restore_table.version optional
+argument restore_table.version: integer
+argument restore_table.version: null
+argument search_notes.context_length optional
+argument search_notes.context_length: integer
+argument search_notes.query: string
+argument select_rows.aggregates optional
+argument select_rows.aggregates: null
+argument select_rows.aggregates: object
+argument select_rows.columns optional
+argument select_rows.columns: null
+argument select_rows.columns: string[]
+argument select_rows.expand optional
+argument select_rows.expand: null
+argument select_rows.expand: string[]
+argument select_rows.group_by optional
+argument select_rows.group_by: null
+argument select_rows.group_by: string
+argument select_rows.group_by: string[]
+argument select_rows.include_body optional
+argument select_rows.include_body: boolean
+argument select_rows.join optional
+argument select_rows.join: null
+argument select_rows.join: object
+argument select_rows.limit optional
+argument select_rows.limit: integer
+argument select_rows.limit: null
+argument select_rows.offset optional
+argument select_rows.offset: integer
+argument select_rows.offset: null
+argument select_rows.order_by optional
+argument select_rows.order_by: null
+argument select_rows.order_by: string
+argument select_rows.order_by: string[]
+argument select_rows.table: string
+argument select_rows.this_note optional
+argument select_rows.this_note: null
+argument select_rows.this_note: string
+argument select_rows.timestamp optional
+argument select_rows.timestamp: null
+argument select_rows.timestamp: string
+argument select_rows.version optional
+argument select_rows.version: integer
+argument select_rows.version: null
+argument select_rows.where optional
+argument select_rows.where: null
+argument select_rows.where: object
+argument semantic_search.folder optional
+argument semantic_search.folder: null
+argument semantic_search.folder: string
+argument semantic_search.limit optional
+argument semantic_search.limit: integer
+argument semantic_search.min_score optional
+argument semantic_search.min_score: null
+argument semantic_search.min_score: number
+argument semantic_search.query: string
+argument semantic_search.tables optional
+argument semantic_search.tables: null
+argument semantic_search.tables: string[]
+argument set_table_bases.bases: string[]
+argument set_table_bases.dry_run optional
+argument set_table_bases.dry_run: boolean
+argument set_table_bases.table: string
+argument sync_semantic_index.rebuild optional
+argument sync_semantic_index.rebuild: boolean
+argument table_changes.end_version optional
+argument table_changes.end_version: integer
+argument table_changes.end_version: null
+argument table_changes.start_version: integer
+argument table_changes.table: string
+argument undo_migration.migration_id: string
+argument update_row.autolink optional
+argument update_row.autolink: boolean
+argument update_row.autolink: null
+argument update_row.body optional
+argument update_row.body: null
+argument update_row.body: string
+argument update_row.body_append optional
+argument update_row.body_append: null
+argument update_row.body_append: string
+argument update_row.body_prepend optional
+argument update_row.body_prepend: null
+argument update_row.body_prepend: string
+argument update_row.body_sections optional
+argument update_row.body_sections: null
+argument update_row.body_sections: object
+argument update_row.dry_run optional
+argument update_row.dry_run: boolean
+argument update_row.expect optional
+argument update_row.expect: null
+argument update_row.expect: object
+argument update_row.id optional
+argument update_row.id: null
+argument update_row.id: string
+argument update_row.path optional
+argument update_row.path: null
+argument update_row.path: string
+argument update_row.set optional
+argument update_row.set: null
+argument update_row.set: object
+argument update_row.table: string
+argument update_row.unset optional
+argument update_row.unset: null
+argument update_row.unset: string[]
+argument update_rows.dry_run optional
+argument update_rows.dry_run: boolean
+argument update_rows.expect_count optional
+argument update_rows.expect_count: integer
+argument update_rows.expect_count: null
+argument update_rows.set optional
+argument update_rows.set: null
+argument update_rows.set: object
+argument update_rows.table: string
+argument update_rows.unset optional
+argument update_rows.unset: null
+argument update_rows.unset: string[]
+argument update_rows.where: object
+argument vacuum_table.dry_run optional
+argument vacuum_table.dry_run: boolean
+argument vacuum_table.retain_from_version optional
+argument vacuum_table.retain_from_version: integer
+argument vacuum_table.retain_from_version: null
+argument vacuum_table.table: string
+command mcp --database <value>
+command mcp --except <value>
+command mcp --otlp-endpoint <value>
+command mcp --owner-tools
+command mcp --profile <value>
+command mcp --token-file <value>
+command mcp --tools <value>
+command mcp --url <value>
+command mcp --vault <value>
+command mcp serve --except <value>
+command mcp serve --host <value>
+command mcp serve --otlp-endpoint <value>
+command mcp serve --owner-tools
+command mcp serve --port <value>
+command mcp serve --profile <value>
+command mcp serve --tools <value>
+command mcp serve --url <value>
+command serve --database <value>
+command serve --embedding-key-file <value>
+command serve --git-interval-min <value>
+command serve --git-no-push
+command serve --git-quiet-s <value>
+command serve --git-sync
+command serve --host <value>
+command serve --log <value>
+command serve --no-store-backup
+command serve --poll-ms <value>
+command serve --port <value>
+command serve --settings <value>
+command serve --store <value>
+command serve --store-backup
+command serve --store-backup-interval-s <value>
+command serve --store-backup-remote <value>
+command serve --vault <value>
+command serve --watch <value>
+command status --database <value>
+command status --json
+command status --settings <value>
+command status --store <value>
+command status --token <value>
+command status --url <value>
+command status --vault <value>
+command stop --database <value>
+command stop --json
+command stop --settings <value>
+command stop --store <value>
+command stop --timeout-s <value>
+command stop --token <value>
+command stop --url <value>
+command stop --vault <value>
+command store backup --database <value>
+command store backup --interval-s <value>
+command store backup --json
+command store backup --off
+command store backup --remote <value>
+command store backup --settings <value>
+command store backup --ssh-command <value>
+command store backup --store <value>
+command store backup --vault <value>
+command store new-id --database <value>
+command store new-id --store <value>
+command store new-id --vault <value>
+command store path --database <value>
+command store path --json
+command store path --store <value>
+command store path --vault <value>
+command store restore --database <value>
+command store restore --force
+command store restore --from <value>
+command store restore --no-backup
+command store restore --port <value>
+command store restore --settings <value>
+command store restore --store <value>
+command store restore --vault <value>
+environment DATANOTES_DATABASE
+environment DATANOTES_DATA_HOME
+environment DATANOTES_DOCS_DIR
+environment DATANOTES_EMBEDDING_KEY
+environment DATANOTES_EMBEDDING_KEY_FILE
+environment DATANOTES_ENGINE_START_TIMEOUT_S
+environment DATANOTES_GIT_INTERVAL_MIN
+environment DATANOTES_GIT_NETWORK_TIMEOUT_S
+environment DATANOTES_GIT_QUIET_S
+environment DATANOTES_GIT_SYNC
+environment DATANOTES_HOST
+environment DATANOTES_MCP_EXCEPT
+environment DATANOTES_MCP_HOST
+environment DATANOTES_MCP_OWNER_TOOLS
+environment DATANOTES_MCP_PORT
+environment DATANOTES_MCP_PROFILE
+environment DATANOTES_MCP_TOOLS
+environment DATANOTES_POLL_MS
+environment DATANOTES_PORT
+environment DATANOTES_SETTINGS
+environment DATANOTES_STORE
+environment DATANOTES_STORE_BACKUP
+environment DATANOTES_STORE_BACKUP_INTERVAL_S
+environment DATANOTES_STORE_BACKUP_REMOTE
+environment DATANOTES_TOKEN
+environment DATANOTES_TOKEN_FILE
+environment DATANOTES_URL
+environment DATANOTES_VAULT
+environment DATANOTES_WATCH
+operation add_column
+operation add_constraint
+operation adopt_rows
+operation align_relations
+operation alter_column
+operation alter_table
+operation batch
+operation check_table
+operation clone_table
+operation comment_on
+operation configure_database
+operation create_table
+operation create_view
+operation create_webhook
+operation define_base
+operation delete_rows
+operation delete_webhook
+operation describe_database
+operation describe_history
+operation describe_semantic_index
+operation describe_table
+operation drop_column
+operation drop_constraint
+operation drop_table
+operation drop_view
+operation graph_neighbors
+operation graph_path
+operation graph_traverse
+operation infer_table
+operation insert_row
+operation list_changes
+operation list_folder
+operation list_link_targets
+operation list_migrations
+operation list_tables
+operation list_webhooks
+operation merge_rows
+operation move_rows
+operation read_note
+operation recompute_columns
+operation rename_column
+operation rename_value
+operation restore_database
+operation restore_table
+operation search_notes
+operation select_rows
+operation semantic_search
+operation set_table_bases
+operation sync_semantic_index
+operation table_changes
+operation undo_migration
+operation update_row
+operation update_rows
+operation vacuum_table
+route GET /
+route GET /datanotes/changes/stream
+route GET /datanotes/docs
+route GET /datanotes/manual/
+route GET /datanotes/manual/{page}.md
+route GET /datanotes/openapi.json
+route POST /datanotes/manual/search/
+route POST /datanotes/openapi/
+route POST /datanotes/operations/add_column/
+route POST /datanotes/operations/add_constraint/
+route POST /datanotes/operations/adopt_rows/
+route POST /datanotes/operations/align_relations/
+route POST /datanotes/operations/alter_column/
+route POST /datanotes/operations/alter_table/
+route POST /datanotes/operations/batch/
+route POST /datanotes/operations/check_table/
+route POST /datanotes/operations/clone_table/
+route POST /datanotes/operations/comment_on/
+route POST /datanotes/operations/configure_database/
+route POST /datanotes/operations/create_table/
+route POST /datanotes/operations/create_view/
+route POST /datanotes/operations/create_webhook/
+route POST /datanotes/operations/define_base/
+route POST /datanotes/operations/delete_rows/
+route POST /datanotes/operations/delete_webhook/
+route POST /datanotes/operations/describe_database/
+route POST /datanotes/operations/describe_history/
+route POST /datanotes/operations/describe_semantic_index/
+route POST /datanotes/operations/describe_table/
+route POST /datanotes/operations/drop_column/
+route POST /datanotes/operations/drop_constraint/
+route POST /datanotes/operations/drop_table/
+route POST /datanotes/operations/drop_view/
+route POST /datanotes/operations/graph_neighbors/
+route POST /datanotes/operations/graph_path/
+route POST /datanotes/operations/graph_traverse/
+route POST /datanotes/operations/infer_table/
+route POST /datanotes/operations/insert_row/
+route POST /datanotes/operations/list_changes/
+route POST /datanotes/operations/list_folder/
+route POST /datanotes/operations/list_link_targets/
+route POST /datanotes/operations/list_migrations/
+route POST /datanotes/operations/list_tables/
+route POST /datanotes/operations/list_webhooks/
+route POST /datanotes/operations/merge_rows/
+route POST /datanotes/operations/move_rows/
+route POST /datanotes/operations/read_note/
+route POST /datanotes/operations/recompute_columns/
+route POST /datanotes/operations/rename_column/
+route POST /datanotes/operations/rename_value/
+route POST /datanotes/operations/restore_database/
+route POST /datanotes/operations/restore_table/
+route POST /datanotes/operations/search_notes/
+route POST /datanotes/operations/select_rows/
+route POST /datanotes/operations/semantic_search/
+route POST /datanotes/operations/set_table_bases/
+route POST /datanotes/operations/sync_semantic_index/
+route POST /datanotes/operations/table_changes/
+route POST /datanotes/operations/undo_migration/
+route POST /datanotes/operations/update_row/
+route POST /datanotes/operations/update_rows/
+route POST /datanotes/operations/vacuum_table/
+route POST /datanotes/sessions/identify/
+route POST /datanotes/status/
+route POST /datanotes/stop/
+route POST /datanotes/tokens/
+route POST /datanotes/tokens/create/
+route POST /datanotes/tokens/delete/
+route POST /datanotes/tokens/me/
+route POST /datanotes/tokens/rotate/
+route POST /datanotes/tokens/update/
+route POST /datanotes/tool-calls/record/
+setting autoRecompute: boolean
+setting databaseFolder: string
+setting databaseId: string
+setting fileLogEnabled: boolean
+setting httpServerPort: number
+setting httpServerToken: string
+setting journalRetentionDays: number
+setting logRetentionDays: number
+setting repairLinksOnHandMove: boolean
+setting semanticBaseUrl: string
+setting semanticBatchSize: number
+setting semanticEnabled: boolean
+setting semanticExclude: array
+setting semanticModel: string
+setting semanticProvider: string
+setting semanticScope: string
+setting storeBackupEnabled: boolean
+setting storeBackupIntervalSeconds: number
+setting storeBackupRemote: string
+setting tableKey: string
+setting telemetryEnabled: boolean
+setting telemetryEndpoint: string
+setting telemetryHeaders: object
+setting telemetryProtocol: string
+setting telemetryServiceName: string
+violation broken_link
+violation check
+violation cycle
+violation enum
+violation generated
+violation inverse
+violation max
+violation min
+violation ref
+violation required
+violation step
+violation type
+violation unique
+violation unknown_column
+violation unreadable
+violation vocabulary

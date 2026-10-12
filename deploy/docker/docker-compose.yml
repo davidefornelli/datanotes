@@ -1,0 +1,23 @@
+# The engine as a container (a VPS, a NAS, a Linux box). The vault is a bind mount; config (the
+# settings) and data (the engine's store: journal, history, tokens, change feed, logs) are volumes.
+# Programs use http://<host>:${DATANOTES_HOST_PORT}/datanotes/* with the owner's token in
+# /config/settings.json or a named token; agents go through the MCP server (datanotes mcp).
+services:
+  datanotes:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: datanotes-service
+    volumes:
+      - ${DATANOTES_VAULT:?set DATANOTES_VAULT to the vault folder}:/vault
+      - datanotes-config:/config
+      - datanotes-data:/data
+    ports:
+      - "127.0.0.1:${DATANOTES_HOST_PORT:-27150}:27150"
+    environment:
+      DATANOTES_WATCH: ${DATANOTES_WATCH:-poll}
+    restart: unless-stopped
+
+volumes:
+  datanotes-config:
+  datanotes-data:

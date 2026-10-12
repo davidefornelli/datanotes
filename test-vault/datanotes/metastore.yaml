@@ -1,0 +1,256 @@
+# Metastore (Datanotes): catalogs, schemas, tables, columns, views.
+id: 01a12adc-128b-7e56-abf4-10041c010184
+config:
+  default_catalog: work
+  default_schema: planning
+  default_partition: ""
+  default_filename: YYYY-MM-DD[T]HHmm
+  archive_folder: _archive
+  timezone: Europe/Rome
+  history: true
+  autolink: true
+catalogs:
+  work:
+    description: "Work: projects, tasks and the people on them"
+    schemas:
+      planning:
+        description: Areas, projects, workstreams and their tasks
+        tables:
+          person:
+            description: People who work on the projects
+            aliases:
+              - people
+              - team
+            tags:
+              domain: people
+            options:
+              filename: "{name}"
+              archive: _archive
+            columns:
+              - name: id
+                type: string
+                required: true
+                description: "Unique id of the row (UUIDv7): set when the row is created, never changes"
+                unique: true
+                identity: uuid
+                dense: true
+              - name: name
+                type: string
+                required: true
+                description: The person's full name
+                unique: true
+              - name: email
+                type: string
+                description: Where to write to them
+              - name: role
+                type: enum
+                values:
+                  - engineer
+                  - designer
+                  - manager
+                value_descriptions:
+                  engineer: builds the software
+                  designer: designs the product
+                  manager: plans the work
+                description: What the person does in the team
+              - name: projects
+                type: list
+                items: link
+                ref: work.planning.project
+                description: Projects the person works on
+          project:
+            description: Areas of responsibility, the projects in them and their workstreams
+            aliases:
+              - projects
+              - areas
+            tags:
+              domain: work
+              review: weekly
+            bases:
+              - dated
+            options:
+              filename: "{name}"
+              archive: _archive
+            columns:
+              - name: id
+                type: string
+                required: true
+                description: "Unique id of the row (UUIDv7): set when the row is created, never changes"
+                unique: true
+                identity: uuid
+                dense: true
+              - name: name
+                type: string
+                required: true
+                description: The name of the area, project or workstream
+                unique: true
+              - name: kind
+                type: enum
+                required: true
+                values:
+                  - area
+                  - project
+                  - workstream
+                description: "Its level in the tree: an area, a project in it, or a workstream of a project"
+              - name: parent
+                type: link
+                ref: self
+                description: The area or project one level up
+                hierarchy: true
+                ref_by:
+                  column: kind
+                  levels:
+                    - area
+                    - project
+                    - workstream
+              - name: status
+                type: enum
+                default: active
+                values:
+                  - active
+                  - paused
+                  - done
+                description: Whether the work goes on, waits or is finished
+              - name: members
+                type: list
+                items: link
+                ref: work.planning.person
+                description: People on the project
+                inverse: projects
+          task:
+            description: Things to do, each in a project or a workstream
+            aliases:
+              - tasks
+              - todo
+            tags:
+              domain: work
+            options:
+              filename: "{title}"
+              archive: _archive
+            columns:
+              - name: id
+                type: string
+                required: true
+                description: "Unique id of the row (UUIDv7): set when the row is created, never changes"
+                unique: true
+                identity: uuid
+                dense: true
+              - name: title
+                type: string
+                required: true
+                description: The task, in a few words
+                unique: true
+              - name: project
+                type: link
+                required: true
+                ref: work.planning.project
+                description: The project or workstream the task belongs to
+              - name: assignee
+                type: link
+                ref: work.planning.person
+                description: The person who does the task
+              - name: status
+                type: enum
+                required: true
+                default: todo
+                values:
+                  - todo
+                  - doing
+                  - done
+                description: Whether the task is to do, under way or done
+              - name: priority
+                type: enum
+                values:
+                  - low
+                  - medium
+                  - high
+                description: How soon the task matters
+                ordered: true
+              - name: due
+                type: date
+                description: The day the task must be done by
+              - name: done_on
+                type: date
+                description: The day the task was done
+              - name: estimate_h
+                type: number
+                min: 0
+                max: 80
+                description: Hours of work the task should take
+            bases:
+              - dated
+            constraints:
+              done_has_date:
+                or:
+                  - status:
+                      ne: done
+                  - done_on:
+                      exists: true
+              not_on_an_area:
+                project.kind:
+                  in:
+                    - project
+                    - workstream
+        views:
+          vw_open_tasks:
+            description: Tasks not done yet, the nearest due date first
+            aliases:
+              - open tasks
+              - what is left
+            labels:
+              title: Task
+              project: Project
+              assignee: Who
+              priority: Priority
+              due: Due
+            query:
+              table: work.planning.task
+              columns:
+                - title
+                - project
+                - assignee
+                - priority
+                - due
+              where:
+                status:
+                  ne: done
+              order_by: due
+          vw_engineering:
+            description: Projects and workstreams under the Engineering area, at any depth
+            query:
+              table: work.planning.project
+              columns:
+                - name
+                - kind
+                - parent
+                - status
+              where:
+                parent:
+                  within: "[[Engineering]]"
+              order_by: name
+          vw_project_tasks:
+            description: "Tasks of the project a note is about, its workstreams included: select it with this_note = the project's note"
+            aliases:
+              - project tasks
+            query:
+              table: work.planning.task
+              columns:
+                - title
+                - project
+                - status
+                - assignee
+                - due
+              where:
+                project:
+                  within: "{this.link}"
+              order_by: title
+bases:
+  dated:
+    description: Work that starts on a day
+    columns:
+      - name: started_on
+        type: date
+        description: When the work began
+      - name: summary
+        type: string
+        description: One line about it

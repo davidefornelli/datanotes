@@ -1,0 +1,125 @@
+name: CI
+
+# Tests run on every push to main, on the commits of pull requests that are not drafts (marking a
+# draft "Ready for review" runs them), and when run by hand (Actions > CI > Run workflow).
+# Every job has a time limit: a test that hangs would otherwise run for up to six hours.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run of the previous one; every push to main is tested.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Layers, types, the CLI bundle and the npm package.
+  checks:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/check-layers.mjs
+      - run: npx tsc -noEmit -skipLibCheck
+      - run: npm run build:service
+      - run: node dist/datanotes.cjs --version
+      # the published types: attw, publint and a consumer compiled with nodenext, node16, bundler
+      - run: npm run check:package
+      - run: npm pack --dry-run
+
+  # Every test, the engine tests on the fake App of tests/helpers/db-vault.ts (an Obsidian stand-in
+  # over a temporary folder), with the coverage thresholds of vitest.config.ts (a ratchet,
+  # CONTRIBUTING.md "Test coverage"): the pure engine modules stay at 100%, the whole code base
+  # never goes below its floor. Once, on Linux with the oldest Node supported.
+  coverage:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage
+
+  # The tests on the headless Node host, the code users run, on Linux, Windows and macOS with every
+  # Node version supported: file watching, renames, locked files, case sensitivity, long paths and
+  # line endings differ between them. On Linux with Node 22 only the files the host changes run
+  # (VAULT_HOST_TESTS_ONLY, vitest.node.config.ts): the others do the same on either host and
+  # already ran in `coverage`. Windows needs Node 24.16.0 or later, or 26.1.0 or later: earlier
+  # versions abort at random (0xC0000409) on TCP connects to 127.0.0.1, which the tests make all the
+  # time (libuv bug). So Windows skips Node 22, and `check-latest` keeps an older Node of the runner
+  # image from being used.
+  # On Linux with Node 22, the test files a push to a pull request adds or changes then run twice
+  # more, on both hosts, so three runs in all: a test that passes only sometimes is caught before it
+  # is merged. Only the files of this push (since the previous one), not of the whole branch, so a
+  # long-lived branch does not repeat everything.
+  test-node:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: test-node (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24, 26]
+        exclude:
+          - os: windows-latest
+            node: 22
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 45 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          check-latest: true
+          cache: npm
+      - name: Node 24.16 or later, or 26.1 or later, on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          node -e '
+            const [major, minor] = process.versions.node.split(".").map(Number);
+            const ok = (major === 24 && minor >= 16) || (major === 26 && minor >= 1) || major > 26;
+            if (!ok) {
+              console.error(`Node ${process.version} aborts at random on Windows: use 24.16+ or 26.1+`);
+              process.exit(1);
+            }'
+      - run: npm ci
+      - run: npx vitest run --config vitest.node.config.ts
+        env:
+          VAULT_HOST_TESTS_ONLY: ${{ matrix.os == 'ubuntu-latest' && matrix.node == 22 && '1' || '' }}
+      - name: Test files changed by this push, two more runs each
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && matrix.node == 22
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # the previous push of the pull request; its base when it was just opened
+          from="origin/$BASE_REF"
+          if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then from="$BEFORE"; fi
+          # a pathspec `*` also matches `/`, so this takes test files in subfolders too
+          files=$(git diff --name-only --diff-filter=AM "$from...HEAD" -- 'tests/*.test.ts')
+          if [ -z "$files" ]; then echo "no test file added or changed"; exit 0; fi
+          echo "$files"
+          for i in 1 2; do
+            npx vitest run $files
+            npx vitest run --config vitest.node.config.ts $files
+          done

@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose something Datanotes should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. Datanotes 3 adds features but never takes one away, so every
+        new operation, argument, field, route, option or setting needs an approved issue before
+        a pull request. See "What we accept" in [CONTRIBUTING.md](https://github.com/davidefornelli/datanotes/blob/main/CONTRIBUTING.md).
+
+        To ask how to do something, use [Discussions](https://github.com/davidefornelli/datanotes/discussions) instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and why it is hard or impossible today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your proposal
+      description: What Datanotes should do. Name the operations, arguments or settings you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways to solve it, and the workarounds you use now.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to open the pull request once the issue is approved.

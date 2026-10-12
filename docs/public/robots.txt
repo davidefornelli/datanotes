@@ -1,0 +1,8 @@
+# Datanotes documentation: open to search engines and AI agents.
+# Every page also has a Markdown version (/<page>.md); an index for language models is at /llms.txt.
+
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
+Allow: /
+
+Sitemap: https://datanotes.dev/sitemap-index.xml

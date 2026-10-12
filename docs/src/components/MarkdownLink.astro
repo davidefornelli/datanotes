@@ -1,0 +1,21 @@
+---
+// Starlight's EditLink slot, in the page footer: the site sets no `editLink`, so this shows the link
+// to the page as Markdown (src/markdown-pages/), next to Starlight's own edit link if one is ever set.
+import Default from "@astrojs/starlight/components/EditLink.astro";
+import { markdownPathOf } from "../markdown-pages/paths.js";
+
+const { entry } = Astro.locals.starlightRoute;
+---
+
+<Default />
+{entry.id !== "404" && <a class="print:hidden" href={markdownPathOf(Astro.url.pathname)} type="text/markdown">View as Markdown</a>}
+
+<style>
+  a {
+    text-decoration: none;
+    color: var(--sl-color-gray-3);
+  }
+  a:hover {
+    color: var(--sl-color-white);
+  }
+</style>
