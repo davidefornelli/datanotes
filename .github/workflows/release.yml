@@ -144,4 +144,5 @@ jobs:
           package-manager-cache: false
       # trusted publishing needs npm 11.5.1 or later; an exact version, not a range or "latest"
       - run: npm install -g npm@11.20.0
-      - run: npm publish ./datanotes-*.tgz --access public
+      # verbose: npm logs the trusted-publishing (OIDC) exchange, never the token
+      - run: npm publish ./datanotes-*.tgz --access public --loglevel verbose
