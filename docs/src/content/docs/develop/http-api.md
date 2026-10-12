@@ -36,7 +36,7 @@ An operation’s body takes the same arguments as the agent’s tool of the same
 - **[`list_folder`](/reference/operations/queries/#list_folder)**: the notes and folders in a `folder`
 - **[`search_notes`](/reference/operations/queries/#search_notes)**: the notes that contain a `query`
 
-Every route and field keeps working in every 3.x version: see [Compatibility](/reference/compatibility/).
+Routes and fields follow semantic versioning: see [Compatibility](/reference/compatibility/).
 
 ## Record who makes each write
 
