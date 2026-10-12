@@ -149,6 +149,12 @@ describe("a file name taken in another case", () => {
     expect(existingPathIgnoringCase(app, `${DIR}/dune.md`)).toBe(`${DIR}/Dune.md`);
     expect(existingPathIgnoringCase(app, DIR.toLowerCase())).toBe(DIR);
     expect(existingPathIgnoringCase(app, `${DIR}/Emma.md`)).toBeNull();
+    // a host that lists folders but finds no file by path: the listed child is followed
+    const dune = { path: "/Shelf/Dune.md", name: "Dune.md" };
+    const shelf = { path: "/Shelf", children: [dune] };
+    const listed = { vault: { getRoot: () => ({ path: "/", children: [shelf] }), getAbstractFileByPath: () => null } } as never;
+    expect(existingPathIgnoringCase(listed, "shelf/dune.md")).toBe("Shelf/Dune.md");
+    expect(existingPathIgnoringCase(listed, "shelf/emma.md")).toBeNull();
   });
 
   it("a passed path is refused with the standard error naming the note; dry_run says the same and writes nothing", async () => {

@@ -510,7 +510,7 @@ async function cloneTableImpl(app: App, settings: DatanotesSettings, input: Clon
     src = await loadTable(app, settings, input.source);
     rows = input.shallow ? [] : await loadRows(app, settings, src);
   }
-  const ref = await newRef(app, settings, { name: input.target }, { catalog: src.def.catalog ?? "", schema: src.def.schema });
+  const ref = await newRef(app, settings, { name: input.target }, { catalog: src.def.catalog, schema: src.def.schema });
   const { text, model } = await metastoreOrEmpty(app, settings);
   const conflicts: OpConflict[] = [];
   if (nameTaken(model, ref)) conflicts.push({ path: ref.full, message: `${ref.full} already exists` });
@@ -579,13 +579,8 @@ export interface DefineBaseInput {
 /** Tables that inherit `base` (directly or through other bases). */
 function tablesInheriting(model: Metastore, base: string): CatalogRef[] {
   return catalogTables(model)
-    .filter(({ entry }) => {
-      try {
-        return baseChain(model.bases, (entry.bases as string[] | undefined) ?? []).includes(base);
-      } catch {
-        return false;
-      }
-    })
+    // a parsed metastore names known bases, without cycles: the chain is always there
+    .filter(({ entry }) => baseChain(model.bases, (entry.bases as string[] | undefined) ?? []).includes(base))
     .map(({ ref }) => ref);
 }
 
@@ -822,13 +817,9 @@ async function setTableBasesImpl(app: App, settings: DatanotesSettings, input: S
   const { bases: _e, ...rest } = cat.entry;
   const entry: CatalogTableEntry = { ...rest, ...(input.bases.length > 0 ? { bases: input.bases } : {}), columns: own };
   const after = setTableEntry(text, cat.ref, entry);
-  let next: Metastore;
-  try {
-    next = parseMetastore(after);
-    effectiveColumns(next, cat.ref, entry);
-  } catch (e) {
-    throw new OperationInputError(messageOf(e));
-  }
+  // the bases exist and their columns agree (inheritedColumns above); the own columns keep only
+  // what the bases do not define: the entry parses and its columns resolve
+  const next = parseMetastore(after);
   const cs = emptyChangeSet("set_table_bases", `${cat.ref.full} extends ${input.bases.join(", ") || "nothing"}`, t.def.schemaPath);
   cs.texts.push({ path: metastorePath(settings), before: text, after });
   const violations = await planInheritedRows(app, settings, next, after, [cat.ref], (o) => o, cs);

@@ -322,7 +322,7 @@ describe("a copied database, a moved vault", () => {
 });
 
 /** Make `fs[name]` fail with `code` for the calls `when` picks (its first argument), until restored. */
-function failing(name: "renameSync" | "writeFileSync" | "copyFileSync", when: (first: string) => string | null): () => void {
+function failing(name: "renameSync" | "writeFileSync" | "copyFileSync" | "readFileSync" | "statSync", when: (first: string) => string | null): () => void {
   const real = fs[name] as (...a: unknown[]) => unknown;
   (fs as unknown as Record<string, unknown>)[name] = (...a: unknown[]) => {
     const code = when(String(a[0]));
@@ -531,5 +531,173 @@ describe("two starts on the same vault at once", () => {
     expect(fs.existsSync(left)).toBe(false);
     // with --store, the lock is in the store
     expect(setupLockFile(home, path.join(home, "s"), vault)).toBe(path.join(home, "s", "setup.lock"));
+  });
+});
+
+describe("the setup lock: what another start left", () => {
+  /** Write the setup lock of `vault` as another start would have, with `text`. */
+  function leave(home: string, vault: string, text: string): string {
+    const file = setupLockFile(home, undefined, vault);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+    return file;
+  }
+  const lockOf = (pid: number, at: Date, host = os.hostname()) => JSON.stringify({ pid, host, at: at.toISOString() });
+
+  it("a start of another machine holds it until it is old: waited for, then refused", () => {
+    const vault = tmp();
+    const home = tmp();
+    const file = leave(home, vault, lockOf(4242, new Date(), "another-machine"));
+    expect(() => open(vault, home, { setupWaitMs: 150 })).toThrow(`another engine is starting on this vault (pid 4242 on another-machine): it holds ${file}`);
+    // ten minutes old: the start is gone, its lock taken over
+    fs.writeFileSync(file, lockOf(4242, new Date(Date.now() - 11 * 60_000), "another-machine"));
+    expect(open(vault, home, { setupWaitMs: 150 }).id).toBeTruthy();
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("a lock naming this very process, or written before the machine started, is left over", () => {
+    const vault = tmp();
+    const home = tmp();
+    const file = leave(home, vault, lockOf(process.pid, new Date()));
+    open(vault, home, { setupWaitMs: 150 });
+    expect(fs.existsSync(file)).toBe(false);
+    // another vault: the first start holds the store of this one
+    const other = tmp();
+    const left = leave(home, other, lockOf(process.ppid, new Date(Date.now() - os.uptime() * 1000 - 60_000)));
+    open(other, home, { setupWaitMs: 150 });
+    expect(fs.existsSync(left)).toBe(false);
+  });
+
+  it("a lock that cannot be read (half written, or not a lock): waited for while new, taken over once 5 s old", () => {
+    const vault = tmp();
+    const home = tmp();
+    const file = leave(home, vault, "{");
+    expect(() => open(vault, home, { setupWaitMs: 150 })).toThrow(`another engine is starting on this vault (another process): it holds ${file}`);
+    fs.writeFileSync(file, JSON.stringify({ pid: "1" }));
+    expect(() => open(vault, home, { setupWaitMs: 150 })).toThrow("(another process)");
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(file, old, old);
+    open(vault, home, { setupWaitMs: 150 });
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("a lock gone before its time could be read is taken over", () => {
+    const vault = tmp();
+    const home = tmp();
+    const file = leave(home, vault, "{");
+    const undo = failing("statSync", (p) => (p === file ? "ENOENT" : null));
+    try {
+      open(vault, home, { setupWaitMs: 5_000 });
+    } finally {
+      undo();
+    }
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("a lock that cannot be read for a moment is read again", () => {
+    const vault = tmp();
+    const home = tmp();
+    const file = leave(home, vault, lockOf(process.pid, new Date()));
+    // the first read fails (held by the system), then the second read of the left-over check
+    let reads = 0;
+    const undo = failing("readFileSync", (p) => (p === file && [1, 3].includes(++reads) ? "EBUSY" : null));
+    try {
+      open(vault, home, { setupWaitMs: 5_000 });
+    } finally {
+      undo();
+    }
+    expect(reads).toBeGreaterThanOrEqual(4);
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("a lock that cannot be created for another reason fails the start at once", () => {
+    const vault = tmp();
+    const home = tmp();
+    const file = setupLockFile(home, undefined, vault);
+    const real = fs.writeFileSync;
+    let calls = 0;
+    (fs as unknown as Record<string, unknown>).writeFileSync = (...a: unknown[]) => {
+      if (a[0] === file) {
+        calls++;
+        throw new Error("the disk went away"); // an error without a code
+      }
+      return (real as (...b: unknown[]) => unknown)(...a);
+    };
+    try {
+      expect(() => open(vault, home)).toThrow("the disk went away");
+    } finally {
+      (fs as unknown as Record<string, unknown>).writeFileSync = real;
+    }
+    expect(calls).toBe(1);
+    const undo = failing("writeFileSync", (p) => (p === file ? "ENOSPC" : null));
+    try {
+      expect(() => open(vault, home)).toThrow(/^ENOSPC/);
+    } finally {
+      undo();
+    }
+  });
+
+  it("a lock removed by someone else while the start sets up: the release has nothing to do", () => {
+    const vault = tmp();
+    const home = tmp();
+    const file = setupLockFile(home, undefined, vault);
+    const r = open(vault, home, {
+      files: () => {
+        fs.rmSync(file);
+        return files(vault);
+      },
+    });
+    expect(r.id).toBeTruthy();
+    expect(fs.existsSync(file)).toBe(false);
+  });
+});
+
+describe("store records and the registry, in odd shapes", () => {
+  it("a --store record that is not an object is no record; the process environment when none is given", () => {
+    const vault = tmp();
+    const store = tmp();
+    write(vault, "Datanotes/metastore.yaml", `id: ${ID}\n${META}`);
+    fs.writeFileSync(path.join(store, "store.json"), "[1, 2]");
+    const r = openStore({ vault, store, files: () => files(vault) });
+    expect(r).toMatchObject({ store: path.resolve(store), id: ID, database: "Datanotes", home: null });
+    expect(JSON.parse(read(store, "store.json"))).toMatchObject({ id: ID, database: "Datanotes" });
+  });
+
+  it("a database without an id in another folder than the registry knew: a new id, not the registry's", () => {
+    const vault = tmp();
+    const home = tmp();
+    write(vault, "Datanotes/metastore.yaml", META);
+    const first = open(vault, home);
+    fs.rmSync(first.store, { recursive: true });
+    fs.rmSync(path.join(vault, "Datanotes"), { recursive: true });
+    write(vault, "Elsewhere/metastore.yaml", META);
+    const second = open(vault, home);
+    expect(second.database).toBe("Elsewhere");
+    expect(second.id).not.toBe(first.id);
+    expect(second.idAdded).toBe(true);
+  });
+
+  it("a store whose record names another vault without a database folder: the default folder is checked", () => {
+    const vault = tmp();
+    const home = tmp();
+    const other = tmp();
+    write(vault, "Datanotes/metastore.yaml", `id: ${ID}\n${META}`);
+    write(other, "Datanotes/metastore.yaml", `id: ${ID}\n${META}`);
+    fs.mkdirSync(path.join(home, ID), { recursive: true });
+    fs.writeFileSync(path.join(home, ID, "store.json"), JSON.stringify({ id: ID, vault: other }));
+    expect(() => open(vault, home)).toThrow(`this database (id ${ID}) is a copy: the vault ${other} holds it too`);
+  });
+});
+
+describe("retried file operations", () => {
+  it("an error without a code is not retried", () => {
+    let calls = 0;
+    expect(() =>
+      retrying(() => {
+        calls++;
+        throw new Error("not a file error");
+      }),
+    ).toThrow("not a file error");
+    expect(calls).toBe(1);
   });
 });

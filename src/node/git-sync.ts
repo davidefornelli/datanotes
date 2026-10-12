@@ -85,13 +85,9 @@ export function gitEnv(env: NodeJS.ProcessEnv = process.env, sshCommand = false)
 /** End a process and the ones it started (git starts ssh, a credential helper). */
 function killTree(pid: number | undefined, child: ChildProcess): void {
   if (pid === undefined) return;
-  if (process.platform === "win32") {
-    try {
-      spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => undefined);
-    } catch {
-      child.kill();
-    }
-  } else child.kill("SIGKILL");
+  // a taskkill that cannot run is an error event (spawn throws only on bad arguments, and these are fixed)
+  if (process.platform === "win32") spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => undefined);
+  else child.kill("SIGKILL");
 }
 
 /** Per folder: whether git's config names an SSH command (asked once). */
@@ -286,7 +282,8 @@ export class GitSync {
   }
 
   private async git(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-    return this.run(args, this.repo ?? this.o.vault, { signal: this.killer.signal });
+    // only after start() found the repository: every caller runs once it is set
+    return this.run(args, this.repo!, { signal: this.killer.signal });
   }
 
   /** Aborted by {@link kill}: the git still running is killed. */

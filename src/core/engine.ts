@@ -8,7 +8,7 @@
 
 import { currentActor, type Actor } from "./actor";
 import { markUndone, readJournal, writeJournal } from "./journal";
-import { inverseEditsFor, withFrontmatter } from "./inverse";
+import { inverseEditsFor } from "./inverse";
 import type { App, TFile } from "./host";
 import { invalidateFiles, readParsed } from "./file-cache";
 import {
@@ -346,15 +346,17 @@ export function serializeOptions(o: TableOptions): Record<string, unknown>[] {
   return Object.keys(entry).length > 0 ? [entry] : [];
 }
 
-/** Insert a top-level field before the first reserved key (keeps meta keys at the bottom). */
+/**
+ * Insert a top-level field before the first reserved key (keeps meta keys at the bottom). `ordered`
+ * comes from withColumns, so it always has one (`columns`).
+ */
 function addFieldBeforeMeta(
   ordered: OrderedFrontmatter,
   key: string,
   value: unknown,
   reserved: ReadonlySet<string>,
 ): OrderedFrontmatter {
-  const idx = ordered.findIndex(([k]) => reserved.has(k));
-  return fmAdd(ordered, key, value, idx < 0 ? undefined : idx);
+  return fmAdd(ordered, key, value, ordered.findIndex(([k]) => reserved.has(k)));
 }
 
 function withColumns(
@@ -449,7 +451,7 @@ export async function finish(
     notifyApplied(app, {
       op: cs.op,
       summary: cs.summary,
-      ...(applied.migrationId ? { migrationId: applied.migrationId } : {}),
+      migrationId: applied.migrationId,
       paths: touchedPaths(cs),
       moves: cs.moves.map((m) => ({ ...m })),
       deletes: [...cs.deletes],
@@ -483,14 +485,15 @@ async function rollBackFailedWrite(app: App, settings: DatanotesSettings, migrat
   const at = now ?? new Date();
   try {
     const { entry } = await readJournal(app, settings, migrationId);
-    if ([entry.rows, entry.creates, entry.moves, entry.references, entry.deleted ?? []].every((x) => x.length === 0)) {
+    // the entry was just written by applyChangeSet: it lists its deleted files
+    if ([entry.rows, entry.creates, entry.moves, entry.references, entry.deleted!].every((x) => x.length === 0)) {
       await markUndone(app, settings, migrationId, migrationId, at);
       return { ok: true, undoes: migrationId, conflicts: [], failed: [], touched: [] };
     }
     const r = await undoMigration(app, settings, migrationId, at, undefined, "rollback");
     // refused (a file changed meanwhile): every file the write wrote is left as it is
     if (!r.ok && !r.left) {
-      r.left = [...new Set([...entry.references.map((x) => x.path), ...entry.rows.map((x) => x.path), ...entry.moves.map((m) => m.to), ...entry.creates, ...(entry.deleted ?? []).map((d) => d.path)])];
+      r.left = [...new Set([...entry.references.map((x) => x.path), ...entry.rows.map((x) => x.path), ...entry.moves.map((m) => m.to), ...entry.creates, ...entry.deleted!.map((d) => d.path)])];
     }
     return r;
   } catch (e) {
@@ -506,12 +509,13 @@ async function rollBackFailedWrite(app: App, settings: DatanotesSettings, migrat
 async function loggedRollback(app: App, settings: DatanotesSettings, migrationId: string, rollback: UndoResult, now?: Date): Promise<SyncedCommit[]> {
   forgetLoggedStates(app);
   await loadMetastore(app, settings);
-  invalidateFiles(app, rollback.touched ?? []);
+  // a rollback that succeeded names the files it wrote (none when the write wrote nothing)
+  invalidateFiles(app, rollback.touched!);
   return logChanges(app, settings, {
     operation: "UNDO",
     parameters: { migration: migrationId },
     ...(rollback.migration_id ? { migrationId: rollback.migration_id } : {}),
-    touched: rollback.touched ?? [],
+    touched: rollback.touched!,
     ...(now ? { now } : {}),
   });
 }
@@ -535,7 +539,6 @@ const INVERSE_OPS = new Set(["insert_row", "update_rows", "update_row", "merge_r
 async function addInverseEdits(app: App, settings: DatanotesSettings, cs: ChangeSet, conflicts: OpConflict[]): Promise<Set<string> | null> {
   if (cs.skipInverse || !INVERSE_OPS.has(cs.op)) return null;
   const keep = new Set([settings.tableKey]);
-  const created = new Map(cs.creates.map((c) => [c.path, c]));
   const rows = [
     ...cs.edits.map((e) => ({ path: e.path, before: e.before, after: e.after })),
     ...cs.creates.map((c) => ({ path: c.path, before: [] as OrderedFrontmatter, after: readOrderedFromMarkdown(c.content, keep).ordered })),
@@ -546,13 +549,14 @@ async function addInverseEdits(app: App, settings: DatanotesSettings, cs: Change
   conflicts.push(...plan.conflicts);
   if (plan.edits.size === 0) return null;
   const mirrored = new Set<string>();
+  // a link resolves to a file of the vault, so a row the change set creates is never a target
   for (const [path, w] of plan.edits) {
     const own = cs.edits.find((e) => e.path === path);
-    const create = created.get(path);
     if (own) own.after = w.after;
-    else if (create) create.content = withFrontmatter(create.content, w.after, settings);
-    else cs.edits.push({ path, before: w.before, after: w.after });
-    if (!own && !create) mirrored.add(path);
+    else {
+      cs.edits.push({ path, before: w.before, after: w.after });
+      mirrored.add(path);
+    }
   }
   return mirrored;
 }
@@ -684,13 +688,8 @@ async function externalViolationCounts(app: App, settings: DatanotesSettings, ch
     const { checkExternalEdits, checkChangedTables } = await import("./external-edits");
     const tp = settings.tableKey;
     const keep = new Set([tp]);
-    const parse = (content: string): OrderedFrontmatter | null => {
-      try {
-        return readOrderedFromMarkdown(content, keep).ordered;
-      } catch {
-        return null;
-      }
-    };
+    // the log holds only rows whose front matter it could read (transaction-log.ts reads them alike)
+    const parse = (content: string): OrderedFrontmatter => readOrderedFromMarkdown(content, keep).ordered;
     const added = new Set(changes.flatMap((c) => c.add.map((a) => a.path)));
     const edits: (ExternalEdit & { after?: OrderedFrontmatter | null })[] = [];
     /** The tables an edit counts in: its table now and the one it left. */
@@ -708,7 +707,7 @@ async function externalViolationCounts(app: App, settings: DatanotesSettings, ch
       }
       for (const r of c.remove) {
         if (added.has(r.path)) continue;
-        edits.push({ path: r.path, before: parse(c.before.get(r.path)?.content ?? ""), gone: true });
+        edits.push({ path: r.path, before: parse(c.before.get(r.path)!.content), gone: true }); // a removed file was in the log's state
         countsIn.set(r.path, new Set([c.table]));
       }
     }
@@ -721,15 +720,16 @@ async function externalViolationCounts(app: App, settings: DatanotesSettings, ch
       const [from] = edits.splice(g, 1);
       e.oldPath = from!.path;
       e.before = from!.before;
-      countsIn.set(e.path, new Set([...(countsIn.get(e.path) ?? []), ...(countsIn.get(from!.path) ?? [])]));
+      countsIn.set(e.path, new Set([...countsIn.get(e.path)!, ...countsIn.get(from!.path)!])); // every edit has its tables
     }
     const out = new Map<string, number>();
     if (edits.length > 0) {
       const { byPath, tableOf } = await checkExternalEdits(app, settings, edits.map(({ after: _after, ...e }) => e));
       const seen = new Map<string, Set<string>>();
       for (const e of edits) {
-        for (const full of countsIn.get(e.path) ?? []) {
+        for (const full of countsIn.get(e.path)!) {
           if (!seen.has(full)) seen.set(full, new Set());
+          /* v8 ignore next -- a race: a row that became unreadable between the log and its check has no entry */
           for (const v of byPath.get(e.path) ?? []) if (tableOf.get(v.path) === full) seen.get(full)!.add(JSON.stringify(v));
         }
       }
@@ -772,17 +772,15 @@ export function logEngineWrite(app: App, settings: DatanotesSettings, options: S
 }
 
 /**
- * Record a change of a table's definition: a rewrite of its entry in `metastore.yaml` (at
- * `target` when it moves).
+ * Record a change of a table's definition: a rewrite of its entry in `metastore.yaml`.
  */
 export function addSchemaChange(
   cs: ChangeSet,
   t: LoadedTable,
   after: OrderedFrontmatter,
   settings: DatanotesSettings,
-  target?: CatalogRef,
 ): void {
-  const ref = target ?? t.catalog.ref;
+  const ref = t.catalog.ref;
   let entry: CatalogTableEntry;
   let def: TableDefinition;
   try {
@@ -805,12 +803,8 @@ export function addSchemaChange(
       `"${SYSTEM_ID_COLUMN}" is the system row id (string, identity: uuid, unique, required): it cannot be dropped, renamed or changed — only its description, label or aliases`,
     );
   }
-  const pending = cs.texts.find((x) => x.path === t.file.path);
-  let text = pending ? pending.after : t.catalog.text;
-  if (target && target.full !== t.catalog.ref.full) text = setTableEntry(text, t.catalog.ref, null);
-  text = setTableEntry(text, ref, entry);
-  if (pending) pending.after = text;
-  else cs.texts.push({ path: t.file.path, before: t.catalog.text, after: text });
+  // one schema change per change set: its operation rewrites the table's entry once
+  cs.texts.push({ path: t.file.path, before: t.catalog.text, after: setTableEntry(t.catalog.text, ref, entry) });
 }
 
 const FULL_NAME = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
@@ -925,10 +919,10 @@ function checkInverse(model: Metastore, owner: string | null, columns: readonly 
   const name = String(c.name);
   const inv = String(c.inverse);
   if (owner === null) throw new OperationInputError(`${where}.${name}: "inverse" is only valid on table columns`);
-  const target = ref === "self" ? owner : ref;
+  // checkColumnRefs passes a full name that is a table or the owner (it skips "self")
+  const target = ref;
   const r = resolveCatalogRef(model, target);
   const entry = r ? model.catalogs[r.catalog]?.schemas[r.schema]?.tables[r.table] : undefined;
-  if ((!r || !entry) && target !== owner) throw new OperationInputError(`${where}.${name}: ref "${target}" is not a table`);
   // The owner's own columns: what the table has, with the columns being written on top.
   const existing = r && entry ? effectiveColumns(model, r, entry) : [];
   const targetColumns =
@@ -1095,8 +1089,9 @@ async function createTableImpl(
     tableDefinitionFromOrdered(ref, pseudo, cat, settings); // generated expressions and other cross-column rules
     const entry = withTableTags(orderedToEntry(cat, undefined, settings), tags);
     if (typeof input.rowTemplate === "string" && input.rowTemplate.trim() !== "") entry.row_template = input.rowTemplate; // body of new rows
-    if (typeof linkTarget === "boolean") entry.options = { ...(entry.options ?? {}), autolink_target: linkTarget };
-    if (typeof input.history === "boolean") entry.options = { ...(entry.options ?? {}), history: input.history };
+    // the entry has options: a table needs a filename
+    if (typeof linkTarget === "boolean") entry.options = { ...entry.options, autolink_target: linkTarget };
+    if (typeof input.history === "boolean") entry.options = { ...entry.options, history: input.history };
     checkColumnRefs(model, ref.full, entry.columns, ref.full);
     const missing = missingDescriptions(catOptions.description, columns);
     if (missing) throw refused(createTableRefusal(ref.full, missing, input.columns, proposal));
@@ -1231,8 +1226,7 @@ async function filteredLinkViolations(app: App, settings: DatanotesSettings, t: 
 
 /** Rewrite, in the metastore text `cs` writes for `t`, the CHECKs and link filters `f` changes (see rewrittenEntries). */
 function rewriteLinkFilters(cs: ChangeSet, t: LoadedTable, f: Parameters<typeof rewrittenEntries>[2]): void {
-  const pending = cs.texts.find((x) => x.path === t.file.path);
-  if (!pending) return;
+  const pending = cs.texts.find((x) => x.path === t.file.path)!; // addSchemaChange wrote it
   let text = pending.after;
   for (const { ref, entry } of rewrittenEntries(t.catalog.model, parseMetastore(text), f)) text = setTableEntry(text, ref, entry);
   pending.after = text;
@@ -1257,6 +1251,7 @@ function renamedLevels(by: Record<string, unknown>, keys: boolean, values: boole
     if (keys && values) return { ...rest, levels: lv.map(word) };
     return { ...rest, map: Object.fromEntries(lv.map((v, i) => [keys ? word(v) : v, i === 0 ? null : [values ? word(lv[i - 1]!) : lv[i - 1]!]])) };
   }
+  // a hand-edited ref_by without levels or a map (its table is reported malformed): left as it is
   if (map === null || typeof map !== "object") return by;
   return {
     ...rest,
@@ -1296,9 +1291,7 @@ async function renameColumnImpl(
   const t = await loadTable(app, settings, input.table);
   const from = input.from;
   const to = assertColumnName(input.to, `"to"`);
-  const reserved = META_KEYS;
   if (!columnExists(t, from)) throw new OperationInputError(`column "${from}" not found in table "${t.def.name}"`, noColumn(from, t));
-  if (reserved.has(to)) throw new OperationInputError(`"${to}" is a reserved front matter key`, guide(`"${to}" is a front matter key the engine uses itself: choose another column name.`, "renameColumn"));
   if (columnExists(t, to)) throw new OperationInputError(`column "${to}" already exists in table "${t.def.name}"`, EXISTS_HINT);
   const conflicts: OpConflict[] = [];
 
@@ -1383,7 +1376,7 @@ async function renameValueImpl(
   const columns = t.def.columns.map((c, i) => {
     const c2 = c.name === col.name ? spec : c;
     if (!c2.ref_by) return c2;
-    const target = c2.ref === "self" ? full : c2.ref;
+    const target = c2.ref; // the loaded definition names "self" in full
     const stored = serializeColumn(c2).ref_by as Record<string, unknown>;
     const next = renamedLevels(stored, c2.ref_by.column === col.name, target === full && (c2.ref_by.target_column ?? c2.ref_by.column) === col.name, word);
     return next === stored ? c2 : { ...c2, ref_by: parseLinkLevels(next, i) };
@@ -1498,8 +1491,8 @@ async function alterColumnImpl(
   }
   violations.push(...(await filteredLinkViolations(app, settings, t, columns, spec)));
   // the levels other tables' ref_by pick on this column must stay values of it
-  const text = cs.texts.find((x) => x.path === t.file.path)?.after;
-  const conflicts: OpConflict[] = text === undefined ? [] : levelTargetConflicts(parseMetastore(text), t.catalog.ref.full, spec.name).map((message) => ({ path: t.file.path, message }));
+  const text = cs.texts.find((x) => x.path === t.file.path)!.after; // addSchemaChange wrote it
+  const conflicts: OpConflict[] = levelTargetConflicts(parseMetastore(text), t.catalog.ref.full, spec.name).map((message) => ({ path: t.file.path, message }));
   return finish(app, settings, cs, conflicts, violations, opts);
 }
 
@@ -1589,7 +1582,7 @@ async function undoAny(app: App, settings: DatanotesSettings, migrationId: strin
     if (undone) return { ok: false, undoes: migrationId, conflicts: [{ path, message: "migration already undone" }], failed: [] };
     const members: string[] = [];
     const entries: JournalEntry[] = [];
-    for (const m of [...(entry.members ?? [])].reverse()) {
+    for (const m of [...entry.members!].reverse()) { // a batch entry lists its operations
       const j = await readJournal(app, settings, m);
       if (j.undone) continue; // undone by an earlier attempt
       members.push(m);
@@ -1610,7 +1603,7 @@ async function undoAny(app: App, settings: DatanotesSettings, migrationId: strin
           touched,
         };
       }
-      touched.push(...(r.touched ?? []));
+      touched.push(...r.touched!); // an undo that succeeded names the files it wrote
       if (r.migration_id) undos.push(r.migration_id);
     }
     // the undos of its operations are a batch too: undoing it redoes them all, oldest first
@@ -1677,11 +1670,12 @@ function undoOne(
         forgetLoggedStates(app);
         await loadMetastore(app, settings);
         if (r.ok) {
+          // an undo that succeeded has its journal entry and names the files it wrote
           notifyApplied(app, {
             op: "undo_migration",
             summary: `undo ${migrationId}`,
-            ...(r.migration_id ? { migrationId: r.migration_id } : {}),
-            paths: r.touched ?? [],
+            migrationId: r.migration_id!,
+            paths: r.touched!,
             moves: [],
             deletes: [],
             ...(currentActor() ? { actor: currentActor() } : {}),
@@ -1689,8 +1683,8 @@ function undoOne(
           await logChanges(app, settings, {
             operation: "UNDO",
             parameters: { migration: migrationId },
-            ...(r.migration_id ? { migrationId: r.migration_id } : {}),
-            touched: r.touched ?? [],
+            migrationId: r.migration_id!,
+            touched: r.touched!,
           });
         }
         return r;

@@ -275,6 +275,9 @@ describe("a tool's arguments", () => {
     expect(api.checkArguments("no_such_operation", { anything: 1 })).toBeNull();
     // any tool, from its own schema (the docs tools): a schema without arguments takes none
     expect(api.checkToolArguments("my_tool", {}, { x: 1 }, "https://example.com/my-tool")).toEqual({ message: 'my_tool: unknown argument "x"', hint: "my_tool takes: no arguments.", docs: "https://example.com/my-tool" });
+    // a list typed with several types (["array", "null"]): the wrong item is named
+    const labels = { properties: { labels: { type: ["array", "null"], items: { type: "string" } } } };
+    expect(api.checkToolArguments("my_tool", labels as never, { labels: ["red", 7] }, "https://example.com/my-tool")!.message).toBe('my_tool: "labels": item 7 must be a string');
     // every operation's own example of required arguments passes
     for (const op of OPERATIONS) {
       const schema = op.inputSchema as { required?: string[]; properties?: Record<string, { type?: string }> };

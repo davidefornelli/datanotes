@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { metastoreId, newDatabaseId, withMetastoreId } from "../src/core/database-id";
-import { databaseMoves, moveEntryPaths, moveLinks, movePath, moveValue, translateJournalEntry, type DatabaseMove } from "../src/core/database-move";
+import { appendDatabaseMove, databaseMoves, moveEntryPaths, moveLinks, movePath, moveValue, MOVES_FILE, translateJournalEntry, type DatabaseMove } from "../src/core/database-move";
 import { configureDatabase, recordDatabaseMove } from "../src/core/database";
 import { createTable, INDEX_RETRY, undoOperation } from "../src/core/engine";
 import { describeHistory, restoreTable, tableChanges } from "../src/core/history";
@@ -251,5 +251,24 @@ describe("journal entries as they read today", () => {
   it("the store's record of the moves skips torn lines", async () => {
     const v = createDbVault({ "store:database_moves.jsonl": `${JSON.stringify(move("2026-09-02T00:00:00.000Z"))}\n{"from":\n{"to":"x"}\n` });
     expect(await databaseMoves(v.app)).toEqual([move("2026-09-02T00:00:00.000Z")]);
+  });
+});
+
+describe("database moves at their edges", () => {
+  it("a note with no link to the database's names at the root is left as it is", () => {
+    expect(moveLinks("Plain text, [[Elsewhere]].", "", "films", ["metastore.yaml", "main"])).toBe("Plain text, [[Elsewhere]].");
+  });
+
+  it("an exclude list keeps a value that is no folder as it is", () => {
+    const entry = { columns: [], options: { exclude: ["Datanotes/old", 7] } } as unknown as Parameters<typeof moveEntryPaths>[0];
+    expect(moveEntryPaths(entry, "Datanotes", "Data")!.options!.exclude).toEqual(["Data/old", 7]);
+  });
+
+  it("a move appended to a file whose last line has no line break starts on a line of its own", async () => {
+    const v = createDbVault({});
+    const first: DatabaseMove = { from: "Datanotes", to: "Data", at: "2026-09-01T10:00:00.000Z", by: "configure_database" };
+    v.write(MOVES_FILE, JSON.stringify(first));
+    await appendDatabaseMove(v.app, { ...first, from: "Data", to: "Notes", at: "2026-09-02T10:00:00.000Z" });
+    expect((await databaseMoves(v.app)).map((m) => m.to)).toEqual(["Data", "Notes"]);
   });
 });

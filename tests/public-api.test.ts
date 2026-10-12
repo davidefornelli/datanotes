@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createPublicApi } from "../src/core/public-api";
-import { createDbVault, logVault, LOG_DIR, METASTORE } from "./helpers/db-vault";
+import { createPublicApi, describeTable } from "../src/core/public-api";
+import { createDbVault, logVault, LOG_DIR, METASTORE, withTables } from "./helpers/db-vault";
 import { INDEX_RETRY } from "../src/core/engine";
 import { described } from "./helpers/descriptions";
 
@@ -61,5 +61,24 @@ describe("public API", () => {
     expect(r.planned_creates[0]!.startsWith(`${LOG_DIR}/`)).toBe(true);
     const ops = await api.listMigrations({ op: "insert_row" });
     expect(ops.migrations[0]).toMatchObject({ by: "my-plugin / none" });
+  });
+});
+
+describe("describe_table", () => {
+  it("answers the table's own options: filename, history and autolink_target", async () => {
+    const v = logVault();
+    const yaml = v.read(METASTORE).replace("              archive: _archive\n", "              archive: _archive\n              history: false\n              autolink_target: true\n");
+    v.write(METASTORE, yaml);
+    const d = await describeTable(v.app, v.settings, "log");
+    expect(d.options).toEqual({ partition: "{occurred_at:YYYY/MM/DD}", filename: "{occurred_at:YYYY-MM-DD} {kind}", archive: "_archive" });
+    expect(d).toMatchObject({ history: false, autolink_target: true });
+  });
+
+  it("answers no options a table does not set", async () => {
+    const v = createDbVault({ [METASTORE]: withTables("plain:\n  columns:\n    - { name: title, type: string }\n") });
+    const d = await describeTable(v.app, v.settings, "plain");
+    expect(d.options).toEqual({});
+    expect(d).not.toHaveProperty("history");
+    expect(d).not.toHaveProperty("autolink_target");
   });
 });

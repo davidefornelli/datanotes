@@ -623,7 +623,7 @@ export class ChangeFeed {
           n += violations.length;
           for (const v of violations) {
             rows.add(v.path);
-            tables.add(tableOf.get(v.path) ?? out[i]!.table!);
+            tables.add(tableOf.get(v.path)!); // every violation is recorded with its table
           }
         }
         if (n > 0) {
@@ -681,7 +681,7 @@ export class ChangeFeed {
     const model = cachedMetastore(this.app, s);
     const table = model ? rowTableFull(model, fm[s.tableKey]) : null;
     if (!table) return null;
-    if ((this.excludedOf(model!, table) ?? []).some((dir) => path.startsWith(`${dir}/`))) return null;
+    if (this.excludedOf(model!, table)!.some((dir) => path.startsWith(`${dir}/`))) return null; // a table of the model
     const { [s.tableKey]: _t, position: _p, ...values } = fm;
     return { table, ...(typeof fm.id === "string" ? { id: fm.id } : {}), values };
   }
@@ -1080,18 +1080,9 @@ function capped(violations: ExternalViolation[]): Pick<ChangeEvent, "violations"
 /** Tables whose entry `next` (a metastore.yaml text) has and `prev` lacks or has otherwise. */
 function changedTables(prev: string | null, next: string | null): string[] {
   if (next === null) return [];
-  let after: Metastore;
-  let before: Metastore | null = null;
-  try {
-    after = parseMetastore(next);
-  } catch {
-    return [];
-  }
-  try {
-    before = prev === null ? null : parseMetastore(prev);
-  } catch {
-    // the earlier text could not be read: every table counts as changed
-  }
+  // both are texts loadMetastore read, so they parse (a text it cannot parse is never kept)
+  const after = parseMetastore(next);
+  const before = prev === null ? null : parseMetastore(prev);
   const was = new Map(before ? catalogTables(before).map(({ ref, entry }) => [ref.full, JSON.stringify(entry)] as const) : []);
   return catalogTables(after)
     .filter(({ ref, entry }) => was.get(ref.full) !== JSON.stringify(entry))

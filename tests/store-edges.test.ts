@@ -14,6 +14,7 @@ describe("store paths", () => {
     expect(isStorePath("Datanotes/x.md")).toBe(false);
     expect(storeKey("store:journal/x/")).toBe("journal/x");
     expect(storeKey("store:")).toBe("");
+    expect(storeKey("/journal/x")).toBe("journal/x");
   });
 });
 

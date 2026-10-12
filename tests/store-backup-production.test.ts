@@ -83,6 +83,21 @@ describe("secrets never reach the change feed", () => {
     expect(redactToolCall("select_rows", { table: "t" }, { rows: [{ a: 1 }] })).toEqual({ args: { table: "t" }, value: { rows: [{ a: 1 }] } });
   });
 
+  it("redacts the arguments a catalogue entry marks sensitive, in objects and in a text", async () => {
+    // no operation of the catalogue marks arguments today: one that does, added before redact.ts reads it
+    vi.resetModules();
+    try {
+      const catalog = await import("../src/api/catalog");
+      catalog.OPERATIONS.push({ name: "open_safe", description: "", inputSchema: {}, sensitive: { args: ["combination"] } } as never);
+      const fresh = await import("../src/api/redact");
+      const r = fresh.redactToolCall("open_safe", { combination: "12-34", nested: { combination: "56" }, note: '{"combination": "78"}', room: "vault" }, { ok: true });
+      expect(r.args).toEqual({ combination: REDACTED, nested: { combination: REDACTED }, note: `{"combination": "${REDACTED}"}`, room: "vault" });
+      expect(r.value).toEqual({ ok: true });
+    } finally {
+      vi.resetModules();
+    }
+  });
+
   it("create_webhook through the MCP server: the agent gets the secret, the change feed and every backup commit never do", async () => {
     const vault = tmp("prod-backup-vault-");
     const store = tmp("prod-backup-store-");

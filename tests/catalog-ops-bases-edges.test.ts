@@ -263,3 +263,16 @@ describe("define_base", () => {
     });
   });
 });
+
+describe("define_base renames past a link to another table", () => {
+  it("a dotted ref_where of a base column linking to another table reads that table's columns", async () => {
+    const v = createDbVault({});
+    await configureDatabase(v.app, v.settings, { timezone: "Europe/Rome" }, async () => {});
+    expect((await createTable(v.app, v.settings, described({ schema: "plan", name: "person", options: { filename: "{name}" }, columns: [{ name: "name", type: "string" }, { name: "mentor", type: "link", ref: "self" }] }))).ok).toBe(true);
+    const lead = { name: "lead", type: "link", ref: "main.plan.person", ref_where: { "mentor.name": { ne: "Nobody" } } };
+    expect((await defineBase(v.app, v.settings, describedBase({ name: "staffed", columns: [{ name: "level", type: "enum", values: LEVELS }, lead] }))).ok).toBe(true);
+    const r = await defineBase(v.app, v.settings, describedBase({ name: "staffed", columns: [{ name: "tier", type: "enum", values: LEVELS }, lead], renameColumns: { level: "tier" } }));
+    expect(r.ok, JSON.stringify([r.conflicts, r.violations])).toBe(true);
+    expect(model(v).bases.staffed!.columns[1]!.ref_where).toEqual({ "mentor.name": { ne: "Nobody" } });
+  });
+});

@@ -1,3 +1,5 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -292,6 +294,31 @@ describe("datanotes mcp: starting an engine", () => {
     expect(engine.token).toBe("fake-owner-token");
   });
 
+  it("starts it with --database when the folder is the database", async () => {
+    const root = await emptyVault();
+    const { child } = await startEngine(root, [process.execPath, "-e", FAKE_ENGINE.replace('indexOf("--vault")', 'indexOf("--database")')], 10_000, 50, true);
+    child.kill();
+    expect(child.spawnargs.slice(-3)).toEqual(["serve", "--database", root]);
+  });
+
+  it("an engine that ends while it refuses the stop is not killed", async () => {
+    const child = Object.assign(new EventEmitter(), { exitCode: null as number | null, signalCode: null as string | null, kill: vi.fn() });
+    // the engine refuses the token, and ends at that moment (stopped by someone else)
+    const server = http.createServer((_req, res) => {
+      child.signalCode = "SIGTERM";
+      res.statusCode = 401;
+      res.end("{}");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      expect(await stopEngine(child as unknown as ChildProcess, { url, token: "stale-token" }, 10_000)).toBe("stopped");
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      server.close();
+    }
+  });
+
   it("stops it with POST /datanotes/stop/, and kills it only when it does not stop in time", async () => {
     expect(ENGINE_STOP_TIMEOUT_MS).toBe(35_000);
     // an engine that stops when asked
@@ -384,6 +411,19 @@ describe("datanotes mcp serve", () => {
     await run(["serve"], io);
     expect(io.out()).toContain("-> http://127.0.0.1:27150");
     expect(spy.mock.calls.map((c) => c[0])).toEqual(["SIGINT", "SIGTERM"]);
+  });
+
+  it("without --port or DATANOTES_MCP_PORT, port 27151", async () => {
+    const io = fakeIo();
+    const r = await run(["serve", "--url", engineUrl], io);
+    if (r) {
+      expect(r.url).toBe("http://127.0.0.1:27151/mcp");
+      await r.stop();
+    } else {
+      // a datanotes mcp of this machine already listens there
+      expect(io.err()).toMatch(/EADDRINUSE.*27151/);
+    }
+    await until(() => io.exits.length > 0);
   });
 });
 

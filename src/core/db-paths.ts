@@ -15,16 +15,6 @@ export function inDatabase(root: string, rel: string): string {
   return root === "" ? rel : `${root}/${rel}`;
 }
 
-/** Is the vault path `p` the database folder itself or inside it? Every path is, when the database is the root. */
-export function isInDatabase(root: string, p: string): boolean {
-  return root === "" || p === root || p.startsWith(`${root}/`);
-}
-
-/** `p` relative to the database folder `root` (as given when it is outside). */
-export function relativeToDatabase(root: string, p: string): string {
-  return root === "" ? p : p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p;
-}
-
 /**
  * A vault path after the database folder moved from `from` to `to`. A folder moves with what is
  * inside it; the root ("") does not move as a whole: only its database `entries` move (the catalog

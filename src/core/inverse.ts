@@ -14,7 +14,7 @@
 
 import type { App, TFile } from "./host";
 import { readParsed } from "./file-cache";
-import { buildMarkdownWithFrontmatter, fmGet, fmSet, readOrderedFromMarkdown } from "./frontmatter";
+import { fmGet, fmSet, readOrderedFromMarkdown } from "./frontmatter";
 import { cachedMetastore, catalogTables, effectiveColumns, loadMetastore, rowTableFull, type Metastore } from "./metastore";
 import type { DatanotesSettings } from "./settings";
 import type { OrderedFrontmatter } from "./types";
@@ -50,7 +50,7 @@ export function inverseSpecs(model: Metastore): Map<string, InverseSpec[]> {
   for (const [table, columns] of cols) {
     for (const c of columns) {
       if (typeof c.inverse !== "string" || typeof c.ref !== "string") continue;
-      const target = c.ref === "self" ? table : c.ref;
+      const target = c.ref; // effectiveColumns names "self" in full
       const back = cols.get(target)?.find((x) => String(x.name) === c.inverse);
       if (!back) continue;
       add({ table, column: String(c.name), single: isSingle(c), target, targetColumn: String(back.name), targetSingle: isSingle(back) });
@@ -272,13 +272,6 @@ export async function inverseEditsFor(
   return planInverse(app, settings, ms.model, changes, { known, finalPath });
 }
 
-/** Rebuild a note's text with new frontmatter, keeping its body. */
-export function withFrontmatter(content: string, ordered: OrderedFrontmatter, settings: DatanotesSettings): string {
-  const keep = new Set([settings.tableKey]);
-  const { body } = readOrderedFromMarkdown(content, keep);
-  return buildMarkdownWithFrontmatter(ordered, body);
-}
-
 /** A row's inverse links as the watcher last saw them. */
 interface Snapshot {
   table: string;
@@ -310,7 +303,7 @@ export class InverseWatcher {
     private readonly delayMs = 2000,
   ) {}
 
-  private specsFor(path: string): { table: string; specs: InverseSpec[] } | null {
+  private specsFor(path: string): { table: string; specs: InverseSpec[]; fm: Record<string, unknown> } | null {
     const s = this.settings();
     const model = cachedMetastore(this.app, s);
     if (!model) return null;
@@ -319,14 +312,13 @@ export class InverseWatcher {
     const fm = this.app.metadataCache.getFileCache(f as TFile)?.frontmatter as Record<string, unknown> | undefined;
     const table = fm ? rowTableFull(model, fm[s.tableKey]) : null;
     const specs = table ? inverseSpecs(model).get(table) : undefined;
-    return table && specs ? { table, specs } : null;
+    return table && specs ? { table, specs, fm: fm! } : null;
   }
 
   private current(path: string): Snapshot | null {
     const t = this.specsFor(path);
     if (!t) return null;
-    const f = this.app.vault.getAbstractFileByPath(path) as TFile;
-    const fm = (this.app.metadataCache.getFileCache(f)?.frontmatter ?? {}) as Record<string, unknown>;
+    const fm = t.fm;
     return { table: t.table, ...(typeof fm.id === "string" ? { id: fm.id } : {}), targets: inverseTargets(this.app, t.specs, fm, path) };
   }
 

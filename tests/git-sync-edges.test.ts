@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GitSync, runGit, type GitRunner } from "../src/node/git-sync";
+import { GitSync, gitExecutable, KILLED_CODE, runGit, type GitRunner } from "../src/node/git-sync";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -230,5 +230,91 @@ describe("git sync: timing", () => {
     sync.stop();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(g.calls.filter((c) => c.startsWith("commit"))).toHaveLength(2);
+  });
+});
+
+/** Run `fn` with `process.platform` set to `platform` and `PATH` to `pathValue`; both restored after. */
+async function withPlatform<T>(platform: NodeJS.Platform, pathValue: string, fn: () => Promise<T>): Promise<T> {
+  const saved = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const savedPath = process.env.PATH;
+  Object.defineProperty(process, "platform", { ...saved, value: platform });
+  process.env.PATH = pathValue;
+  try {
+    return await fn();
+  } finally {
+    Object.defineProperty(process, "platform", saved);
+    process.env.PATH = savedPath;
+  }
+}
+
+describe("git sync: running git", () => {
+  it("a vault at the repository's root that holds a Datanotes 2 store: the warning names the folder alone", async () => {
+    const repo = repoDir();
+    fs.mkdirSync(path.join(repo, ".datanotes"));
+    const g = fakeGit([], repo);
+    const logs: [string, string, Record<string, unknown> | undefined][] = [];
+    const sync = new GitSync({ vault: repo, run: g.run, log: (level, message, attrs) => void logs.push([level, message, attrs]) });
+    expect(await sync.start()).toBe(true);
+    sync.stop();
+    expect(g.calls).toContain("ls-files -- .datanotes");
+    expect(logs.find(([, m]) => m.includes(".datanotes/"))?.[2]).toMatchObject({ path: ".datanotes", tracked: false });
+  });
+
+  it("a git killed past its time limit keeps what it wrote on stderr", async () => {
+    const dir = repoDir();
+    const r = await runGit(["-c", "alias.slow=!echo almost there >&2; sleep 30", "slow"], dir, { timeoutMs: 1_500 });
+    expect(r.code).toBe(KILLED_CODE);
+    expect(r.stderr).toMatch(/^almost there\ngit slow timed out after 2 s and was stopped$/);
+  }, 20_000);
+
+  it("arguments git cannot be given (a NUL byte): a failure, not a throw", async () => {
+    const r = await runGit(["status\0"], repoDir());
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/null bytes/);
+  });
+
+  it("on Windows, a git found on no PATH folder is refused, never looked up in the vault folder", async () => {
+    const empty = repoDir();
+    const r = await withPlatform("win32", empty, () => runGit(["status"], repoDir()));
+    expect(r).toEqual({ code: 1, stdout: "", stderr: "git was not found in any folder of PATH: install Git for Windows, or add its cmd folder to PATH" });
+  });
+
+  it.skipIf(process.platform === "win32")("a git that could not start, stopped at once: nothing to kill", async () => {
+    const stop = new AbortController();
+    const r = await withPlatform(process.platform, repoDir(), async () => {
+      const pending = runGit(["status"], repoDir(), { signal: stop.signal });
+      stop.abort();
+      return pending;
+    });
+    expect(r).toMatchObject({ code: KILLED_CODE, stderr: "git status stopped: the engine is stopping" });
+  });
+
+  it.skipIf(process.platform === "win32")("on Windows, a stop kills git and what it started with taskkill", async () => {
+    // a program named git.exe that runs a while: taskkill is not there on this system, and its
+    // failure to start is only an error event, never a throw
+    const bin = repoDir();
+    fs.writeFileSync(path.join(bin, "git.exe"), "#!/bin/sh\n/bin/sleep 1\n", { mode: 0o755 });
+    const stop = new AbortController();
+    const r = await withPlatform("win32", bin, async () => {
+      const pending = runGit(["status"], repoDir(), { signal: stop.signal });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      stop.abort();
+      return pending;
+    });
+    expect(r).toMatchObject({ code: KILLED_CODE, stderr: "git status stopped: the engine is stopping" });
+    await new Promise((resolve) => setTimeout(resolve, 100)); // taskkill's error event
+  });
+
+  it("finds git on a Windows PATH: quoted folders, relative ones skipped, a folder named like git passed over", () => {
+    const first = repoDir();
+    const second = repoDir();
+    fs.mkdirSync(path.join(first, "git.exe")); // a folder, not the program
+    fs.writeFileSync(path.join(second, "git.exe"), "");
+    expect(gitExecutable({ Path: ` "${first}" ;relative;;${second}` }, "win32")).toBe(path.join(second, "git.exe"));
+    expect(gitExecutable({ PATH: "relative;also\relative" }, "win32")).toBe("git");
+    // POSIX: a folder named git is not git either
+    const posix = repoDir();
+    fs.mkdirSync(path.join(posix, "git"));
+    expect(gitExecutable({ PATH: posix }, "linux")).toBe("git");
   });
 });

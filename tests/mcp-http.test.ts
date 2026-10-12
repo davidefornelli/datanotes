@@ -166,6 +166,22 @@ describe("datanotes mcp serve: Streamable HTTP", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("a token the engine accepts is asked once, then remembered", async () => {
+    const asked: string[] = [];
+    class Accepting extends Toolbox {
+      override client(token: string): DatanotesClient {
+        const real = super.client(token);
+        return Object.assign(Object.create(real) as DatanotesClient, { post: async (route: string) => void asked.push(route) });
+      }
+    }
+    const { url } = await serve(new Accepting(engineUrl));
+    for (const name of ["first", "second"]) {
+      const r = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, ...JSON_HEADERS }, body: initialize(name) });
+      expect(r.status).toBe(200);
+    }
+    expect(asked).toHaveLength(1);
+  });
+
   it("an unexpected failure is a 500 and an ERROR record", async () => {
     const logs = collector();
     class Broken extends Toolbox {

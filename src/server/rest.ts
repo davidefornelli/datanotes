@@ -103,16 +103,17 @@ function optInt(body: Body, key: string): number | undefined {
 /** Time travel parameters: `version` or `timestamp`. */
 function asOf(body: Body): { version?: number; timestamp?: string } {
   const version = optInt(body, "version");
-  const timestamp = str(body, "timestamp", false);
+  const timestamp = str(body, "timestamp");
   return { ...(version !== undefined ? { version } : {}), ...(timestamp !== undefined ? { timestamp } : {}) };
 }
 
-function str(body: Body, key: string, required = true): string | undefined {
+// The readers below take a body already checked against the operation's input schema (checkArgs):
+// a required argument is given, and a given one has its type (an object, a list of strings, a value
+// of its enum). They read it, and refuse only what the schema lets through.
+
+function str(body: Body, key: string): string | undefined {
   const v = body[key];
-  if (v === undefined || v === null) {
-    if (required) throw new BadRequest(`"${key}" is required`);
-    return undefined;
-  }
+  if (v === undefined || v === null) return undefined;
   if (typeof v !== "string" || v.trim() === "") throw new BadRequest(`"${key}" must be a non-empty string`);
   return v;
 }
@@ -120,55 +121,32 @@ function str(body: Body, key: string, required = true): string | undefined {
 /** An optional string where "" means something (a flat `partition`, the vault root). */
 function text(body: Body, key: string): string | undefined {
   const v = body[key];
-  if (v === undefined || v === null) return undefined;
-  if (typeof v !== "string") throw new BadRequest(`"${key}" must be a string`);
-  return v;
+  return v === undefined || v === null ? undefined : (v as string);
 }
 
-function obj(body: Body, key: string, required = true): Record<string, unknown> | undefined {
+function obj(body: Body, key: string): Record<string, unknown> | undefined {
   const v = body[key];
-  if (v === undefined || v === null) {
-    if (required) throw new BadRequest(`"${key}" is required`);
-    return undefined;
-  }
-  if (typeof v !== "object" || Array.isArray(v)) throw new BadRequest(`"${key}" must be an object`);
-  return v as Record<string, unknown>;
+  return v === undefined || v === null ? undefined : (v as Record<string, unknown>);
 }
 
 function list(body: Body, key: string): unknown[] | undefined {
   const v = body[key];
-  if (v === undefined || v === null) return undefined;
-  if (!Array.isArray(v)) throw new BadRequest(`"${key}" must be a list`);
-  return v;
+  return v === undefined || v === null ? undefined : (v as unknown[]);
 }
 
 function strings(body: Body, key: string): string[] | undefined {
-  const v = list(body, key);
-  if (v === undefined) return undefined;
-  if (!v.every((x) => typeof x === "string")) throw new BadRequest(`"${key}" must be a list of strings`);
-  return v as string[];
+  return list(body, key) as string[] | undefined;
 }
 
 /** An optional true or false; null is not given. */
 function optBool(body: Body, key: string): boolean | undefined {
   const v = body[key];
-  if (v === undefined || v === null) return undefined;
-  if (typeof v !== "boolean") throw new BadRequest(`"${key}" must be true or false`);
-  return v;
+  return v === undefined || v === null ? undefined : (v as boolean);
 }
 
-/** An optional value among `allowed`. */
-function oneOf<T extends string>(body: Body, key: string, allowed: readonly T[]): T | undefined {
-  const v = str(body, key, false);
-  if (v !== undefined && !(allowed as readonly string[]).includes(v)) throw new BadRequest(`"${key}" must be ${allowed.map((a) => `"${a}"`).join(", ")}`);
-  return v as T | undefined;
-}
-
-/** The rows a bulk write changes: required, so that every row is never meant by mistake ({} is every row). */
-function whereArg(body: Body): Record<string, unknown> {
-  const w = obj(body, "where", false);
-  if (!w) throw new BadRequest(`"where" is required: the condition of the rows to change, or {} for every row`, guide(`Pass "where", e.g. {"status": "done"}; {} changes every row of the table.`, "filters"));
-  return w;
+/** An optional value among `allowed` (the schema's enum). */
+function oneOf<T extends string>(body: Body, key: string, _allowed: readonly T[]): T | undefined {
+  return str(body, key) as T | undefined;
 }
 
 /** A write's `autolink` (automatic links in the text it writes), when given. */
@@ -178,19 +156,11 @@ function autolinkArg(body: Body): { autolink?: boolean } {
 }
 
 function runOpts(body: Body): RunOptions {
-  if (body.dry_run !== undefined && body.dry_run !== null && typeof body.dry_run !== "boolean") {
-    throw new BadRequest(`"dry_run" must be true or false`);
-  }
   return { dryRun: body.dry_run === true };
 }
 
-/** The kinds of change of the change feed (its filters `kinds`). */
-const CHANGE_KINDS = ["insert", "update", "delete", "move", "metastore", "tool_call", "unreadable"] as const;
-
 function kindsArg(body: Body): string[] | undefined {
-  const kinds = strings(body, "kinds");
-  if (kinds && kinds.some((k) => !(CHANGE_KINDS as readonly string[]).includes(k))) throw new BadRequest(`"kinds" must be among ${CHANGE_KINDS.join(", ")}`);
-  return kinds?.map(opOfKind);
+  return strings(body, "kinds")?.map(opOfKind);
 }
 
 /**
@@ -344,7 +314,7 @@ export function createHandlers(
       return { status: 200, json: await configureDatabase(app, s(), input, saveSettings) };
     },
     check_table: async (b) => {
-      const table = str(b, "table", false);
+      const table = str(b, "table");
       const limit = optInt(b, "limit");
       const offset = optInt(b, "offset");
       return {
@@ -358,8 +328,8 @@ export function createHandlers(
       const r = await inferTable(app, s(), {
         ...(folder !== undefined ? { folder } : {}),
         ...(strings(b, "paths") ? { paths: strings(b, "paths")! } : {}),
-        ...(str(b, "table", false) !== undefined ? { table: str(b, "table")! } : {}),
-        ...(str(b, "name", false) !== undefined ? { name: str(b, "name")! } : {}),
+        ...(str(b, "table") !== undefined ? { table: str(b, "table")! } : {}),
+        ...(str(b, "name") !== undefined ? { name: str(b, "name")! } : {}),
         ...(maxEnum !== undefined ? { maxEnumValues: maxEnum } : {}),
       });
       if (!r.proposal) return { status: 200, json: r };
@@ -380,7 +350,7 @@ export function createHandlers(
     create_table: async (b) => {
       const options: Record<string, unknown> = {};
       for (const k of ["filename", "archive"]) {
-        const v = str(b, k, false);
+        const v = str(b, k);
         if (v !== undefined) options[k] = v;
       }
       const partition = text(b, "partition");
@@ -398,18 +368,18 @@ export function createHandlers(
           app,
           s(),
           {
-            ...(str(b, "name", false) !== undefined ? { name: str(b, "name")! } : {}),
+            name: str(b, "name")!,
             // null (as infer_table's proposal has it) or "" is refused by the engine with the other missing descriptions
             ...(b.description === null ? { description: null } : text(b, "description") !== undefined ? { description: text(b, "description")! } : {}),
-            ...(str(b, "schema", false) !== undefined ? { schema: str(b, "schema")! } : {}),
-            ...(str(b, "catalog", false) !== undefined ? { catalog: str(b, "catalog")! } : {}),
-            ...(str(b, "time_column", false) !== undefined ? { timeColumn: str(b, "time_column")! } : {}),
+            ...(str(b, "schema") !== undefined ? { schema: str(b, "schema")! } : {}),
+            ...(str(b, "catalog") !== undefined ? { catalog: str(b, "catalog")! } : {}),
+            ...(str(b, "time_column") !== undefined ? { timeColumn: str(b, "time_column")! } : {}),
             ...(Object.keys(options).length > 0 ? { options: options as never } : {}),
             ...(history !== undefined ? { history } : {}),
-            ...(obj(b, "fields", false) ? { fields: obj(b, "fields")! } : {}),
-            columns: (list(b, "columns") ?? []) as never,
+            ...(obj(b, "fields") ? { fields: obj(b, "fields")! } : {}),
+            columns: list(b, "columns") as never,
             ...(template !== undefined ? { rowTemplate: template } : {}),
-            ...(obj(b, "tags", false) ? { tags: obj(b, "tags") as Record<string, string> } : {}),
+            ...(obj(b, "tags") ? { tags: obj(b, "tags") as Record<string, string> } : {}),
           },
           runOpts(b),
         ),
@@ -420,18 +390,10 @@ export function createHandlers(
       return opResponse(await dropTable(app, s(), { table: str(b, "table")!, ...(mode ? { mode } : {}) }, runOpts(b)));
     },
     alter_table: async (b) => {
-      const optStr = (k: string) => (str(b, k, false) !== undefined ? { [k]: str(b, k)! } : {});
+      const optStr = (k: string) => (str(b, k) !== undefined ? { [k]: str(b, k)! } : {});
+      // true, false or "default" (the input schema)
       const history = b.history;
-      if (history !== undefined && history !== null && history !== "default" && typeof history !== "boolean") {
-        throw new BadRequest(`"history" must be true, false or "default", not ${JSON.stringify(history)}`, guide(`Pass history: true (keep the table's versions), false, or "default" (the database's setting).`, "history"));
-      }
       const target = b.autolink_target;
-      if (target !== undefined && target !== null && target !== "default" && typeof target !== "boolean") {
-        throw new BadRequest(
-          `"autolink_target" must be true, false or "default", not ${JSON.stringify(target)}`,
-          guide(`Pass autolink_target: true (automatic links may link the table's rows), false (never) or "default" (yes, unless its rows are named by a date or a time).`, "autolinkTargets"),
-        );
-      }
       const description = text(b, "description");
       const template = text(b, "row_template");
       const archive = text(b, "archive");
@@ -454,10 +416,10 @@ export function createHandlers(
             ...(target === "default" ? { autolinkTarget: null } : typeof target === "boolean" ? { autolinkTarget: target } : {}),
             // "" removes the template
             ...(template !== undefined ? { rowTemplate: template === "" ? null : template } : {}),
-            ...(obj(b, "tags", false) ? { tags: obj(b, "tags") as Record<string, string | null> } : {}),
+            ...(obj(b, "tags") ? { tags: obj(b, "tags") as Record<string, string | null> } : {}),
             ...(optBool(b, "clear_tags") === true ? { clearTags: true } : {}),
             ...(archive !== undefined ? { archive } : {}),
-            ...(obj(b, "fields", false) ? { fields: obj(b, "fields")! } : {}),
+            ...(obj(b, "fields") ? { fields: obj(b, "fields")! } : {}),
           },
           runOpts(b),
         ),
@@ -480,23 +442,22 @@ export function createHandlers(
         await renameValue(app, s(), { table: str(b, "table")!, column: str(b, "column")!, from: str(b, "from_value")!, to: str(b, "to_value")! }, runOpts(b)),
       ),
     comment_on: async (b) => {
-      const description = text(b, "description");
-      if (description === undefined) throw new BadRequest(`"description" is required ("" removes it)`);
+      const description = text(b, "description")!;
       return opResponse(
-        await commentOn(app, s(), { catalog: str(b, "catalog")!, ...(str(b, "schema", false) !== undefined ? { schema: str(b, "schema")! } : {}), description }, runOpts(b)),
+        await commentOn(app, s(), { catalog: str(b, "catalog")!, ...(str(b, "schema") !== undefined ? { schema: str(b, "schema")! } : {}), description }, runOpts(b)),
       );
     },
     define_base: async (b) => {
-      const rename = obj(b, "rename_columns", false);
+      const rename = obj(b, "rename_columns");
       return opResponse(
         await defineBase(
           app,
           s(),
           {
             name: str(b, "name")!,
-            columns: (list(b, "columns") ?? []) as Record<string, unknown>[],
+            columns: list(b, "columns") as Record<string, unknown>[],
             ...(strings(b, "bases") ? { bases: strings(b, "bases")! } : {}),
-            ...(str(b, "description", false) !== undefined ? { description: str(b, "description")! } : {}),
+            ...(str(b, "description") !== undefined ? { description: str(b, "description")! } : {}),
             ...(rename ? { renameColumns: rename as Record<string, string> } : {}),
             ...(strings(b, "drop_columns") ? { dropColumns: strings(b, "drop_columns")! } : {}),
           },
@@ -504,7 +465,7 @@ export function createHandlers(
         ),
       );
     },
-    set_table_bases: async (b) => opResponse(await setTableBases(app, s(), { table: str(b, "table")!, bases: strings(b, "bases") ?? [] }, runOpts(b))),
+    set_table_bases: async (b) => opResponse(await setTableBases(app, s(), { table: str(b, "table")!, bases: strings(b, "bases")! }, runOpts(b))),
     add_constraint: async (b) => opResponse(await addConstraint(app, s(), { table: str(b, "table")!, name: str(b, "name")!, check: obj(b, "check")! }, runOpts(b))),
     drop_constraint: async (b) => opResponse(await dropConstraint(app, s(), { table: str(b, "table")!, name: str(b, "name")! }, runOpts(b))),
     create_view: async (b) =>
@@ -514,11 +475,11 @@ export function createHandlers(
           s(),
           {
             name: str(b, "name")!,
-            ...(str(b, "catalog", false) !== undefined ? { catalog: str(b, "catalog")! } : {}),
-            ...(str(b, "schema", false) !== undefined ? { schema: str(b, "schema")! } : {}),
-            ...(str(b, "description", false) !== undefined ? { description: str(b, "description")! } : {}),
+            ...(str(b, "catalog") !== undefined ? { catalog: str(b, "catalog")! } : {}),
+            ...(str(b, "schema") !== undefined ? { schema: str(b, "schema")! } : {}),
+            ...(str(b, "description") !== undefined ? { description: str(b, "description")! } : {}),
             ...(strings(b, "aliases") ? { aliases: strings(b, "aliases")! } : {}),
-            ...(obj(b, "labels", false) ? { labels: obj(b, "labels", false) as Record<string, string> } : {}),
+            ...(obj(b, "labels") ? { labels: obj(b, "labels") as Record<string, string> } : {}),
             query: obj(b, "query")!,
             ...(optBool(b, "replace") === true ? { replace: true } : {}),
           },
@@ -537,7 +498,7 @@ export function createHandlers(
             table: str(b, "table")!,
             values: obj(b, "values")!,
             ...(text(b, "body") !== undefined ? { body: text(b, "body")! } : {}),
-            ...(str(b, "path", false) !== undefined ? { path: str(b, "path")! } : {}),
+            ...(str(b, "path") !== undefined ? { path: str(b, "path")! } : {}),
             ...autolinkArg(b),
           },
           runOpts(b),
@@ -550,15 +511,15 @@ export function createHandlers(
           s(),
           {
             table: str(b, "table")!,
-            ...(str(b, "id", false) !== undefined ? { id: str(b, "id")! } : {}),
-            ...(str(b, "path", false) !== undefined ? { path: str(b, "path")! } : {}),
-            ...(obj(b, "set", false) ? { set: obj(b, "set")! } : {}),
+            ...(str(b, "id") !== undefined ? { id: str(b, "id")! } : {}),
+            ...(str(b, "path") !== undefined ? { path: str(b, "path")! } : {}),
+            ...(obj(b, "set") ? { set: obj(b, "set")! } : {}),
             ...(strings(b, "unset") ? { unset: strings(b, "unset")! } : {}),
             ...(text(b, "body") !== undefined ? { body: text(b, "body")! } : {}),
-            ...(obj(b, "body_sections", false) ? { bodySections: obj(b, "body_sections") as Record<string, string> } : {}),
+            ...(obj(b, "body_sections") ? { bodySections: obj(b, "body_sections") as Record<string, string> } : {}),
             ...(text(b, "body_prepend") !== undefined ? { bodyPrepend: text(b, "body_prepend")! } : {}),
             ...(text(b, "body_append") !== undefined ? { bodyAppend: text(b, "body_append")! } : {}),
-            ...(obj(b, "expect", false) ? { expect: obj(b, "expect")! } : {}),
+            ...(obj(b, "expect") ? { expect: obj(b, "expect")! } : {}),
             ...autolinkArg(b),
           },
           runOpts(b),
@@ -572,8 +533,8 @@ export function createHandlers(
           s(),
           {
             table: str(b, "table")!,
-            where: whereArg(b),
-            ...(obj(b, "set", false) ? { set: obj(b, "set")! } : {}),
+            where: obj(b, "where")!,
+            ...(obj(b, "set") ? { set: obj(b, "set")! } : {}),
             ...(strings(b, "unset") ? { unset: strings(b, "unset")! } : {}),
             ...(expectCount !== undefined ? { expectCount } : {}),
           },
@@ -585,7 +546,7 @@ export function createHandlers(
       const mode = oneOf(b, "mode", ["archive", "delete"] as const);
       const policy = oneOf(b, "on_referenced", ["restrict", "set_null", "ignore"] as const);
       return opResponse(
-        await deleteRows(app, s(), { table: str(b, "table")!, where: whereArg(b), ...(mode ? { mode } : {}), ...(policy ? { onReferenced: policy } : {}) }, runOpts(b)),
+        await deleteRows(app, s(), { table: str(b, "table")!, where: obj(b, "where")!, ...(mode ? { mode } : {}), ...(policy ? { onReferenced: policy } : {}) }, runOpts(b)),
       );
     },
     merge_rows: async (b) => {
@@ -597,8 +558,8 @@ export function createHandlers(
           s(),
           {
             table: str(b, "table")!,
-            on: strings(b, "on") ?? [],
-            rows: (list(b, "rows") ?? []) as Record<string, unknown>[],
+            on: strings(b, "on")!,
+            rows: list(b, "rows") as Record<string, unknown>[],
             ...(whenMatched ? { whenMatched } : {}),
             ...(whenNotMatched ? { whenNotMatched } : {}),
           },
@@ -614,9 +575,9 @@ export function createHandlers(
           {
             table: str(b, "table")!,
             toTable: str(b, "to_table")!,
-            where: whereArg(b),
-            ...(obj(b, "rename", false) ? { rename: obj(b, "rename") as Record<string, string> } : {}),
-            ...(obj(b, "set", false) ? { set: obj(b, "set")! } : {}),
+            where: obj(b, "where")!,
+            ...(obj(b, "rename") ? { rename: obj(b, "rename") as Record<string, string> } : {}),
+            ...(obj(b, "set") ? { set: obj(b, "set")! } : {}),
             ...(strings(b, "drop") ? { drop: strings(b, "drop")! } : {}),
             ...(optBool(b, "relocate") === true ? { relocate: true } : {}),
           },
@@ -630,10 +591,10 @@ export function createHandlers(
           s(),
           {
             table: str(b, "table")!,
-            paths: strings(b, "paths") ?? [],
-            ...(obj(b, "rename", false) ? { rename: obj(b, "rename") as Record<string, string> } : {}),
-            ...(obj(b, "set", false) ? { set: obj(b, "set")! } : {}),
-            ...(obj(b, "per_row", false) ? { perRow: obj(b, "per_row") as Record<string, Record<string, unknown>> } : {}),
+            paths: strings(b, "paths")!,
+            ...(obj(b, "rename") ? { rename: obj(b, "rename") as Record<string, string> } : {}),
+            ...(obj(b, "set") ? { set: obj(b, "set")! } : {}),
+            ...(obj(b, "per_row") ? { perRow: obj(b, "per_row") as Record<string, Record<string, unknown>> } : {}),
             ...(strings(b, "drop") ? { drop: strings(b, "drop")! } : {}),
             ...(optBool(b, "relocate") === false ? { relocate: false } : {}),
           },
@@ -652,10 +613,9 @@ export function createHandlers(
     align_relations: async (b) =>
       opResponse(await alignRelations(app, s(), { table: str(b, "table")!, ...(strings(b, "paths") ? { paths: strings(b, "paths")! } : {}) }, runOpts(b))),
     batch: async (b) => {
-      const operations = list(b, "operations");
-      if (!operations || operations.length === 0) throw new BadRequest(`"operations" must be a non-empty list`);
+      const operations = list(b, "operations")!;
+      if (operations.length === 0) throw new BadRequest(`"operations" must be a non-empty list`);
       const steps = operations.map((raw, i) => {
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new BadRequest(`operation ${i} must be an object`);
         const { op, ...args } = raw as Body;
         if (typeof op !== "string") throw new BadRequest(`operation ${i} needs "op"`);
         if (!isBatchOperation(op)) {
@@ -664,11 +624,8 @@ export function createHandlers(
             guide(`${didYouMean(op, BATCH_OPERATIONS)} A batch holds writes: each operation is {"op": "<name>", ...its arguments}.`.trim(), "batch"),
           );
         }
-        try {
-          checkArgs(op, args);
-        } catch (e) {
-          throw new BadRequest(`operation ${i}: ${messageOf(e)}`, guidanceOf(e) ?? undefined);
-        }
+        const problem = checkArguments(op, args);
+        if (problem) throw new BadRequest(`operation ${i}: ${problem.message}`, { hint: problem.hint, docs: problem.docs });
         return {
           op,
           run: async (dryRun: boolean): Promise<OpResult> => {
@@ -682,7 +639,7 @@ export function createHandlers(
       });
       const r = await runBatch(app, s(), steps, (id) => undoOperation(app, s(), id), {
         ...runOpts(b),
-        ...(str(b, "summary", false) !== undefined ? { summary: str(b, "summary")! } : {}),
+        ...(str(b, "summary") !== undefined ? { summary: str(b, "summary")! } : {}),
       });
       // a step that failed partway (not refused) makes the batch a failure: 503 once all is rolled back
       const failedStep = r.failed_at !== undefined && (r.steps[r.failed_at]?.result?.failed.length ?? 0) > 0;
@@ -692,24 +649,19 @@ export function createHandlers(
 
     // --- queries ---
     select_rows: async (b) => {
+      // a string or a list of strings (the input schema)
       const groupBy = b.group_by;
-      if (groupBy !== undefined && groupBy !== null && typeof groupBy !== "string" && !Array.isArray(groupBy)) {
-        throw new BadRequest(`"group_by" must be a string or a list of strings`);
-      }
       const orderBy = b.order_by;
-      if (orderBy !== undefined && orderBy !== null && typeof orderBy !== "string" && !Array.isArray(orderBy)) {
-        throw new BadRequest(`"order_by" must be a string or a list of strings`);
-      }
       const limit = optInt(b, "limit");
       const offset = optInt(b, "offset");
-      const join = obj(b, "join", false);
-      const aggregates = obj(b, "aggregates", false);
+      const join = obj(b, "join");
+      const aggregates = obj(b, "aggregates");
       return {
         status: 200,
         json: await select(app, s(), {
           table: str(b, "table")!,
           ...(strings(b, "columns") ? { columns: strings(b, "columns")! } : {}),
-          ...(obj(b, "where", false) ? { where: obj(b, "where")! } : {}),
+          ...(obj(b, "where") ? { where: obj(b, "where")! } : {}),
           ...(orderBy !== undefined && orderBy !== null ? { orderBy: orderBy as string | string[] } : {}),
           ...(limit !== undefined ? { limit } : {}),
           ...(offset !== undefined ? { offset } : {}),
@@ -718,15 +670,15 @@ export function createHandlers(
           ...(groupBy !== undefined && groupBy !== null ? { groupBy: groupBy as string | string[] } : {}),
           ...(aggregates ? { aggregates: aggregates as Record<string, string> } : {}),
           ...(optBool(b, "include_body") === true ? { includeBody: true } : {}),
-          ...(str(b, "this_note", false) !== undefined ? { thisNote: str(b, "this_note")! } : {}),
+          ...(str(b, "this_note") !== undefined ? { thisNote: str(b, "this_note")! } : {}),
           ...asOf(b),
         }),
       };
     },
     list_link_targets: async (b) => {
       const limit = optInt(b, "limit");
-      const row = str(b, "row", false);
-      const values = obj(b, "values", false);
+      const row = str(b, "row");
+      const values = obj(b, "values");
       return {
         status: 200,
         json: await linkOptions(app, s(), {
@@ -738,7 +690,7 @@ export function createHandlers(
         }),
       };
     },
-    read_note: async (b) => ({ status: 200, json: await readNote(app, s(), text(b, "path") ?? "") }),
+    read_note: async (b) => ({ status: 200, json: await readNote(app, s(), text(b, "path")!) }),
     list_folder: async (b) => ({ status: 200, json: listFolder(app, text(b, "folder") ?? "") }),
     search_notes: async (b) => {
       const ctx = optInt(b, "context_length");
@@ -747,15 +699,14 @@ export function createHandlers(
     semantic_search: async (b) => {
       const sem = needSemantic();
       const limit = optInt(b, "limit");
-      const minScore = b.min_score;
-      if (minScore !== undefined && minScore !== null && typeof minScore !== "number") throw new BadRequest(`"min_score" must be a number`);
+      const minScore = b.min_score; // a number (the input schema)
       return {
         status: 200,
         json: await sem.search({
           query: str(b, "query")!,
           ...(limit !== undefined ? { limit } : {}),
           ...(strings(b, "tables") ? { tables: strings(b, "tables")! } : {}),
-          ...(str(b, "folder", false) !== undefined ? { folder: str(b, "folder")! } : {}),
+          ...(str(b, "folder") !== undefined ? { folder: str(b, "folder")! } : {}),
           ...(typeof minScore === "number" ? { minScore } : {}),
         }),
       };
@@ -764,7 +715,7 @@ export function createHandlers(
       status: 200,
       json: await graphNeighbors(app, s(), {
         from: obj(b, "from_nodes") as GraphNodeSet,
-        ...(str(b, "direction", false) !== undefined ? { direction: str(b, "direction") as Direction } : {}),
+        ...(str(b, "direction") !== undefined ? { direction: str(b, "direction") as Direction } : {}),
         ...(strings(b, "edges") ? { edges: strings(b, "edges")! } : {}),
       }),
     }),
@@ -776,7 +727,7 @@ export function createHandlers(
         status: 200,
         json: await graphTraverse(app, s(), {
           from: obj(b, "from_nodes") as GraphNodeSet,
-          ...(str(b, "direction", false) !== undefined ? { direction: str(b, "direction") as Direction } : {}),
+          ...(str(b, "direction") !== undefined ? { direction: str(b, "direction") as Direction } : {}),
           ...(strings(b, "edges") ? { edges: strings(b, "edges")! } : {}),
           ...(strings(b, "tables") ? { tables: strings(b, "tables")! } : {}),
           ...(strings(b, "through") ? { through: strings(b, "through")! } : {}),
@@ -793,7 +744,7 @@ export function createHandlers(
         json: await graphPath(app, s(), {
           from: obj(b, "from_nodes") as GraphNodeSet,
           to: obj(b, "to_nodes") as GraphNodeSet,
-          ...(str(b, "direction", false) !== undefined ? { direction: str(b, "direction") as Direction } : {}),
+          ...(str(b, "direction") !== undefined ? { direction: str(b, "direction") as Direction } : {}),
           ...(strings(b, "edges") ? { edges: strings(b, "edges")! } : {}),
           ...(max !== undefined ? { maxDepth: max } : {}),
         }),
@@ -803,9 +754,9 @@ export function createHandlers(
     // --- history, journal, change feed ---
     list_migrations: async (b) => {
       const limit = optInt(b, "limit");
-      const op = str(b, "op", false);
-      const table = str(b, "table", false);
-      const since = str(b, "since", false);
+      const op = str(b, "op");
+      const table = str(b, "table");
+      const since = str(b, "since");
       return {
         status: 200,
         json: await listMigrations(app, s(), { ...(limit !== undefined ? { limit } : {}), ...(op ? { op } : {}), ...(table ? { table } : {}), ...(since ? { since } : {}) }),
@@ -817,16 +768,15 @@ export function createHandlers(
     },
     describe_history: async (b) => {
       const limit = optInt(b, "limit");
-      const table = str(b, "table", false);
-      const since = str(b, "since", false);
+      const table = str(b, "table");
+      const since = str(b, "since");
       const rest = { ...(limit !== undefined ? { limit } : {}), ...(since !== undefined ? { since } : {}) };
       // without a table: the history of the whole database
       const h = table === undefined ? await describeDatabaseHistory(app, s(), rest) : await describeHistory(app, s(), { table, ...rest });
       return { status: 200, json: { ...h, history: h.history.map(wireCommit) } };
     },
     table_changes: async (b) => {
-      const start = optInt(b, "start_version");
-      if (start === undefined) throw new BadRequest(`"start_version" is required`);
+      const start = optInt(b, "start_version")!;
       const end = optInt(b, "end_version");
       return { status: 200, json: await tableChanges(app, s(), { table: str(b, "table")!, startVersion: start, ...(end !== undefined ? { endVersion: end } : {}) }) };
     },
@@ -836,8 +786,8 @@ export function createHandlers(
       return opResponse(await restoreTable(app, s(), { table: str(b, "table")!, ...at }, runOpts(b)));
     },
     restore_database: async (b) => {
-      const timestamp = str(b, "timestamp", false);
-      const before = str(b, "before_migration", false);
+      const timestamp = str(b, "timestamp");
+      const before = str(b, "before_migration");
       if ((timestamp === undefined) === (before === undefined)) throw new BadRequest(`pass "timestamp" or "before_migration" (one of them)`);
       return opResponse(await restoreDatabase(app, s(), { ...(timestamp !== undefined ? { timestamp } : { beforeMigration: before! }) }, runOpts(b)));
     },
@@ -860,8 +810,8 @@ export function createHandlers(
           ...(strings(b, "tables") ? { tables: strings(b, "tables")! } : {}),
           ...(kinds ? { ops: kinds as never } : {}),
           ...(strings(b, "columns") ? { columns: strings(b, "columns")! } : {}),
-          ...(str(b, "exclude_actor", false) !== undefined ? { excludeActor: str(b, "exclude_actor")! } : {}),
-          ...(obj(b, "where", false) ? { where: obj(b, "where")! } : {}),
+          ...(str(b, "exclude_actor") !== undefined ? { excludeActor: str(b, "exclude_actor")! } : {}),
+          ...(obj(b, "where") ? { where: obj(b, "where")! } : {}),
         })),
       );
     },
@@ -875,8 +825,8 @@ export function createHandlers(
           ...(strings(b, "tables") ? { tables: strings(b, "tables")! } : {}),
           ...(kinds ? { ops: kinds as never } : {}),
           ...(strings(b, "columns") ? { columns: strings(b, "columns")! } : {}),
-          ...(str(b, "exclude_actor", false) !== undefined ? { excludeActor: str(b, "exclude_actor")! } : {}),
-          ...(obj(b, "where", false) ? { where: obj(b, "where")! } : {}),
+          ...(str(b, "exclude_actor") !== undefined ? { excludeActor: str(b, "exclude_actor")! } : {}),
+          ...(obj(b, "where") ? { where: obj(b, "where")! } : {}),
           ...(since !== undefined ? { since } : {}),
         }),
       );

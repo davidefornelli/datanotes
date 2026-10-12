@@ -5,9 +5,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { INDEX_RETRY, type OpResult } from "../src/core/engine";
+import { INDEX_RETRY, undoOperation, type OpResult } from "../src/core/engine";
+import { loadMetastore } from "../src/core/metastore";
 import { insertRow, updateRows } from "../src/core/rows";
-import { createDbVault, METASTORE, withTables, type DbVault } from "./helpers/db-vault";
+import { createDbVault, logVault, METASTORE, withTables, type DbVault } from "./helpers/db-vault";
 
 INDEX_RETRY.delayMs = 1;
 
@@ -111,5 +112,19 @@ describe("filtered link columns", () => {
         message: `[[Site]], [[Shop]] are not valid targets in projects (needs ref_where {"kind":"project"}); valid: none (after this change to [[Shop]], [[Site]], rows it links to)`,
       },
     ]);
+  });
+});
+
+describe("an undo when the database has no metastore any more", () => {
+  it("has no link rules to check: the rows are put back", async () => {
+    const v = logVault();
+    const before = v.read("Daily/a.md");
+    const r = await updateRows(v.app, v.settings, { table: "log", where: { kind: "alcohol" }, set: { metric_drinks: 2 } });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    v.remove(METASTORE);
+    await loadMetastore(v.app, v.settings);
+    const u = await undoOperation(v.app, v.settings, r.migration_id!);
+    expect(u.ok, JSON.stringify(u)).toBe(true);
+    expect(v.read("Daily/a.md")).toBe(before);
   });
 });

@@ -480,9 +480,10 @@ export class EngineRuntime {
         const file = app.vault.getAbstractFileByPath(path);
         if (!file) return;
         this.track(
+          // an adopted note, or one refused with a reason, names its table
           adoptCreatedNote(app, s(), file as TFile).then((r) => {
-            if (r.adopted) telemetry().log("INFO", "datanotes adopted new note", { path, table: r.table ?? "" });
-            else if (r.reason) telemetry().log("WARN", "datanotes could not adopt new note", { path, table: r.table ?? "", reason: r.reason });
+            if (r.adopted) telemetry().log("INFO", "datanotes adopted new note", { path, table: r.table! });
+            else if (r.reason) telemetry().log("WARN", "datanotes could not adopt new note", { path, table: r.table!, reason: r.reason });
           }),
           `adopt of ${path}`,
         );

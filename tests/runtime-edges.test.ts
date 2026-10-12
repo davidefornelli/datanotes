@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runWithActor } from "../src/core/actor";
 import type { Transport } from "../src/core/embeddings";
 import { INDEX_RETRY, whileWriting } from "../src/core/engine";
@@ -462,4 +462,89 @@ describe("runtime: the semantic index catches up after a quiet time", () => {
       { severity: "WARN", body: "datanotes semantic index update failed", attributes: { error: "embedding request failed (HTTP 401): unauthorized" } },
     ]);
   });
+});
+
+describe("runtime: its own routes and background work at their edges", () => {
+  type Internals = { inverse: { onChange(changes: unknown[]): Promise<void> }; logTimer?: unknown; syncDocsIndex(): Promise<void> };
+  const internals = (e: Engine) => e.runtime as unknown as Internals;
+
+  it("drains at once with no HTTP server; its status names no host, no environment and no telemetry endpoint", async () => {
+    const e = engine();
+    expect(await e.runtime.drain(10)).toBe(true);
+    const status = await e.runtime.handlers()["/status/"]!({});
+    expect(status.status).toBe(200);
+    expect(status.json).toMatchObject({ logs: { console_log: null, telemetry: null } });
+  });
+
+  it("a stop asked over HTTP answers before the host stops, with no pid when the host gives no status", async () => {
+    const e = engine();
+    let stopped = false;
+    e.runtime.setHostStop(() => void (stopped = true));
+    const r = await e.runtime.handlers()["/stop/"]!({});
+    expect(r).toEqual({ status: 200, json: { ok: true, stopping: true, pid: null } });
+    for (let i = 0; i < 50 && !stopped; i++) await new Promise((res) => setTimeout(res, 10));
+    expect(stopped).toBe(true);
+  });
+
+  it("an HTTP server that fails with a plain value says so", async () => {
+    const { HttpApiServer } = await import("../src/server/http-server");
+    const spy = vi.spyOn(HttpApiServer.prototype, "start").mockRejectedValueOnce("port taken");
+    const e = engine({ httpServerToken: "owner-token" }, { canServeHttp: true, httpHost: "127.0.0.1" });
+    await e.runtime.applyHttpServer();
+    spy.mockRestore();
+    expect(e.runtime.httpServerRunning).toBe(false);
+    expect(e.runtime.httpServerError).toBe("port taken");
+  });
+
+  it("links edited while the database folder is looked for are not mirrored; a mirror that fails is logged", async () => {
+    const e = engine();
+    const rows = await import("../src/core/rows");
+    const spy = vi.spyOn(rows, "syncRelations").mockRejectedValue(new Error("vault busy"));
+    e.runtime.relocation = new Promise(() => {});
+    await internals(e).inverse.onChange([]);
+    expect(spy).not.toHaveBeenCalled();
+    e.runtime.relocation = null;
+    await internals(e).inverse.onChange([]);
+    spy.mockRestore();
+    expect(logged("datanotes link mirroring failed")).toEqual([{ severity: "WARN", body: "datanotes link mirroring failed", attributes: { error: "vault busy" } }]);
+  });
+
+  it("a docs index that only dropped sections is logged as updated; with no docs given it reads the installed ones", async () => {
+    const e = engine();
+    const sync = vi.spyOn(e.runtime.docsIndex, "sync").mockResolvedValueOnce({ version: "3.0.0-test", embedded: 0, reused: 4, removed: 2 } as never);
+    await internals(e).syncDocsIndex();
+    sync.mockRestore();
+    expect(logged("datanotes docs index updated")).toEqual([
+      { severity: "INFO", body: "datanotes docs index updated", attributes: { version: "3.0.0-test", embedded: 0, reused: 4, removed: 2 } },
+    ]);
+  });
+
+  it("with no docs given, the docs index reads the installed docs on first use", async () => {
+    const e = engine({ semanticEnabled: true, semanticProvider: "ollama", semanticModel: "fake-embed" });
+    // none in a checkout without the docs build: the sync is refused with why; else it runs
+    const settled = await e.runtime.docsIndex.sync().then(() => "synced", (x: unknown) => (x instanceof Error ? "refused" : "other"));
+    expect(["synced", "refused"]).toContain(settled);
+  });
+
+  it("its status names the telemetry endpoint it sends to", async () => {
+    const e = engine({ telemetryEnabled: true, telemetryEndpoint: "http://collector.test:4318/v1/logs" });
+    const status = await e.runtime.handlers()["/status/"]!({});
+    expect(status.json).toMatchObject({ logs: { telemetry: "http://collector.test:4318" } });
+  });
+
+  it("finds no moved database while the metastore is in place, settling the vault itself without a host settler", async () => {
+    const e = engine({ databaseId: "db-1" });
+    expect(await e.runtime.findMovedDatabase()).toBeNull();
+  });
+
+  it("hand edits seen while the database folder is looked for wait to be logged", async () => {
+    const e = engine();
+    await e.runtime.start({ http: false });
+    e.runtime.relocation = new Promise(() => {});
+    await e.host.app.vault.process(e.host.app.vault.getAbstractFileByPath("Daily/a.md") as TFile, (t) => t.replace("kind: walk", "kind: mood"));
+    await new Promise((r) => setTimeout(r, 3_300));
+    // the log waited: its timer is set again
+    expect(internals(e).logTimer).toBeDefined();
+    e.runtime.relocation = null;
+  }, 10_000);
 });

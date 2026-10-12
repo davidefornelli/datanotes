@@ -39,17 +39,17 @@ export function existingPathIgnoringCase(app: App, p: string): string | null {
   const exact = app.vault.getAbstractFileByPath(p);
   if (exact != null) return exact.path;
   let folder: TAbstractFile | null = app.vault.getRoot?.() ?? app.vault.getAbstractFileByPath("") ?? app.vault.getAbstractFileByPath("/");
-  for (const [i, part] of parts.entries()) {
+  let at = "";
+  for (const part of parts) {
     const children = childrenOf(folder);
     if (!children) return scanIgnoringCase(app, p);
     const lower = part.toLowerCase();
     const hit: TAbstractFile | undefined = children.find((c) => nameOf(c).toLowerCase() === lower);
     if (!hit) return null;
-    const at = hit.path.replace(/^\/+/, "");
-    if (i === parts.length - 1) return at;
+    at = hit.path.replace(/^\/+/, "");
     folder = app.vault.getAbstractFileByPath(at) ?? hit;
   }
-  return null;
+  return at;
 }
 
 /** {@link existingPathIgnoringCase} on a host without folder listings: every file compared. */

@@ -5,12 +5,13 @@
  * rows whose computed values are empty.
  */
 
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { configureDatabase } from "../src/core/database";
 import { createTable, INDEX_RETRY, OperationInputError } from "../src/core/engine";
 import { readOrderedFromMarkdown } from "../src/core/frontmatter";
-import { insertRow, mergeRows, recomputeColumns, select, updateRow, updateRows } from "../src/core/rows";
-import { createDbVault, METASTORE, withTables, type DbVault } from "./helpers/db-vault";
+import { deleteRows, insertRow, mergeRows, recomputeColumns, select, updateRow, updateRows } from "../src/core/rows";
+import { createDbVault, logVault, METASTORE, withTables, type DbVault } from "./helpers/db-vault";
 import { described } from "./helpers/descriptions";
 
 INDEX_RETRY.delayMs = 1;
@@ -262,5 +263,39 @@ describe("recompute_columns", () => {
     expect(r.planned_edits).toEqual([{ path: p, set: { label: "Dune (500)" }, remove: [] }]);
     expect(fm(v, p).byline).toBeUndefined();
     expect((await select(v.app, v.settings, { table: "book", columns: ["label"] })).rows).toEqual([{ path: p, label: "Dune (500)" }]);
+  });
+});
+
+describe("row operations at their edges", () => {
+  it("update_row with nothing to change names what it takes", async () => {
+    const v = logVault();
+    await expect(updateRow(v.app, v.settings, { table: "log", path: "Daily/a.md" })).rejects.toThrow(`nothing to update: pass "set", "unset", "body" or a part of the body`);
+  });
+
+  it("two notes with one id created at the same moment: the first by path keeps it", async () => {
+    const v = logVault({ "Daily/z.md": "---\ntable: main.public.log\nid: 01a0f000-0000-7000-8000-00000000000a\nkind: walk\noccurred_at: 2026-09-27T08:00\n---\nZ\n" }, "fake");
+    const real = fs.statSync;
+    vi.spyOn(fs, "statSync").mockImplementation(((p: fs.PathLike, o?: fs.StatSyncOptions) => {
+      const s = real(p, o) as fs.Stats;
+      return /[\/]Daily[\/][az]\.md$/.test(String(p)) ? Object.assign(Object.create(Object.getPrototypeOf(s) as object) as fs.Stats, s, { ctimeMs: 1_000 }) : s;
+    }) as typeof fs.statSync);
+    const r = await recomputeColumns(v.app, v.settings, { table: "log" });
+    vi.restoreAllMocks();
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(fm(v, "Daily/a.md").id).toBe("01a0f000-0000-7000-8000-00000000000a");
+    expect(fm(v, "Daily/z.md").id).not.toBe("01a0f000-0000-7000-8000-00000000000a");
+  });
+
+  it("delete with set_null leaves a referrer that is not a note alone", async () => {
+    const v = logVault({}, "fake");
+    // a canvas links to the row too, as Obsidian lists it
+    const app = v.app as unknown as { metadataCache: object };
+    const cache = app.metadataCache;
+    app.metadataCache = new Proxy(cache, {
+      get: (t, k) => (k === "resolvedLinks" ? { ...(Reflect.get(t, k) as object), "Boards/plan.canvas": { "Daily/a.md": 1 } } : Reflect.get(t, k)),
+    });
+    const r = await deleteRows(v.app, v.settings, { table: "log", where: { kind: "alcohol" }, onReferenced: "set_null" });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.planned_edits.map((e) => e.path)).toEqual([]);
   });
 });

@@ -371,12 +371,13 @@ export function withTables(entries: string): string {
 /** Folder of the log table's rows. */
 export const LOG_DIR = "Datanotes/main/public/log";
 
-export function logVault(extra: Record<string, string> = {}): DbVault {
+/** `host`: the fake App or the headless Node host whatever `VAULT_HOST` says (as createDbVault). */
+export function logVault(extra: Record<string, string> = {}, host?: "fake" | "node"): DbVault {
   return createDbVault({
     [METASTORE]: LOG_YAML,
     "Daily/a.md":
       "---\ntable: main.public.log\nid: 01a0f000-0000-7000-8000-00000000000a\nkind: alcohol\noccurred_at: 2026-09-25T22:30\nmetric_drinks: 7\n---\nA\n",
     "Daily/b.md": "---\ntable: main.public.log\nid: 01a0f000-0000-7000-8000-00000000000b\nkind: mood\noccurred_at: 2026-09-26T08:00\n---\nB\n",
     ...extra,
-  });
+  }, {}, host ? { host } : {});
 }

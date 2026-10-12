@@ -8,7 +8,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { INDEX_RETRY } from "../src/core/engine";
 import { readOrderedFromMarkdown } from "../src/core/frontmatter";
-import { InverseWatcher, REMOVED_ROW_MS, type RowChange } from "../src/core/inverse";
+import { inverseEditsFor, inverseSpecs, InverseWatcher, REMOVED_ROW_MS, type RowChange } from "../src/core/inverse";
+import { parseMetastore } from "../src/core/metastore";
 import { checkTable, syncRelations, updateRow } from "../src/core/rows";
 import { createDbVault, METASTORE, withTables, type DbVault } from "./helpers/db-vault";
 
@@ -241,5 +242,79 @@ describe("sync_relations", () => {
     const r = await syncRelations(v.app, v.settings, [{ path: "P/Alice.md", table: "main.public.person", before: new Map([["friends", ["P/Carol.md"]]]), after: new Map() }]);
     expect(r?.ok).toBe(true);
     expect(fm(v, "P/Carol.md").friends).toEqual(["[[Mark]]"]);
+  });
+});
+
+describe("links edited by hand: what the watcher cannot read", () => {
+  it("a path with no note, or a folder, has no row to compare", async () => {
+    const v = vault();
+    await checkTable(v.app, v.settings, { table: "person" });
+    const seen: RowChange[][] = [];
+    const watcher = new InverseWatcher(v.app, () => v.settings, async (changes) => void seen.push(changes), 60_000);
+    watcher.init();
+    await watcher.flush("P/Nobody.md");
+    await watcher.flush("P");
+    expect(seen).toEqual([]);
+  });
+
+  it("a row renamed by hand: values of the list that are no links are kept beside the replaced link", async () => {
+    const v = vault({
+      "P/Alice.md": person("Alice", 'friends: ["[[Carol]]"]\n'),
+      "P/Carol.md": person("Carol", 'friends: ["[[Alice]]"]\n'),
+      "P/Dave.md": person("Dave", 'friends: [42, "Bob", "[[Mark]]", "[[Alice]]"]\n'),
+    });
+    await checkTable(v.app, v.settings, { table: "person" });
+    const watcher = new InverseWatcher(v.app, () => v.settings, async (changes) => void (await syncRelations(v.app, v.settings, changes)), 60_000);
+    watcher.init();
+    const text = v.read("P/Alice.md").replace('friends: ["[[Carol]]"]', 'friends: ["[[Carol]]", "[[Dave]]"]');
+    v.remove("P/Alice.md");
+    watcher.onDeleted("P/Alice.md");
+    v.write("P/Alicia.md", text);
+    await watcher.flush("P/Alicia.md");
+    expect(fm(v, "P/Dave.md").friends).toEqual([42, "Bob", "[[Mark]]", "[[Alicia]]"]);
+  });
+});
+
+describe("inverse edits of a change set", () => {
+  it("reads the metastore when none is cached; none in the vault: no edits", async () => {
+    const v = vault({ "P/Alice.md": person("Alice", 'friends: ["[[Carol]]"]\n') });
+    const after = readOrderedFromMarkdown(v.read("P/Alice.md")).ordered;
+    const plan = await inverseEditsFor(v.app, v.settings, [{ path: "P/Alice.md", before: [], after }], (p) => p);
+    expect([...plan!.edits.keys()]).toEqual(["P/Carol.md"]);
+    const bare = createDbVault({ "P/Alice.md": person("Alice", 'friends: ["[[Carol]]"]\n') });
+    expect(await inverseEditsFor(bare.app, bare.settings, [{ path: "P/Alice.md", before: [], after }], (p) => p)).toBeNull();
+  });
+
+  it("a row that leaves its table is read by its table before; a note of no table is left out", async () => {
+    const v = vault({ "P/Carol.md": person("Carol", 'friends: ["[[Alice]]"]\n') });
+    await checkTable(v.app, v.settings, { table: "person" });
+    const before = readOrderedFromMarkdown(person("Alice", 'friends: ["[[Carol]]"]\n')).ordered;
+    const plain: [string, unknown][] = [["title", "Hello"]];
+    const plan = await inverseEditsFor(v.app, v.settings, [
+      { path: "P/Alice.md", before, after: [["name", "Alice"]] },
+      { path: "Welcome.md", before: plain, after: plain },
+    ], (p) => p);
+    expect([...plan!.edits.entries()].map(([p, w]) => [p, Object.fromEntries(w.after).friends])).toEqual([["P/Carol.md", []]]);
+  });
+});
+
+describe("inverseSpecs", () => {
+  it("leaves out a table whose columns cannot be resolved (the loader reports it)", () => {
+    const model = parseMetastore(`bases:
+  named:
+    columns:
+      - { name: name, type: string }
+catalogs:
+  main:
+    schemas:
+      public:
+        tables:
+          broken:
+            bases: [named]
+            columns:
+              - { name: name, type: integer }
+${TABLES.split("\n").map((l) => (l === "" ? l : `          ${l}`)).join("\n")}`);
+    const specs = inverseSpecs(model);
+    expect([...specs.keys()]).toEqual(["main.public.person"]);
   });
 });

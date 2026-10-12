@@ -180,6 +180,15 @@ describe("information_schema", () => {
     ]);
   });
 
+  it("types an enum column written by hand without values as an empty enum", async () => {
+    const v = createDbVault({ [METASTORE]: withTables("mood:\n  columns:\n    - { name: id, type: string, unique: true, identity: uuid, required: true, dense: true }\n    - { name: feeling, type: enum }\n") });
+    const cols = await select(v.app, v.settings, { table: "information_schema.columns", where: { table_name: "mood" }, columns: ["column_name", "data_type"] });
+    expect(cols.rows.map((r) => [r.column_name, r.data_type])).toEqual([
+      ["id", "string"],
+      ["feeling", "enum()"],
+    ]);
+  });
+
   it("types a list column written by hand without items as a list of strings", async () => {
     const v = createDbVault({ [METASTORE]: withTables("reading:\n  columns:\n    - { name: id, type: string, unique: true, identity: uuid, required: true, dense: true }\n    - { name: shelves, type: list }\n") });
     const cols = await select(v.app, v.settings, { table: "information_schema.columns", where: { table_name: "reading" }, columns: ["column_name", "data_type"] });

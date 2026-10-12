@@ -323,7 +323,7 @@ export function checkDatabaseRoot(app: App, oldRoot: string, root: string): stri
     if (parent(newRoot) !== parent(oldRoot)) {
       throw new DatabaseConfigError(
         `"${newRoot}" changes the case of a folder above the database folder ${oldRoot}`,
-        fix(`Change the case of the database folder's own name only, e.g. root: "${parent(oldRoot) ? `${parent(oldRoot)}/` : ""}${newRoot.slice(newRoot.lastIndexOf("/") + 1)}".`),
+        fix(`Change the case of the database folder's own name only, e.g. root: "${parent(oldRoot)}/${newRoot.slice(newRoot.lastIndexOf("/") + 1)}".`),
       );
     }
     return newRoot;
@@ -357,7 +357,8 @@ async function rootEntries(app: App, settings: DatanotesSettings, oldRoot: strin
   if (taken.length > 0) {
     throw new DatabaseConfigError(
       `"root": ${taken.map((e) => inDatabase(newRoot, e)).join(", ")} already ${taken.length === 1 ? "exists" : "exist"} in the vault`,
-      guide(`The database's ${newRoot === "" ? "names at the root of the vault" : "folder"} must be free: move or rename ${taken.join(", ")} first, or choose another root, e.g. ${ROOT_EXAMPLE}.`, "moveDatabase"),
+      // only a move to the root can find them taken: a folder it moves to does not exist (checkDatabaseRoot)
+      guide(`The database's names at the root of the vault must be free: move or rename ${taken.join(", ")} first, or choose another root, e.g. ${ROOT_EXAMPLE}.`, "moveDatabase"),
     );
   }
   return entries;

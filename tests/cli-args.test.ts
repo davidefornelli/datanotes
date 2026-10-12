@@ -2,7 +2,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "../src/api/index";
 import { help } from "../src/node/help";
-import { CliOptionError } from "../src/api/cli-options";
+import { CliOptionError, folderArg, readOptions } from "../src/api/cli-options";
 import { parseArgs } from "../src/node/service";
 
 afterEach(() => {
@@ -89,6 +89,35 @@ describe("datanotes serve: options and their environment variables", () => {
     expect(refusal(["serve", "--vault", "/v"]).message).toBe('unexpected argument "serve"');
     // the options engines before 3.0 took are gone, not ignored
     expect(refusal(["--vault", "/v", "--extension", "x.js"]).message).toBe("unknown option --extension");
+  });
+});
+
+describe("the options of a command: readOptions and folderArg", () => {
+  const refusal = (f: () => unknown) => {
+    try {
+      f();
+    } catch (e) {
+      return e as CliOptionError;
+    }
+    throw new Error("not refused");
+  };
+
+  it("a command that takes flags only, or nothing at all", () => {
+    const flagsOnly = readOptions(["--quiet"], { flags: ["quiet"] }, "datanotes tidy");
+    expect([flagsOnly.has("quiet"), flagsOnly.get("quiet")]).toEqual([true, undefined]);
+    expect(refusal(() => readOptions(["--quiet=yes"], { flags: ["quiet"] }, "datanotes tidy")).hint).toBe("Write --quiet alone. datanotes tidy takes: --quiet (datanotes tidy --help).");
+    const none = refusal(() => readOptions(["--verbose"], {}, "datanotes ping"));
+    expect([none.message, none.hint]).toEqual(["unknown option --verbose", "datanotes ping takes: no options (datanotes ping --help)."]);
+  });
+
+  it("the folder from the environment: DATANOTES_DATABASE or DATANOTES_VAULT, never both", () => {
+    const o = readOptions([], { values: ["database", "vault"] }, "datanotes check");
+    expect(folderArg(o, { DATANOTES_DATABASE: "/db" }, "datanotes check")).toEqual({ folder: "/db", atRoot: true });
+    expect(folderArg(o, { DATANOTES_VAULT: "/vault" }, "datanotes check")).toEqual({ folder: "/vault", atRoot: false });
+    expect(folderArg(o, {}, "datanotes check", false)).toBeNull();
+    const both = refusal(() => folderArg(o, { DATANOTES_DATABASE: "/db", DATANOTES_VAULT: "/vault" }, "datanotes check"));
+    expect(both.message).toBe("datanotes check: DATANOTES_DATABASE and DATANOTES_VAULT name the folder twice");
+    expect(both.hint).toMatch(/^Pass --database <folder> when the folder is the database/);
   });
 });
 

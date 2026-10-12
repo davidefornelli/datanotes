@@ -367,6 +367,7 @@ async function recomputeImpl(app: App, settings: DatanotesSettings, input: Recom
       const after = withIdentity(t, withGenerated(t, settings, r.ordered, r.file.path), r.file.path, reassign, {
         now: opts.now ?? new Date(),
         tz,
+        /* v8 ignore next -- platform: a host without file stats (both hosts here give them) */
         ...(fileCreated(app, r.file.path) !== undefined ? { created: fileCreated(app, r.file.path)! } : {}),
       });
       if (JSON.stringify(after) === JSON.stringify(r.ordered)) continue;
@@ -404,12 +405,6 @@ export interface UpdateRowsInput {
  * links from the new path.
  */
 type BodyFor = (finalPath: string, oldPath: string) => Promise<{ body: string; report: AutolinkReport | null }>;
-
-/** The links of several rows' texts, in one report. */
-function mergeReports(a: AutolinkReport | null, b: AutolinkReport | null): AutolinkReport | null {
-  if (!a || !b) return a ?? b;
-  return { added: [...a.added, ...b.added], ambiguous: [...a.ambiguous, ...b.ambiguous] };
-}
 
 async function updateRowsImpl(
   app: App,
@@ -520,7 +515,7 @@ async function updateRowsImpl(
       // linked as seen from where the note will be (a rename moves it)
       const own = await bodyFor(finalPath, r.file.path);
       bodyAfter = own.body;
-      links = mergeReports(links, own.report);
+      links = own.report; // update_row writes one row
     }
     cs.edits.push({
       path: r.file.path,
@@ -719,7 +714,7 @@ async function deleteRowsImpl(
     sources.forEach((s) => referrers.add(s));
   }
   if (policy === "set_null") {
-    const model = cachedMetastore(app, settings);
+    const model = cachedMetastore(app, settings)!; // loadTable above loaded it
     for (const src of [...referrers].sort()) {
       const f = app.vault.getAbstractFileByPath(src) as TFile | null;
       if (!f || !("extension" in f) || f.extension !== "md") continue;
@@ -727,7 +722,7 @@ async function deleteRowsImpl(
       const before = readOrderedFromMarkdown(text).ordered;
       const after = clearLinksTo(app, src, before, doomed);
       // Like ON DELETE SET NULL on a NOT NULL column: a required link left empty is refused.
-      const owner = model ? rowTableFull(model, fmGet(after, settings.tableKey)) : null;
+      const owner = rowTableFull(model, fmGet(after, settings.tableKey));
       const ot = owner ? await loadTable(app, settings, owner) : null;
       if (ot && !src.startsWith(`${archiveFolder(ot.def)}/`)) {
         for (const c of ot.def.columns) {

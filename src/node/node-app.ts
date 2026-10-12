@@ -132,19 +132,17 @@ async function atomicWrite(abs: string, data: string, modes?: FileModes): Promis
  * EPERM / EBUSY / EACCES until it closes it; readers (an editor, an antivirus, a sync tool) hold
  * files for milliseconds, so retry for up to ~3 s before the write fails (and is rolled back).
  */
-async function renameRetrying(from: string, to: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await fsp.rename(from, to);
-      return;
-      /* v8 ignore start -- runs only on Windows, while a reader holds the file; it gives up only if one holds it for seconds */
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (attempt >= 30 || !["EPERM", "EBUSY", "EACCES"].includes(code ?? "")) throw e;
-      await new Promise((r) => setTimeout(r, 25 + attempt * 10));
-    }
-    /* v8 ignore stop */
+async function renameRetrying(from: string, to: string, attempt = 0): Promise<void> {
+  try {
+    await fsp.rename(from, to);
+    /* v8 ignore start -- runs only on Windows, while a reader holds the file; it gives up only if one holds it for seconds */
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (attempt >= 30 || !["EPERM", "EBUSY", "EACCES"].includes(code ?? "")) throw e;
+    await new Promise((r) => setTimeout(r, 25 + attempt * 10));
+    await renameRetrying(from, to, attempt + 1);
   }
+  /* v8 ignore stop */
 }
 
 /**
@@ -1199,8 +1197,8 @@ export class NodeFileManager implements FileManager {
     const before = JSON.stringify(fm);
     fn(fm);
     if (JSON.stringify(fm) === before) return;
-    const entries = Object.entries(fm);
-    await this.vault.writeText(f, entries.length === 0 && ordered.length === 0 ? text : buildMarkdownWithFrontmatter(entries, body));
+    // fm changed, so it had keys before or has some now: never a note left without frontmatter
+    await this.vault.writeText(f, buildMarkdownWithFrontmatter(Object.entries(fm), body));
   }
 
   trashFile(file: TAbstractFile): Promise<void> {

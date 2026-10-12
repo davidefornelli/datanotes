@@ -240,9 +240,10 @@ async function backupCommand(has: (name: string) => boolean, get: (name: string)
 `));
   const st = backup.status;
   c.write(`datanotes store: the store backup is on\nstore        ${loc.store}\nremote       ${redactRemote(remote)}\ncommits      ${cadenceText(parseEvery(settings.storeBackupIntervalSeconds) ?? 60)}\nlast commit  ${st.lastCommit ?? "none"}\nlast push    ${st.lastPush ?? "none"}\n`);
-  if (!started || st.lastError) {
+  // once() fails exactly when it set lastError
+  if (!started) {
     c.write(
-      `error        ${st.lastError ?? "the repository could not be prepared"}\n` +
+      `error        ${st.lastError!}\n` +
         `The setting is saved: the engine commits ${cadenceText(parseEvery(settings.storeBackupIntervalSeconds) ?? 60)} and retries the push. Check the URL, and that git push works from ${loc.store}.\n`,
     );
     return 1;

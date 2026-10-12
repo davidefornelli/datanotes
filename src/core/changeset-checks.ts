@@ -70,12 +70,8 @@ function renewedRules(prev: Metastore, next: Metastore): Set<string> {
     for (const c of modelColumns(next, ref.full)!) { // a table of the model
       if ((c.ref_where ?? c.ref_by) != null && was.get(String(c.name)) !== rule(c)) out.add(`${ref.full}|${String(c.name)}`);
     }
-    let p: CatalogRef | null = null;
-    try {
-      p = resolveCatalogRef(prev, ref.full);
-    } catch {
-      // not a table before: every CHECK is new
-    }
+    // a full name is never ambiguous: null when it was not a table before (every CHECK is new)
+    const p = resolveCatalogRef(prev, ref.full);
     const old = p ? prev.catalogs[p.catalog]?.schemas[p.schema]?.tables[p.table]?.constraints ?? {} : {};
     for (const [name, where] of Object.entries(entry.constraints ?? {})) {
       if (followsLinks(where) && JSON.stringify(old[name]) !== JSON.stringify(where)) out.add(`${ref.full}|CHECK ${name}`);
@@ -159,7 +155,7 @@ export async function linkedCheckViolations(
   await linkTargetViolations(app, settings, filtered, written, consequential, after, before, add, suffix, renewed, metastore, validated);
   for (const { ref } of owners) {
     const s = await tableIn(app, settings, metastore, ref.full);
-    for (const [name, where] of Object.entries(s.catalog.entry.constraints ?? {})) {
+    for (const [name, where] of Object.entries(s.catalog.entry.constraints!)) { // an owner has CHECKs
       if (!followsLinks(where)) continue;
       await after.prepare(s, where);
       const rows = after.rowsOf(s);
@@ -192,11 +188,8 @@ export async function linkedCheckViolations(
           // not written by this change: refused only when the change breaks it
           if (!passed) {
             await before.prepare(s, where);
-            try {
-              passed = compileCheck(where as Where, s, settings, before);
-            } catch {
-              passed = () => false;
-            }
+            // it compiled above, on the same tables (`before` reads the metastore `after` reads)
+            passed = compileCheck(where as Where, s, settings, before);
           }
           if (passed(r)) add(r.file.path, { constraint: name, code: "check", message: `${message}${suffix(r, heads)}` });
           continue;

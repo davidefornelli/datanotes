@@ -30,13 +30,15 @@ interface Storage {
 }
 
 let storage: Storage | null = null;
+/* v8 ignore start -- platform: a runtime without node:async_hooks (Node always has it) */
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { AsyncLocalStorage } = require("node:async_hooks") as { AsyncLocalStorage: new () => Storage };
   storage = new AsyncLocalStorage();
-} catch /* v8 ignore next -- Node always has async_hooks */ {
+} catch {
   storage = null;
 }
+/* v8 ignore stop */
 
 const generation = (app: App): number => GENERATION.get(app) ?? 0;
 
@@ -59,11 +61,13 @@ export function wrote(app: App): void {
  * and run it again when it was refused that way (`isStale`), at most WRITE_ATTEMPTS times.
  */
 export async function runWrite<T>(app: App, fn: () => Promise<T>, isStale: (result: T) => boolean): Promise<T> {
+  /* v8 ignore next -- platform: a runtime without node:async_hooks (Node always has it) */
   if (!storage) return fn();
-  for (let attempt = 1; ; attempt++) {
-    const result = await storage.run({ gen: generation(app) }, fn);
-    if (attempt >= WRITE_ATTEMPTS || !isStale(result)) return result;
-  }
+  const s = storage;
+  const attempt = () => s.run({ gen: generation(app) }, fn);
+  let result = await attempt();
+  for (let n = 1; n < WRITE_ATTEMPTS && isStale(result); n++) result = await attempt();
+  return result;
 }
 
 /** Does an answer (an operation's result, a batch's steps) hold the STALE_WRITE conflict? */

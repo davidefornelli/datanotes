@@ -8,7 +8,7 @@ import { emptyChangeSet, type ChangeSet } from "./changeset";
 import { transactionLogDir, listVersions } from "./transaction-log";
 import { storeList } from "./store";
 import { readersBlocking } from "./link-paths";
-import { cachedMetastore, catalogTablePath, loadMetastore, metastorePath, orderedToEntry, parseMetastore, refOf, rowTableFull, setTableEntry, tableTags, withTableTags, type CatalogRef } from "./metastore";
+import { cachedMetastore, catalogTablePath, loadMetastore, metastorePath, orderedToEntry, refOf, rowTableFull, setTableEntry, tableTags, withTableTags, type CatalogRef } from "./metastore";
 import {
   finish,
   serializeOptions,
@@ -76,7 +76,7 @@ async function relocateTable(
   fields: Record<string, unknown> = {},
 ): Promise<OpResult> {
   const conflicts: OpConflict[] = [];
-  const merged: Record<string, unknown> = { ...(serializeOptions(t.def.options)[0] ?? {}) };
+  const merged: Record<string, unknown> = { ...serializeOptions(t.def.options)[0] }; // it has a name at least
   for (const [k, v] of Object.entries(changes)) {
     if (v === null) delete merged[k];
     else merged[k] = v;
@@ -93,9 +93,8 @@ async function relocateTable(
     layout = catalogLayout(databaseRoot(settings), ref, options);
     // Rows carry the system UUID id (a row without one gets it when it moves).
     member = (o) => withRowId([[settings.tableKey, ref.full], ...o.filter(([k]) => !membership.has(k))] as OrderedFrontmatter);
-    const ms = await loadMetastore(app, settings);
-    const text = ms?.text ?? "";
-    const model = ms?.model ?? parseMetastore("");
+    // the table was just loaded from it
+    const { text, model } = (await loadMetastore(app, settings))!;
     const sch = model.catalogs[ref.catalog]?.schemas[ref.schema];
     if (ref.full !== t.catalog.ref.full && (sch?.tables[ref.table] || sch?.views[ref.table])) {
       conflicts.push({ path: catalogTablePath(settings, ref.full), message: `${ref.full} already exists` });
@@ -203,11 +202,12 @@ async function relocateTable(
     relink({ path: r.file.path, ordered: r.ordered }, to);
   }
   // Archived rows (not rows any more, but still linked to the schema) follow to the new archive.
-  const oldArchive = t.def.layout.archive;
   const newArchive = layout.archive;
   for (const f of archiveMoves ? archivedRowFiles(app, settings, t) : []) {
     const { ordered } = readOrderedFromMarkdown(await app.vault.read(f), membership);
-    const to = newArchive === oldArchive ? f.path : claim(`${newArchive}/${basenameOf(f.path)}`, f.path);
+    // archiveMoves means the archive folder changes: a rename gives the table a new folder, and
+    // alterTableImpl turns a vault-path archive into a folder name inside it, so never the same path
+    const to = claim(`${newArchive}/${basenameOf(f.path)}`, f.path);
     relink({ path: f.path, ordered }, to);
   }
   return finish(app, settings, cs, conflicts, [], opts);

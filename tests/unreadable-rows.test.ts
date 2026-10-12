@@ -79,6 +79,30 @@ describe("the front matter of a note", () => {
   });
 });
 
+describe("the unreadable rows of a vault", () => {
+  it("are found on a host whose index throws on broken YAML; a note held by another program is skipped", async () => {
+    const v = logVault({ "Notes/held.md": "---\ntable: log\nkind: [walk\n---\n" });
+    broken(v);
+    const vault = v.app.vault as unknown as { read(f: { path: string }): Promise<string> };
+    const real = vault.read.bind(vault);
+    vi.spyOn(vault, "read").mockImplementation(async (f) => {
+      if (f.path === "Notes/held.md") throw new Error("EBUSY: resource busy or locked");
+      return real(f);
+    });
+    const model = parseMetastore(v.read("Datanotes/metastore.yaml"));
+    expect(await unreadableRows(v.app, v.settings, model)).toEqual([{ path: A, table: "main.public.log", error: expect.any(String) }]);
+    vi.restoreAllMocks();
+  });
+
+  it("of a table whose options cannot be read leave no folder out", () => {
+    const v = logVault();
+    const text = v.read("Datanotes/metastore.yaml").replace('partition: "{occurred_at:YYYY/MM/DD}"', "partition: 5");
+    const model = parseMetastore(text);
+    const row = unreadableRowOf(model, v.settings, `${LOG_DIR}/_archive/x.md`, "---\ntable: log\nkind: [walk\n---\n");
+    expect(row).toEqual({ path: `${LOG_DIR}/_archive/x.md`, table: "main.public.log", error: expect.any(String) });
+  });
+});
+
 describe("check_table and describe_database", () => {
   it("report the row with code unreadable and count it apart, until it is fixed", async () => {
     const e = engine(logVault({ "Notes/plain-broken.md": "---\nx: [\n---\n", [`${LOG_DIR}/_archive/old.md`]: "---\ntable: log\nkind: [walk\n---\n" }));

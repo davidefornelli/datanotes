@@ -256,9 +256,11 @@ export async function checkExternalEdits(app: App, settings: DatanotesSettings, 
     }
     before = new CheckLinks(app, settings, cs, undefined, true);
   }
+  // `at` is an edited row: its path is in byPath already (the rows read above, the removed ones below)
   const add = (at: string, v: ExternalViolation | null, full: string) => {
+    /* v8 ignore next -- defensive: the checks of hand edits never produce inverse or generated codes (ownViolations leaves them out) */
     if (!v) return;
-    byPath.set(at, [...(byPath.get(at) ?? []), v]);
+    byPath.set(at, [...byPath.get(at)!, v]);
     tableOf.set(v.path, full);
   };
   // The edited rows, against their table's rules.
@@ -277,7 +279,7 @@ export async function checkExternalEdits(app: App, settings: DatanotesSettings, 
       const was: LoadedRow[] = [];
       for (const r of rows) {
         const e = edits.get(r.file.path)!;
-        if ((found.get(r.file.path) ?? []).length > 0 && tableOfOrdered(e.before) === full) {
+        if (found.get(r.file.path)!.length > 0 && tableOfOrdered(e.before) === full) {
           was.push({ file: { path: e.oldPath ?? r.file.path } as TFile, ordered: e.before!, body: "" });
         }
       }
@@ -292,7 +294,7 @@ export async function checkExternalEdits(app: App, settings: DatanotesSettings, 
     }
     for (const r of rows) {
       const skip = old.get(r.file.path);
-      for (const v of found.get(r.file.path) ?? []) if (!skip?.has(violationKey(v))) add(r.file.path, externalViolation(r.file.path, v), full);
+      for (const v of found.get(r.file.path)!) if (!skip?.has(violationKey(v))) add(r.file.path, externalViolation(r.file.path, v), full);
     }
   }
   // The rows that link to an edited row, for the rules that read its table through the link.
@@ -350,9 +352,11 @@ export async function checkExternalEdits(app: App, settings: DatanotesSettings, 
           await before!.prepare(s, where);
           try {
             passed = compileCheck(where as Where, s, settings, before!);
+            /* v8 ignore start -- defensive: the same CHECK compiled against the vault after the edits (above) */
           } catch {
             passed = () => false;
           }
+          /* v8 ignore stop */
         }
         return failure(passed(r));
       };

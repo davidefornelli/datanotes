@@ -366,7 +366,7 @@ export class StoreBackup {
       if (this.hasRemote && !this.status.lastError) {
         await this.countPending();
         const n = this.status.pendingCommits;
-        if (n > 0) progress(`pushing ${n} commit${n === 1 ? "" : "s"} to ${this.status.remote ?? "origin"}`);
+        if (n > 0) progress(`pushing ${n} commit${n === 1 ? "" : "s"} to ${this.status.remote!}`);
         await this.push(true);
       }
     } finally {
@@ -543,6 +543,7 @@ export class StoreBackup {
         // the operations this commit covers: every one noted so far is written, as the lock says
         ops = this.ops;
         this.ops = [];
+        let succeeded = false;
         try {
           const add = await this.git(...NO_AUTO_GC, "add", "-A");
           if (add.code !== 0) throw new Error(`git add: ${add.stderr.trim()}`);
@@ -552,11 +553,11 @@ export class StoreBackup {
             const commit = await this.git(...NO_AUTO_GC, "commit", "-q", "-m", this.message(n, ops));
             if (commit.code !== 0) throw new Error(`git commit: ${commit.stderr.trim() || commit.stdout.trim()}`);
           }
+          succeeded = true;
           return n;
-        } catch (e) {
-          this.ops = [...ops, ...this.ops];
-          throw e;
         } finally {
+          // a failed add or commit leaves its operations to the next commit
+          if (!succeeded) this.ops = [...ops, ...this.ops];
           this.lastLockMs = performance.now() - started;
           this.status.pendingOperations = this.ops.length;
         }

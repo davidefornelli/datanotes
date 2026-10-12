@@ -12,7 +12,7 @@ import { createTable, dropColumn, INDEX_RETRY, OperationInputError, renameColumn
 import { readOrderedFromMarkdown } from "../src/core/frontmatter";
 import { parseMetastore } from "../src/core/metastore";
 import { checkTable, insertRow } from "../src/core/rows";
-import { createDbVault, METASTORE, type DbVault } from "./helpers/db-vault";
+import { createDbVault, METASTORE, withTables, type DbVault } from "./helpers/db-vault";
 import { described } from "./helpers/descriptions";
 
 INDEX_RETRY.delayMs = 1;
@@ -224,5 +224,38 @@ describe("rename_value and value descriptions", () => {
     // a value without a description: the descriptions stay as they are
     expect((await renameValue(v.app, v.settings, { table: "film", column: "status", from: "to watch", to: "wishlist" })).ok).toBe(true);
     expect(column(v, "film", "status")!.value_descriptions).toEqual({ watched: "seen at least once" });
+  });
+});
+
+describe("rename_value and a hand-edited ref_by", () => {
+  // `stage.parent` names `kind` without levels or a map: the file loads, only `stage` is malformed
+  const TABLES = `phase:
+  options:
+    filename: "{name}"
+  columns:
+    - { name: id, type: string, unique: true, identity: uuid, required: true, dense: true }
+    - { name: name, type: string, required: true, dense: true }
+    - { name: kind, type: enum, values: [area, project] }
+stage:
+  options:
+    filename: "{name}"
+  columns:
+    - { name: id, type: string, unique: true, identity: uuid, required: true, dense: true }
+    - { name: name, type: string, required: true, dense: true }
+    - { name: parent, type: link, ref: main.public.phase, ref_by: { column: kind } }
+    - { name: owner, type: link, ref: main.public.phase, ref_by: { column: kind, levels: null } }
+`;
+  const stage = (v: DbVault) => {
+    const ms = v.read(METASTORE);
+    return ms.slice(ms.indexOf("stage:"));
+  };
+
+  it("leaves a ref_by without levels or a map as it is and renames the value", async () => {
+    const v = createDbVault({ [METASTORE]: withTables(TABLES) });
+    const before = stage(v);
+    const r = await renameValue(v.app, v.settings, { table: "phase", column: "kind", from: "project", to: "initiative" });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(parseMetastore(v.read(METASTORE)).catalogs.main!.schemas.public!.tables.phase!.columns.find((c) => c.name === "kind")!.values).toEqual(["area", "initiative"]);
+    expect(stage(v)).toBe(before);
   });
 });

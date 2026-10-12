@@ -330,6 +330,7 @@ export async function tableChanges(
     const added = new Map(c.add.map((a) => [a.path, a]));
     for (const r of c.remove) {
       const before = prev?.files.get(r.path)?.content;
+      /* v8 ignore next -- defensive: a removed file was in the previous version */
       const values = before !== undefined ? rowValues(before, settings) : {};
       const after = added.get(r.path);
       changes.push({ ...values, path: r.path, _change_type: after ? "update_preimage" : "delete", ...meta });

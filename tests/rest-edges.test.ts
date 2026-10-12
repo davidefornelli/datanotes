@@ -74,6 +74,45 @@ describe("REST routes: argument refusals (400, exact messages)", () => {
 });
 
 describe("REST routes: options passed through", () => {
+  it("a batch whose operation fails with an error (no result) rolls back and answers 422 with the error", async () => {
+    const { call, v } = setup();
+    const r = await call("/operations/batch/", {
+      operations: [
+        { op: "insert_row", table: "log", values: { kind: "walk", occurred_at: "2026-10-01T07:00" } },
+        { op: "update_rows", table: "log", where: {}, set: { color: "red" } },
+      ],
+    });
+    expect(r.status).toBe(422);
+    expect(r.json).toMatchObject({ ok: false, failed_at: 1, rolled_back: true, steps: [{ ok: true }, { ok: false, error: `unknown column "color" for table "log"` }] });
+    expect(v.list().filter((p) => p.startsWith("Datanotes/main/public/log/"))).toEqual([]);
+  });
+
+  it("a batch whose rollback cannot undo an operation answers 500", async () => {
+    const v = logVault();
+    // the journal is lost as soon as the batch has written it (a sync tool removed it): nothing can be undone
+    const settings = () => {
+      for (const p of v.listAll()) if (p.startsWith("store:journal/")) v.remove(p);
+      return v.settings;
+    };
+    const h = createHandlers(v.app, settings);
+    const r = await dispatch("/operations/batch/", h["/operations/batch/"]!, {
+      operations: [
+        { op: "insert_row", table: "log", values: { kind: "walk", occurred_at: "2026-10-01T07:00" } },
+        { op: "update_rows", table: "log", where: {}, set: { color: "red" } },
+      ],
+    });
+    expect(r.status).toBe(500);
+    expect(r.json).toMatchObject({ ok: false, failed_at: 1, rolled_back: false, rollback: [{ ok: false }] });
+    expect((r.json as { hint: string }).hint).toMatch(/^Some operations could not be undone/);
+  });
+
+  it("update_rows with unset only", async () => {
+    const { call, v } = setup();
+    const r = await call("/operations/update_rows/", { table: "log", where: { kind: "alcohol" }, unset: ["metric_drinks"] });
+    expect(r).toMatchObject({ status: 200, json: { ok: true } });
+    expect(v.read("Daily/a.md")).not.toContain("metric_drinks");
+  });
+
   it("a batch whose operation is refused (422) rolls back and answers 422 with that operation's reason", async () => {
     const { call, v } = setup();
     const r = await call("/operations/batch/", {

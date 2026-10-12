@@ -119,15 +119,17 @@ function sleepSync(ms: number): void {
 
 /** Run a file operation, again after a pause when it fails with a transient error (TRANSIENT). */
 export function retrying<T>(op: () => T): T {
-  for (let i = 0; ; i++) {
+  for (let i = 0; i < fileRetry.attempts - 1; i++) {
     try {
       return op();
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
-      if (i >= fileRetry.attempts - 1 || !code || !TRANSIENT.has(code)) throw e;
+      if (!code || !TRANSIENT.has(code)) throw e;
       sleepSync(fileRetry.delayMs * 2 ** i);
     }
   }
+  // the last attempt: its error goes up
+  return op();
 }
 
 /** Remove a file or folder, retried on a transient error. */

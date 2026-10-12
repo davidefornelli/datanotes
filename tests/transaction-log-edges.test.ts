@@ -161,6 +161,27 @@ describe("syncTransactionLogs", () => {
     expect([back.add.map((a) => [a.path, a.content]), back.remove.map((r) => r.path)]).toEqual([[[row, fixed]], [row]]);
   });
 
+  it("a row that cannot be read at all (held by another program) is no broken note: the log records its removal", async () => {
+    const v = await moodVault();
+    await insertMood(v, "09", 1);
+    const row = rowPath("09");
+    v.write(row, v.read(row).replace("value: 3", "value: 4"));
+    const vault = v.app.vault as unknown as { read(f: { path: string }): Promise<string> };
+    const real = vault.read.bind(vault);
+    vi.spyOn(vault, "read").mockImplementation(async (f) => {
+      if (f.path === row) throw new Error("EBUSY: resource busy or locked");
+      return real(f);
+    });
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    expect(await syncTransactionLogs(v.app, v.settings, { operation: EXTERNAL_EDIT, touched: [row], now: new Date(Date.UTC(2026, 8, 1, 11)) })).toEqual([
+      { table: MOOD, version: 2, operation: EXTERNAL_EDIT },
+    ]);
+    const commit = await readCommit(v.app, v.settings, MOOD, 2);
+    expect([commit.add, commit.remove.map((r) => r.path)]).toEqual([[], [row]]);
+  });
+
   it("never overwrites a version another writer committed first", async () => {
     const v = await moodVault();
     await insertMood(v, "09", 1);

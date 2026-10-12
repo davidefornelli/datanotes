@@ -163,3 +163,23 @@ describe("moving the database folder", () => {
     expect((await select(v.app, v.settings, { table: "mood", columns: ["label"] })).rows).toEqual([{ path: "db/main/metrics/mood/calm.md", label: "calm" }]);
   });
 });
+
+describe("database settings and moves at their edges", () => {
+  it("reads a time zone left empty in the file as the empty one", async () => {
+    const v = createDbVault({ "Datanotes/metastore.yaml": "config:\n  timezone:\n  default_partition:\ncatalogs: {}\n" });
+    const cfg = await readDatabaseConfig(v.app, v.settings);
+    expect([cfg.timezone, cfg.default_partition]).toEqual(["", ""]);
+  });
+
+  it("refuses the root of the vault when several names of the database are taken there", async () => {
+    const v = createDbVault({ "main/notes.md": "mine\n", "metastore.yaml": "mine too\n" });
+    expect((await createTable(v.app, v.settings, described({ name: "film", columns: [{ name: "title", type: "string" }], options: { filename: "{title}" } }))).ok).toBe(true);
+    await expect(configureDatabase(v.app, v.settings, { root: "" }, async () => {})).rejects.toThrow(/^"root": (metastore\.yaml, main|main, metastore\.yaml) already exist in the vault$/);
+  });
+
+  it("moves a database that has no metastore yet to the root of the vault", async () => {
+    const v = createDbVault({});
+    const d = await configureDatabase(v.app, v.settings, { root: "" }, async () => {});
+    expect(d.root).toBe("");
+  });
+});

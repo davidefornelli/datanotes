@@ -36,7 +36,7 @@ import os from "node:os";
 import path from "node:path";
 import { mergeWithDefaults, RUNTIME_KEYS, type DatanotesSettings } from "../core/settings";
 import { telemetry } from "../core/telemetry";
-import { isFresh, LockHolder, readLock } from "../server/engine-lock";
+import { LockHolder } from "../server/engine-lock";
 import { EngineRuntime } from "../server/runtime";
 import { onApplied } from "../core/engine";
 import { recordDatabaseMove } from "../core/database";
@@ -253,13 +253,6 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
     }
   };
 
-  // One engine per database: refuse while another live engine holds the lock (a stale lock, or one
-  // left by a process that is gone, does not count).
-  const held = await readLock(app.store, "");
-  if (isFresh(held) && held.pid !== process.pid && (held.host !== os.hostname() || processAlive(held.pid))) {
-    host.metadataCache.dispose();
-    throw new Error(`another engine holds the vault (pid ${held.pid} on ${held.host}, port ${held.port}): stop it first`);
-  }
   const watcher = new NodeWatcher(host.vault, { mode: o.watch, intervalMs: o.pollMs });
   const keyFromFile = () => {
     if (!o.embeddingKeyFile) return undefined;
@@ -339,8 +332,9 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
   const stop = (): Promise<void> => {
     stopping ??= (async () => {
       // new requests are refused (503) from here on; the ones under way finish
-      const drained = await runtime.drain(o.drainMs ?? 30_000);
-      if (!drained) telemetry().log("WARN", "datanotes stopped before every request under way was answered", { waited_ms: o.drainMs ?? 30_000 });
+      const drainMs = o.drainMs ?? 30_000;
+      const drained = await runtime.drain(drainMs);
+      if (!drained) telemetry().log("WARN", "datanotes stopped before every request under way was answered", { waited_ms: drainMs });
       offApplied?.();
       offBackup?.();
       git?.stop();
@@ -453,16 +447,6 @@ export async function lastGitSync(git: GitSync, ms: number): Promise<void> {
   git.kill();
   telemetry().log("WARN", "datanotes git sync stopped before its last push ended", { waited_ms: ms });
   await Promise.race([cycle, new Promise((r) => setTimeout(r, 1000))]);
-}
-
-/** Is a process with this pid running on this machine? */
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 /** `datanotes serve` (the command line is in `cli.ts`). */

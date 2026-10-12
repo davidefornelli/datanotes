@@ -178,6 +178,28 @@ describe("HTTP server: requests", () => {
     const { request } = await serve({ version: undefined });
     expect(JSON.parse((await request("GET", "/")).body).version).toBe("");
     expect(JSON.parse((await request("GET", "/datanotes/openapi.json")).body).info.version).toBe("");
+    // the console references its assets with the version "dev"
+    const page = await request("GET", "/datanotes/docs", { headers: { authorization: "" } });
+    expect(page.status).toBe(200);
+    expect(page.body).toContain("?v=dev");
+  });
+
+  it("the status page names a named token's owner", async () => {
+    const { request } = await serve({ tokens: { authenticate: async (t: string) => (t === "app-token" ? { name: "reporting" } : null) } });
+    expect(JSON.parse((await request("GET", "/", { headers: { authorization: "Bearer app-token" } })).body)).toMatchObject({ authenticated: true, auth: "reporting" });
+    expect(JSON.parse((await request("GET", "/", { headers: { authorization: "Bearer other-token" } })).body)).toMatchObject({ authenticated: false, auth: null });
+  });
+
+  it("an operation route with a name that cannot be one, and a route close to an operation's", async () => {
+    const { request } = await serve();
+    const bad = await request("POST", "/datanotes/operations/Select-Rows/");
+    expect(bad.status).toBe(404);
+    expect(JSON.parse(bad.body)).toEqual(guided("unknown operation Select-Rows"));
+    expect(JSON.parse(bad.body).hint).toMatch(/^Call an operation with POST/);
+    const near = await request("POST", "/datanotes/operation/list_tables/");
+    expect(near.status).toBe(404);
+    expect(JSON.parse(near.body)).toEqual(guided("unknown route /datanotes/operation/list_tables/"));
+    expect(JSON.parse(near.body).hint).toMatch(/^Did you mean \/datanotes\/operations\/list_tables\/\? /);
   });
 
 

@@ -20,6 +20,7 @@ import {
   setBaseEntry,
   setConfig,
   tableTags,
+  withNewDatabaseConfig,
   withTableTags,
 } from "../src/core/metastore";
 import { MalformedColumnError, tableDefinitionFromOrdered } from "../src/core/table-loader";
@@ -411,5 +412,19 @@ describe("metastore.yaml in the words before 3.0", () => {
     );
     expect(refusal("catalogs:\n  main:\n    comment: Everything\n").message).toMatch(/^catalogs\.main: "comment"/);
     expect(refusal("bases:\n  dated:\n    columns:\n      - { name: day, type: date, comment: The day }\n").message).toMatch(/^bases\.dated\.columns\[0\]: "comment" .* write "description"$/);
+  });
+});
+
+describe("the metastore of a database the engine creates", () => {
+  it("gets history on, first after its leading comments, unless it sets it", () => {
+    expect(withNewDatabaseConfig("{}")).toBe("config:\n  history: true\n");
+    expect(withNewDatabaseConfig("# Garden database\ncatalogs: {}\n")).toBe("# Garden database\nconfig:\n  history: true\ncatalogs: {}\n");
+    expect(parseMetastore(withNewDatabaseConfig("config: {}\n")).config).toEqual({ history: true });
+    expect(parseMetastore(withNewDatabaseConfig("config:\n  default_catalog: garden\n")).config).toEqual({ default_catalog: "garden", history: true });
+  });
+
+  it("is left as written when it sets history, or cannot be read (the write reports it)", () => {
+    expect(withNewDatabaseConfig("config:\n  history: false\n")).toBe("config:\n  history: false\n");
+    expect(withNewDatabaseConfig("- a list\n")).toBe("- a list\n");
   });
 });

@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeRefusal } from "../src/api/results";
-import { emptyChangeSet, type NoteEdit } from "../src/core/changeset";
+import { applyChangeSet, bodyOf, emptyChangeSet, readJournal, type NoteEdit } from "../src/core/changeset";
 import { configureDatabase } from "../src/core/database";
 import { emptyResult, finish, INDEX_RETRY, onApplied, undoOperation } from "../src/core/engine";
 import { fmSet, readOrderedFromMarkdown } from "../src/core/frontmatter";
@@ -196,6 +196,59 @@ describe("when the rollback fails too", () => {
       { path: "Daily/a.md", error: 'not rolled back: "metric_drinks" changed since the operation' },
     ]);
     expect(v.read("Daily/a.md")).toContain("metric_drinks: 5");
+  });
+
+  it("a retried rollback skips every kind of change already back: texts, rows, moves, creates, deletes", async () => {
+    const extra = { "Notes/plain.md": "plain\n", "Notes/old.md": "old\n", "Notes/old2.md": "old 2\n" };
+    const v = logVault({ [C]: ROW_C, ...extra });
+    await configureDatabase(v.app, v.settings, { history: true }, async () => {});
+    const all = [...ROWS, ...Object.keys(extra)];
+    const before = Object.fromEntries(all.map((p) => [p, v.read(p)]));
+    const cs = emptyChangeSet("custom", "every kind of change, then a missing file");
+    cs.creates.push({ path: "Notes/new.md", content: "new\n" });
+    cs.texts.push({ path: "Notes/plain.md", before: "plain\n", after: "plain, linked\n" });
+    cs.edits.push(edit(v, "Daily/a.md", 1));
+    const bodyB = bodyOf(v.read("Daily/b.md"));
+    cs.edits.push({ ...edit(v, "Daily/b.md", 2), bodyBefore: bodyB, bodyAfter: `${bodyB}edited\n` });
+    cs.moves.push({ from: C, to: "Daily/moved.md" });
+    cs.deletes.push("Notes/old.md", "Notes/old2.md", "Notes/missing.md");
+    // the rollback puts back everything but the last deleted note, which another program holds
+    const vault = v.app.vault as unknown as { create(path: string, data: string): Promise<TFile> };
+    const real = vault.create.bind(vault);
+    vi.spyOn(vault, "create").mockImplementation(async (path, data) => {
+      if (path === "Notes/old2.md") throw new Error("EBUSY: resource busy or locked");
+      return real(path, data);
+    });
+    const r = await finish(v.app, v.settings, cs, [], [], {});
+    expect(r).toMatchObject({ ok: false, rolled_back: false });
+    expect(r.failed).toEqual([
+      { path: "Notes/missing.md", error: "file not found" },
+      { path: "Notes/old2.md", error: "not rolled back: EBUSY: resource busy or locked" },
+    ]);
+    expect(v.exists("Notes/old2.md")).toBe(false);
+    expect(v.exists("Notes/new.md")).toBe(false);
+
+    // the retry finds the rest back as before and restores only the held note
+    vi.restoreAllMocks();
+    const u = await undoOperation(v.app, v.settings, r.migration_id!);
+    expect(u.ok, JSON.stringify(u.conflicts)).toBe(true);
+    expect(Object.fromEntries(all.map((p) => [p, v.read(p)]))).toEqual(before);
+    expect(v.exists("Daily/moved.md")).toBe(false);
+    const { entry } = await readJournal(v.app, v.settings, u.migration_id!);
+    expect(entry).toMatchObject({ creates: ["Notes/old2.md"], rows: [], moves: [], references: [], deleted: [] });
+  });
+
+  it("a note created and deleted by the same write keeps no hash for its undo", async () => {
+    const v = await vault();
+    const cs = emptyChangeSet("custom", "create and delete");
+    cs.creates.push({ path: "Notes/temp.md", content: "temp\n" });
+    cs.deletes.push("Notes/temp.md");
+    const r = await applyChangeSet(v.app, v.settings, cs);
+    expect(r.failed).toEqual([]);
+    expect(v.exists("Notes/temp.md")).toBe(false);
+    const { entry } = await readJournal(v.app, v.settings, r.migrationId);
+    expect(entry.creates).toEqual(["Notes/temp.md"]);
+    expect(entry.created_hashes).toBeUndefined();
   });
 
   it("a rollback whose journal entry cannot be read says so", async () => {
