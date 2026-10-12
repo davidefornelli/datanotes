@@ -59,7 +59,8 @@ describe("a path counts as the folder listing spells it", () => {
     expect(on("darwin", () => host.vault.syncPath("Notes/Other.md"))).toBeNull();
   });
 
-  it.skipIf(process.platform === "win32")("Windows: the path as the file system spells it; a spelling in another case is not there", () => {
+  // two names that differ in case only need a file system that keeps case apart: Linux, not macOS
+  it.skipIf(process.platform !== "linux")("Windows: the path as the file system spells it; a spelling in another case is not there", () => {
     const { host, root } = open({});
     fs.mkdirSync(path.join(root, "Notes"));
     fs.writeFileSync(path.join(root, "Notes", "Plan.md"), "plan\n");
