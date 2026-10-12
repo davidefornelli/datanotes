@@ -214,10 +214,6 @@ console.log(films.value);
 
 Each film is now a note, `main/public/film/Nosferatu.md`, with the values in its front matter. The [JavaScript client](https://datanotes.dev/develop/client/) page covers the rest of the client.
 
-## Stability: Datanotes 3 stays 3
-
-Every 3.x version adds to what you use and never takes it away. Operations, arguments, answer fields, routes, commands and settings keep working the same way. [Compatibility](https://datanotes.dev/reference/compatibility/) explains the promise and how the tests enforce it.
-
 ## Learn more
 
 - [Documentation](https://datanotes.dev)
