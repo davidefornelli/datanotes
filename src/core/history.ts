@@ -8,14 +8,17 @@ import type { App, TFile } from "./host";
 import { emptyChangeSet, type ChangeSet } from "./changeset";
 import {
   AbsentTableError,
+  applyCommit,
   commitInfos,
   history,
   HistoryError,
   loggedTables,
   listVersions,
+  newestCommitInfos,
   readCommit,
   readCurrentStates,
   tableStateAt,
+  transactionLogDir,
   vacuum,
   withLogLock,
   type AsOf,
@@ -23,13 +26,15 @@ import {
   type TableState,
   type VacuumResult,
 } from "./transaction-log";
+import { MOVES_FILE } from "./database-move";
+import { storeGeneration } from "./store";
 import {
   catalogLoadedTable,
   finish,
   instrumented,
   OperationInputError,
   RESTORE_WAY_OUT,
-  type LoadedRow,
+  type LoadedRowWithBody as LoadedRow,
   type LoadedTable,
   type OpResult,
   type RowViolations,
@@ -49,6 +54,7 @@ import {
 import type { DatanotesSettings } from "./settings";
 import { tableNotFound } from "./table-registry";
 import { guide, type Guidance } from "./hints";
+import { phase } from "./tracing";
 
 /** A table without a transaction log: how to turn it on. */
 export const HISTORY_OFF = (full: string) => guide(`Turn history on for it with alter_table("${full}", history: true), or for every table with configure_database(history: true); versions are kept from then on.`, "history");
@@ -158,10 +164,26 @@ export function sinceMs(since: string): number {
   return ms;
 }
 
+/**
+ * The newest `limit` commit infos, newest first, each read from its commit's first line only (a
+ * commit holds the text of every row it adds). A log that is not as the engine writes it (a
+ * commit whose first line is no commitInfo) is read in full instead, and refused as before.
+ */
+async function newestHistory(app: App, settings: DatanotesSettings, full: string, limit: number): Promise<CommitInfo[]> {
+  try {
+    // as many as `slice(0, limit)` keeps, whatever number `limit` is
+    const infos = await newestCommitInfos(app, settings, full, Number.isNaN(limit) ? 0 : Math.max(0, Math.trunc(limit)));
+    if (infos.every((c) => c !== null && typeof c === "object")) return infos;
+  } catch {
+    // read in full below
+  }
+  return history(app, settings, full, limit);
+}
+
 export async function describeHistory(app: App, settings: DatanotesSettings, input: DescribeHistoryInput): Promise<HistoryDescription> {
   const ref = await historyTableName(app, settings, input.table);
   const limit = input.limit ?? 50;
-  if (input.since === undefined) return { table: ref.full, history: await history(app, settings, ref.full, limit) };
+  if (input.since === undefined) return { table: ref.full, history: await newestHistory(app, settings, ref.full, limit) };
   const from = sinceMs(input.since);
   const infos = (await commitInfos(app, settings, ref.full)).filter((c) => Date.parse(c.timestamp) >= from);
   return { table: ref.full, history: infos.reverse().slice(0, Math.max(limit, 0)) };
@@ -176,30 +198,89 @@ export interface HistoricalTable {
   timestamp: string;
 }
 
+/** A table's state as of a version or time, its rows parsed: what time travel reads. */
+interface Replayed {
+  version: number;
+  timestamp: string;
+  entry: TableState["entry"];
+  rows: LoadedRow[];
+  /** The characters of its rows' texts, for the budget. */
+  chars: number;
+  /** The store's count of changes to the table's log and to the moves of the database folder, when it was replayed. */
+  stamp: string;
+}
+
+/**
+ * Tables replayed for time travel, kept for the reads that ask the same again (a page after a page,
+ * an agent comparing versions): at most `maxEntries`, and `maxChars` characters of row text, the
+ * least recently used out first. A replay stays right while the table's log and the moves of the
+ * database folder are unchanged: the log only grows, a vacuum or a move changes them.
+ */
+export const TIME_TRAVEL_CACHE = { maxEntries: 8, maxChars: 16 * 1024 * 1024 };
+
+const REPLAYED = new WeakMap<object, Map<string, Replayed>>();
+
+/** What a replay of `full` depends on, as the store counts its changes. */
+function replayStamp(app: App, settings: DatanotesSettings, full: string): string {
+  return `${storeGeneration(app, transactionLogDir(settings, full))}/${storeGeneration(app, MOVES_FILE)}`;
+}
+
+async function replayed(app: App, settings: DatanotesSettings, full: string, asOf: AsOf): Promise<Replayed> {
+  const at = asOfOf(asOf);
+  let cache = REPLAYED.get(app);
+  if (!cache) REPLAYED.set(app, (cache = new Map()));
+  const key = [full, at.version ?? "", at.timestamp ?? "", settings.tableKey].join("\u0000");
+  // taken before reading: a change while it replays leaves a stamp that no longer matches
+  const stamp = replayStamp(app, settings, full);
+  const kept = cache.get(key);
+  if (kept && kept.stamp === stamp) {
+    cache.delete(key);
+    cache.set(key, kept);
+    return kept;
+  }
+  const state = await stateAt(app, settings, full, at);
+  const keep = new Set([settings.tableKey]);
+  let chars = 0;
+  const rows: LoadedRow[] = [...state.files.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, f]) => {
+      chars += f.content.length;
+      const { ordered, body } = readOrderedFromMarkdown(f.content, keep);
+      return { file: pseudoFile(path), ordered, body };
+    });
+  const r: Replayed = { version: state.version, timestamp: state.timestamp, entry: state.entry, rows, chars, stamp };
+  cache.delete(key);
+  if (chars <= TIME_TRAVEL_CACHE.maxChars) {
+    cache.set(key, r);
+    let total = 0;
+    for (const x of cache.values()) total += x.chars;
+    for (const [k, x] of cache) {
+      if (cache.size <= TIME_TRAVEL_CACHE.maxEntries && total <= TIME_TRAVEL_CACHE.maxChars) break;
+      cache.delete(k);
+      total -= x.chars;
+    }
+  }
+  return r;
+}
+
 /** A table and its rows as of a version or time (read from the log; nothing is written). */
-export async function loadTableAsOf(
+async function loadTableAsOfImpl(
   app: App,
   settings: DatanotesSettings,
   table: string,
   asOf: AsOf,
 ): Promise<HistoricalTable> {
   const ref = await historyTableName(app, settings, table);
-  const state = await stateAt(app, settings, ref.full, asOfOf(asOf));
-  if (state.entry == null) throw new TableAbsentError(`${ref.full} did not exist at version ${state.version} (dropped)`);
+  const r = await replayed(app, settings, ref.full, asOf);
+  if (r.entry == null) throw new TableAbsentError(`${ref.full} did not exist at version ${r.version} (dropped)`);
   const ms = await loadMetastore(app, settings);
   const file = ms?.file ?? pseudoFile(metastorePath(settings));
-  // Bases are read from the current metastore (the log keeps table entries, not bases).
+  // Bases are read from the current metastore (the log keeps table entries, not bases). The entry
+  // and the rows are the caller's own: the replay may be read again.
+  const state = { entry: JSON.parse(JSON.stringify(r.entry)) as TableState["entry"] } as TableState;
   const t = catalogLoadedTable(settings, { file, text: "", model: modelWith(ref, state, ms?.model.bases ?? {}) }, ref);
-  const rows: LoadedRow[] = [...state.files.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([path, f]) => {
-      const { ordered, body } = readOrderedFromMarkdown(
-        f.content,
-        new Set([settings.tableKey]),
-      );
-      return { file: pseudoFile(path), ordered, body };
-    });
-  return { table: t, rows, version: state.version, timestamp: state.timestamp };
+  const rows = r.rows.map((x) => ({ file: x.file, ordered: x.ordered.map(([k, v]) => [k, v] as [string, unknown]), body: x.body }));
+  return { table: t, rows, version: r.version, timestamp: r.timestamp };
 }
 
 // --- restore_table ---
@@ -320,7 +401,9 @@ export async function tableChanges(
     throw new OperationInputError(`"start_version" and "end_version" must be integers with start <= end`, guide(`describe_history("${ref.full}") lists the versions; pass start_version <= end_version among them.`, "versions"));
   }
   if (end > latest) throw new OperationInputError(`${ref.full} has no version ${end} (latest: ${latest})`, guide(`describe_history("${ref.full}") lists the versions; the latest is ${latest}.`, "versions"));
-  let prev = start === 0 ? null : await stateAt(app, settings, ref.full, { version: start - 1 });
+  // the version before the range, replayed once; each commit of the range is then applied to it
+  // (with today's paths, as the replay gives them) instead of replaying the log again per version
+  let prev: TableState = start === 0 ? { full: ref.full, version: -1, timestamp: "", entry: null, files: new Map() } : await stateAt(app, settings, ref.full, { version: start - 1 });
   const changes: TableChange[] = [];
   for (const v of versions) {
     if (v < start || v > end) continue;
@@ -328,8 +411,9 @@ export async function tableChanges(
     const meta = { _commit_version: v, _commit_timestamp: c.commitInfo.timestamp, _operation: c.commitInfo.operation };
     if (c.metaData !== undefined && v > 0) changes.push({ _change_type: "metadata", ...meta });
     const added = new Map(c.add.map((a) => [a.path, a]));
+    const removed = new Set(c.remove.map((r) => r.path));
     for (const r of c.remove) {
-      const before = prev?.files.get(r.path)?.content;
+      const before = prev.files.get(r.path)?.content;
       /* v8 ignore next -- defensive: a removed file was in the previous version */
       const values = before !== undefined ? rowValues(before, settings) : {};
       const after = added.get(r.path);
@@ -337,10 +421,11 @@ export async function tableChanges(
       if (after) changes.push({ ...rowValues(after.content, settings), path: r.path, _change_type: "update_postimage", ...meta });
     }
     for (const a of c.add) {
-      if (c.remove.some((r) => r.path === a.path)) continue;
+      if (removed.has(a.path)) continue;
       changes.push({ ...rowValues(a.content, settings), path: a.path, _change_type: "insert", ...meta });
     }
-    prev = await stateAt(app, settings, ref.full, { version: v });
+    // a private state: changed in place
+    prev = applyCommit(prev, c);
   }
   return { table: ref.full, changes };
 }
@@ -369,4 +454,13 @@ export async function vacuumTable(
       throw new OperationInputError(e.message, historyGuidance(ref.full, e.message));
     }
   });
+}
+
+/** {@link loadTableAsOfImpl}, traced: a time-travel read rebuilds the table from its history. */
+export function loadTableAsOf(...args: Parameters<typeof loadTableAsOfImpl>): ReturnType<typeof loadTableAsOfImpl> {
+  return phase("engine.history.read", async (span) => {
+    const t = await loadTableAsOfImpl(...args);
+    span.setAttributes({ "datanotes.version": t.version, "datanotes.rows_scanned": t.rows.length });
+    return t;
+  }, { "db.collection.name": args[2] });
 }

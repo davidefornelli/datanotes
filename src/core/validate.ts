@@ -11,6 +11,7 @@ import type {
 } from "./types-table";
 import type { OrderedFrontmatter } from "./types";
 import { didYouMean } from "./hints";
+import { tally, traceNow, tracingOn } from "./tracing";
 
 export interface ValidationContext {
   /** Resolve a wikilink path (no brackets, alias or heading) to a vault path, or null. */
@@ -184,8 +185,21 @@ export interface ValidateRowOptions {
   reportUnknown?: boolean;
 }
 
-/** Validate a full row (ordered frontmatter) against the table. */
-export function validateRow(
+/**
+ * Validate a full row (ordered frontmatter) against the table. Once per row: timed on the active
+ * span (`datanotes.validate.rows`, `datanotes.validate.ms`), not a span each.
+ */
+export function validateRow(table: TableDefinition, row: OrderedFrontmatter, options: ValidateRowOptions, ctx: ValidationContext = {}): Violation[] {
+  if (!tracingOn()) return validateRowImpl(table, row, options, ctx);
+  const start = traceNow();
+  try {
+    return validateRowImpl(table, row, options, ctx);
+  } finally {
+    tally("datanotes.validate.rows", "datanotes.validate.ms", start);
+  }
+}
+
+function validateRowImpl(
   table: TableDefinition,
   row: OrderedFrontmatter,
   options: ValidateRowOptions,

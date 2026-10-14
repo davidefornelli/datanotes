@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { invalidateFiles } from "../src/core/file-cache";
+import type { TFile } from "../src/core/host";
 import { addConstraint, cloneTable, createView, dropConstraint, dropView } from "../src/core/catalog-ops";
 import { configureDatabase } from "../src/core/database";
 import { createTable, INDEX_RETRY } from "../src/core/engine";
@@ -194,6 +196,28 @@ describe("clone_table", () => {
     expect((await select(v.app, v.settings, { table: "mood_empty" })).total).toBe(0);
     const again = await cloneTable(v.app, v.settings, { source: "personal.metrics.mood", target: "mood_empty" });
     expect(again.ok).toBe(false);
+  });
+
+  it("keeps the bodies of the rows when the first read of a row fails once (a transient error)", async () => {
+    const v = await moodVault();
+    await insertRow(v.app, v.settings, { table: "mood", values: { occurred_at: "2026-09-26T09:00", value: 2 } });
+    await insertRow(v.app, v.settings, { table: "mood", values: { occurred_at: "2026-09-26T10:00", value: 3 } });
+    for (const n of ["0900", "1000"]) v.write(`${P}/2026-09-26T${n}.md`, `${v.read(`${P}/2026-09-26T${n}.md`)}Body ${n}.\n`);
+    invalidateFiles(v.app, [`${P}/2026-09-26T0900.md`, `${P}/2026-09-26T1000.md`]);
+    const vault = v.app.vault as unknown as { read(f: TFile): Promise<string> };
+    const real = vault.read.bind(vault);
+    let failed = false;
+    vi.spyOn(vault, "read").mockImplementation(async (f) => {
+      if (!failed && f.path.startsWith(`${P}/`)) {
+        failed = true;
+        throw new Error(`EBUSY: resource busy or locked, open '${f.path}'`);
+      }
+      return real(f);
+    });
+    const copy = await cloneTable(v.app, v.settings, { source: "mood", target: "mood_copy" });
+    vi.restoreAllMocks();
+    expect([copy.ok, failed]).toEqual([true, true]);
+    for (const n of ["0900", "1000"]) expect(readOrderedFromMarkdown(v.read(`${P}_copy/2026-09-26T${n}.md`)).body).toContain(`Body ${n}.\n`);
   });
 
   it("deep-clones a table with its own history setting (properties.history is not a row option)", async () => {

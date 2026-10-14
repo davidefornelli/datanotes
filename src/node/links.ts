@@ -12,6 +12,12 @@
  * Code blocks and inline code are skipped, like Obsidian does.
  */
 
+import { addLinkLookupNames, fileLookupNames, linkLookupNames, normalizePath } from "../core/link-names";
+
+// The lookups of `LinkResolver.resolve` (a file created, deleted or renamed changes only the links
+// that look up its names), shared with the engine's link graph.
+export { addLinkLookupNames, fileLookupNames, linkLookupNames, normalizePath };
+
 export type LinkFormat = "shortest" | "relative" | "absolute";
 
 export interface LinkRef {
@@ -54,18 +60,7 @@ function stripMd(path: string): string {
   return path.replace(/\.md$/i, "");
 }
 
-/** Normalize `a/./b/../c` and leading slashes. `null` when it climbs above the root. */
-export function normalizePath(path: string): string | null {
-  const out: string[] = [];
-  for (const part of path.replace(/\\/g, "/").split("/")) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") {
-      if (out.length === 0) return null;
-      out.pop();
-    } else out.push(part);
-  }
-  return out.join("/");
-}
+
 
 /** Ranges of fenced code blocks and inline code spans (links inside are not links). */
 function codeRanges(text: string, from: number): [number, number][] {
@@ -166,10 +161,20 @@ export function parseLinks(text: string): LinkRef[] {
   return out.sort((a, b) => a.start - b.start);
 }
 
-/** Lookup structures over the vault's file list, rebuilt when files are added or removed. */
+
+/**
+ * Lookup structures over the vault's file list: built once, then kept up to date file by file
+ * ({@link add}, {@link remove}) as files are created, deleted and renamed.
+ */
 export class LinkResolver {
-  private byLowerPath = new Map<string, string>();
-  private byLowerName = new Map<string, string[]>();
+  /**
+   * Lower-case path → the file with it, or the files in the order they were added (more than one
+   * only where the disk tells cases apart). One path is kept as a string: most paths and names
+   * have one file, and a list or set for each would cost tens of megabytes on a large vault.
+   */
+  private byLowerPath = new Map<string, string | string[]>();
+  /** Lower-case file name (with and without `.md`) → the file with it, or the set of files. */
+  private byLowerName = new Map<string, string | Set<string>>();
 
   constructor(index: FileIndex) {
     this.rebuild(index);
@@ -178,17 +183,53 @@ export class LinkResolver {
   rebuild(index: FileIndex): void {
     this.byLowerPath.clear();
     this.byLowerName.clear();
-    for (const p of index.paths()) {
-      this.byLowerPath.set(p.toLowerCase(), p);
-      const name = basename(p).toLowerCase();
-      for (const key of new Set([name, stripMd(name)])) this.byLowerName.set(key, [...(this.byLowerName.get(key) ?? []), p]);
+    for (const p of index.paths()) this.add(p);
+  }
+
+  /** A file the vault has now (added after the files it has already: the last of one path in two cases wins). */
+  add(path: string): void {
+    const lower = path.toLowerCase();
+    const same = this.byLowerPath.get(lower);
+    if (same === path || (Array.isArray(same) && same.includes(path))) return; // known already: it keeps its place
+    if (same === undefined) this.byLowerPath.set(lower, path);
+    else if (typeof same === "string") this.byLowerPath.set(lower, [same, path]);
+    else same.push(path);
+    for (const key of fileLookupNames(path)) {
+      const names = this.byLowerName.get(key);
+      if (names === undefined) this.byLowerName.set(key, path);
+      else if (typeof names === "string") this.byLowerName.set(key, new Set([names, path]));
+      else names.add(path);
+    }
+  }
+
+  /** A file the vault no longer has. */
+  remove(path: string): void {
+    const lower = path.toLowerCase();
+    const same = this.byLowerPath.get(lower);
+    if (same === path) this.byLowerPath.delete(lower);
+    else {
+      const i = Array.isArray(same) ? same.lastIndexOf(path) : -1;
+      if (i < 0) return;
+      const list = same as string[];
+      list.splice(i, 1);
+      if (list.length === 1) this.byLowerPath.set(lower, list[0]!);
+    }
+    for (const key of fileLookupNames(path)) {
+      const names = this.byLowerName.get(key)!; // added with the path
+      if (typeof names === "string") {
+        this.byLowerName.delete(key);
+        continue;
+      }
+      names.delete(path);
+      if (names.size === 1) this.byLowerName.set(key, names.values().next().value!);
     }
   }
 
   private exact(path: string | null): string | null {
     if (path === null || path === "") return null;
     const lower = path.toLowerCase();
-    return this.byLowerPath.get(lower) ?? this.byLowerPath.get(`${lower}.md`) ?? null;
+    const hit = this.byLowerPath.get(lower) ?? this.byLowerPath.get(`${lower}.md`);
+    return typeof hit === "string" ? hit : (hit?.at(-1) ?? null);
   }
 
   /** The file a link path points to from `sourcePath`, or null. */
@@ -206,7 +247,8 @@ export class LinkResolver {
     if (!norm) return null;
     const lower = norm.toLowerCase();
     const name = basename(lower);
-    const candidates = (this.byLowerName.get(name) ?? []).filter((p) => {
+    const named = this.byLowerName.get(name);
+    const candidates = (named === undefined ? [] : typeof named === "string" ? [named] : [...named]).filter((p) => {
       const lp = p.toLowerCase();
       return lp === lower || lp === `${lower}.md` || lp.endsWith(`/${lower}`) || lp.endsWith(`/${lower}.md`);
     });
@@ -219,7 +261,8 @@ export class LinkResolver {
 
   /** How many files share this file's name (for the `shortest` format). */
   sameName(path: string): number {
-    return (this.byLowerName.get(basename(path).toLowerCase()) ?? []).length;
+    const named = this.byLowerName.get(basename(path).toLowerCase());
+    return named === undefined ? 0 : typeof named === "string" ? 1 : named.size;
   }
 }
 

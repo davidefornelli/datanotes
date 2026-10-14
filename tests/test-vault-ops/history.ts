@@ -102,10 +102,12 @@ export const scenarios: Scenario[] = [
       // vacuum: a dry run unless asked; then time travel before the kept version is gone
       const dryVacuum = await t.ok<{ retained_from: number; deleted: string[]; dry_run: boolean }>("vacuum_table", { table: "task" });
       expect(dryVacuum).toMatchObject({ retained_from: 8, dry_run: true });
-      expect(dryVacuum.deleted).toHaveLength(8);
+      // versions 0 to 8 are in one segment (the default format): that file goes
+      expect(dryVacuum.deleted).toEqual(["store:transaction_log/work.planning.task/00000000000000000000.segment.jsonl"]);
       expect((await t.ok<Rows>("select_rows", { table: "task", version: 1 })).total).toBe(8);
       const vacuumed = await t.ok<{ deleted: string[]; dry_run: boolean }>("vacuum_table", { table: "task", retain_from_version: 3, dry_run: false });
-      expect(vacuumed.deleted).toEqual([0, 1, 2].map((n) => `store:transaction_log/work.planning.task/${String(n).padStart(20, "0")}.json`));
+      // the versions from 3 on are written to a segment of their own, the old one goes
+      expect(vacuumed.deleted).toEqual(["store:transaction_log/work.planning.task/00000000000000000000.segment.jsonl"]);
       expect(await t.refused("select_rows", { table: "task", version: 1 })).toBe("work.planning.task has no version 1 (available: 3..8)");
       expect((await t.ok<History>("describe_history", { table: "task" })).history.map((v) => v.version)).toEqual([8, 7, 6, 5, 4, 3]);
       expect((await t.ok<Rows>("select_rows", { table: "task", version: 3 })).total).toBe(8);

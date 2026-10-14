@@ -10,6 +10,7 @@ import { catalogLayout, DEFAULT_DATABASE_FOLDER, parseTableOptions } from "./tab
 import { TABLE_KEY } from "./types-table";
 import type { ValidationContext } from "./validate";
 import { vaultGeneration } from "./file-cache";
+import { vaultIndex } from "./vault-index";
 import { closestNames, guide, GuidedError, nameList, sentences, type Guidance } from "./hints";
 import { normalizeDatabaseFolder } from "./db-paths";
 
@@ -114,6 +115,8 @@ function markdownFile(app: App, path: string): TFile | null {
 }
 
 const vocabularyCache = new WeakMap<App, { gen: number; sets: Map<string, ReadonlySet<string>> }>();
+/** With a vault index: each table's names, kept while its rows do not change (vault-index.ts). */
+const indexedVocabularies = new WeakMap<App, Map<string, { gen: number; epoch: number; model: Metastore; names: ReadonlySet<string> }>>();
 
 /** Names of the rows of `table` (from Obsidian's frontmatter index), cached per vault generation. */
 function vocabularyOf(
@@ -121,6 +124,24 @@ function vocabularyOf(
   settings: Pick<DatanotesSettings, "databaseFolder" | "tableKey">,
   table: string,
 ): ReadonlySet<string> | null {
+  const idx = vaultIndex(app, settings);
+  if (idx) {
+    const ms = cachedMetastore(app, { databaseFolder: settings.databaseFolder });
+    if (!ms) return null;
+    let byTable = indexedVocabularies.get(app);
+    if (!byTable) indexedVocabularies.set(app, (byTable = new Map()));
+    const gen = idx.tableGeneration(table);
+    const hit = byTable.get(table);
+    if (hit && hit.gen === gen && hit.epoch === idx.epoch && hit.model === ms) return hit.names;
+    const names = new Set<string>();
+    for (const f of idx.rowsOf(table)) {
+      if (f.path.includes("/_archive/")) continue;
+      const name = idx.note(f.path)!.frontmatter!.name; // a row has front matter
+      if (typeof name === "string" && name.trim() !== "") names.add(name.trim());
+    }
+    byTable.set(table, { gen, epoch: idx.epoch, model: ms, names });
+    return names;
+  }
   const gen = vaultGeneration(app);
   let entry = vocabularyCache.get(app);
   if (!entry || entry.gen !== gen) {
@@ -141,6 +162,27 @@ function vocabularyOf(
   }
   entry.sets.set(table, names);
   return names;
+}
+
+/**
+ * How the names kept per table (vault index) differ from the names read from every note now
+ * (index-check.ts); empty when they agree.
+ */
+export function verifyVocabularies(app: App, settings: Pick<DatanotesSettings, "databaseFolder" | "tableKey">): string[] {
+  const idx = vaultIndex(app, settings);
+  const ms = cachedMetastore(app, { databaseFolder: settings.databaseFolder });
+  const out: string[] = [];
+  for (const [table, hit] of indexedVocabularies.get(app) ?? []) {
+    if (!idx || !ms || hit.gen !== idx.tableGeneration(table) || hit.epoch !== idx.epoch || hit.model !== ms) continue; // read again on its next use
+    const names = new Set<string>();
+    for (const f of app.vault.getMarkdownFiles()) {
+      const fm = frontmatterOf(app, f);
+      if (!fm || rowTableFull(ms, fm[settings.tableKey]) !== table || f.path.includes("/_archive/")) continue;
+      if (typeof fm.name === "string" && fm.name.trim() !== "") names.add(fm.name.trim());
+    }
+    if (JSON.stringify([...names]) !== JSON.stringify([...hit.names])) out.push(`names of ${table}: ${JSON.stringify([...hit.names])} instead of ${JSON.stringify([...names])}`);
+  }
+  return out;
 }
 
 const archiveCache = new WeakMap<Metastore, { root: string; folders: readonly string[] }>();

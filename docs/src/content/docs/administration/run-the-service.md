@@ -26,6 +26,24 @@ The first start creates the engine’s store and its settings file, `settings.js
 npx -y datanotes store path --database your_database_folder
 ```
 
+Add `--json` to get the answer as an object:
+
+| Field | Meaning |
+| --- | --- |
+| `vault` | The folder you gave, as an absolute path |
+| `store` | The store folder |
+| `database_id` | The database’s id |
+| `database_folder` | The database folder, relative to the folder you gave; empty with `--database` |
+| `database_path` | The database folder on disk, with `metastore.yaml` at its root |
+
+Every field but `vault` is `null` when the engine cannot tell where the store would be. That happens only when all three hold:
+
+- You pass no `--store`, and `DATANOTES_STORE` is not set.
+- This machine never ran the engine on the folder.
+- `metastore.yaml` has no id yet.
+
+With `--store`, only `database_id` can be `null`: neither the store nor `metastore.yaml` records the id.
+
 To run the engine in a container, follow [Run in Docker](/administration/docker/).
 
 ## Where the engine keeps its store

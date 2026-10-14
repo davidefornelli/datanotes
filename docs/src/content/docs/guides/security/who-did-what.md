@@ -35,6 +35,8 @@ A program that serves its own Model Context Protocol (MCP) server can report its
 
 Tool calls appear on the change feed as events with `kind: "tool_call"`, sent only to consumers that ask for that kind. The `call` field holds `tool`, `ok`, `served_by`, `duration_ms`, `summary` and `session`, the arguments cut at 300 characters, the value cut at 1,000, and the result’s size in `result_chars` and `result_tokens`.
 
+A large result costs less to report when the program cuts it first. The engine answers `takes_summary: true` when it accepts a cut call. Then send the value cut at 1,000 characters, and the result’s `summary` next to it. The event is the same as for the whole call. `datanotes mcp` does this after its first report.
+
 ## Read who did what
 
 Three operations read the record:

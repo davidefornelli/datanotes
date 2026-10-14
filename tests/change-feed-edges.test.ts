@@ -6,8 +6,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChangeFeed, wireEvent, wirePage, type ChangeEvent } from "../src/core/change-feed";
+import { ChangeFeed, firstAfter, wireEvent, wirePage, type ChangeEvent } from "../src/core/change-feed";
 import { INDEX_RETRY, notifyApplied } from "../src/core/engine";
+import { invalidateFiles } from "../src/core/file-cache";
 import type { TFile } from "../src/core/host";
 import { insertRow } from "../src/core/rows";
 import { NOOP_TELEMETRY, setTelemetry } from "../src/core/telemetry";
@@ -33,6 +34,13 @@ function captureLogs(): { body: string; attrs: Record<string, unknown> }[] {
 /** Reads of these paths fail as when another program holds the file (EBUSY). */
 function lockReads(v: DbVault): Set<string> {
   const locked = new Set<string>();
+  // a note locked here is one the engine has not read yet (the headless host hands the notes it
+  // read at start to the file cache)
+  const add = locked.add.bind(locked);
+  locked.add = (p: string) => {
+    invalidateFiles(v.app, [p]);
+    return add(p);
+  };
   const vault = v.app.vault as unknown as { read(f: TFile): Promise<string> };
   const read = vault.read.bind(vault);
   vault.read = async (f) => {
@@ -317,6 +325,55 @@ describe("change files", () => {
     await again.stop();
   });
 
+  it("older reads skip the day files whose events all come before `since`, with the same pages", async () => {
+    const v = logVault();
+    const feed = new ChangeFeed(v.app, () => v.settings);
+    await feed.start();
+    // five days of 30 tool calls each: 1-30 on the 1st, 31-60 on the 2nd, ...
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let day = 1; day <= 5; day++) {
+      vi.setSystemTime(new Date(`2026-01-0${day}T10:00:00Z`));
+      for (let i = 0; i < 30; i++) await feed.recordToolCall(call(i));
+    }
+    vi.useRealTimers();
+    // this feed wrote every file: it knows each one's newest event
+    const adapter = v.app.store! as unknown as { read(p: string): Promise<string> };
+    const reads = vi.spyOn(adapter, "read");
+    const all = Array.from({ length: 150 }, (_, i) => i + 1);
+    const page = async (f: ChangeFeed, since: number, limit: number) => (await f.read({ ops: ["tool_call"], since, limit })).events.map((e) => e.seq);
+    await feed.stop();
+    // a fresh feed keeps the last day in memory: older reads go to the files
+    const again = new ChangeFeed(v.app, () => v.settings);
+    await again.start();
+    await again.states; // the rows' states, then the row paths saved: not the reads looked at here
+    reads.mockClear();
+    expect(await page(again, 10, 25)).toEqual(all.slice(10, 35));
+    expect(reads.mock.calls.map(([p]) => p.split("/").pop())).toEqual(["2026-01-01.jsonl", "2026-01-02.jsonl"]);
+    reads.mockClear();
+    // the 1st now is known to end at 30: from 70 on, the 3rd is the first day read
+    expect(await page(again, 70, 500)).toEqual(all.slice(70));
+    expect(reads.mock.calls.map(([p]) => p.split("/").pop())).toEqual(["2026-01-03.jsonl", "2026-01-04.jsonl", "2026-01-05.jsonl"]);
+    expect(await page(again, 119, 5)).toEqual([120, 121, 122, 123, 124]);
+    expect(await page(again, 0, 500)).toEqual(all);
+    // the newest events come from memory, where the first one after `since` is looked up
+    reads.mockClear();
+    await again.recordToolCall(call(151));
+    expect(await page(again, 148, 500)).toEqual([149, 150, 151]);
+    expect(await page(again, 151, 500)).toEqual([]);
+    expect(await page(again, 120, 2)).toEqual([121, 122]);
+    expect(reads).not.toHaveBeenCalled();
+    // a day pruned is forgotten with its file
+    expect(await again.prune(new Date("2026-02-01T12:00:00Z"))).toBe(1);
+    expect(await page(again, 0, 500)).toEqual([...all.slice(30), 151]);
+    await again.stop();
+  });
+
+  it("finds the first event after a sequence number by halving", () => {
+    const evs = [2, 3, 5, 8, 13].map((seq) => ({ seq }));
+    expect([0, 2, 3, 4, 12, 13, 99].map((s) => firstAfter(evs, s))).toEqual([0, 1, 2, 2, 4, 5, 5]);
+    expect(firstAfter([], 7)).toBe(0);
+  });
+
   it("reports a gap when the events after `since` were dropped by retention", async () => {
     const v = logVault();
     const feed = new ChangeFeed(v.app, () => v.settings);
@@ -462,6 +519,7 @@ describe("the feed's own files", () => {
     const v = logVault();
     const feed = new ChangeFeed(v.app, () => v.settings);
     await feed.start();
+    await feed.states; // the row paths saved once after start
     const logs = captureLogs();
     const adapter = v.app.store! as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
     vi.spyOn(adapter, "write").mockRejectedValue(new Error("ENOSPC: no space left on device"));
@@ -524,6 +582,7 @@ describe("a move of the database folder", () => {
     const v = logVault();
     const feed = new ChangeFeed(v.app, () => v.settings);
     await feed.start();
+    await feed.states;
     // the row paths are saved last while stopping: the move is heard then, and the metastore read slowly
     let saved: (() => void) | undefined;
     let read: (() => void) | undefined;
@@ -533,7 +592,9 @@ describe("a move of the database folder", () => {
       await new Promise<void>((r) => (saved = r));
       return write(...a);
     });
-    const vault = v.app.vault as unknown as { read(f: TFile): Promise<string> };
+    const vault = v.app.vault as unknown as { read(f: TFile): Promise<string>; adapter: { stat?: unknown } };
+    // the metastore is read again (a host with stat would keep it while unchanged)
+    vault.adapter.stat = undefined;
     const realRead = vault.read.bind(vault);
     vi.spyOn(vault, "read").mockImplementation(async (f) => {
       if (saved && f.path === METASTORE) await new Promise<void>((r) => (read = r));
@@ -608,5 +669,43 @@ describe("hand edits in one batch", () => {
     expect(events.filter((e) => e.op === "unreadable").map((e) => [e.path, e.table])).toEqual([["Daily/a.md", "main.public.log"]]);
     expect(unread()).toEqual(["Daily/b.md", "Notes/r.md", "Notes/new.md"]);
     await feed.stop();
+  });
+});
+
+describe("the feed's writes to the store", () => {
+  it("an operation of many rows is one append, and a row moved since the last save is one appended line", async () => {
+    const v = logVault();
+    const feed = new ChangeFeed(v.app, () => v.settings);
+    await feed.start();
+    // the start's row states, and its first save of the rows' paths, settle after start() returns
+    await feed.flush();
+    const store = v.app.store!;
+    const appends: string[] = [];
+    const append = store.append.bind(store);
+    vi.spyOn(store, "append").mockImplementation(async (p: string, d: string) => {
+      appends.push(p);
+      return append(p, d);
+    });
+    const writes: string[] = [];
+    const writeFile = store.write.bind(store);
+    vi.spyOn(store, "write").mockImplementation(async (p: string, d: string) => {
+      writes.push(p);
+      return writeFile(p, d);
+    });
+    for (const [i, kind] of ["walk", "mood", "walk"].entries()) v.write(`Daily/n${i}.md`, `---\ntable: main.public.log\nid: 01a0f000-0000-7000-8000-0000000000e${i}\nkind: ${kind}\noccurred_at: 2026-09-2${i}T10:00\n---\n`);
+    invalidateFiles(v.app, ["Daily/n0.md", "Daily/n1.md", "Daily/n2.md"]);
+    notifyApplied(v.app, { op: "insert_row", summary: "three rows", migrationId: "m1", paths: ["Daily/n0.md", "Daily/n1.md", "Daily/n2.md"], moves: [], deletes: [] });
+    await feed.flush();
+    // the day file made with the first of them, or appended to: one write for the three events
+    expect([...appends, ...writes].filter((p) => p.startsWith("changes/"))).toHaveLength(1);
+    expect((await feed.read({ since: 0 })).events.map((e) => e.path)).toEqual(["Daily/n0.md", "Daily/n1.md", "Daily/n2.md"]);
+    // the rows' paths: the start wrote them all; what changed since is appended
+    await (feed as unknown as { saveRowPaths(): Promise<void> }).saveRowPaths();
+    expect(writes.filter((p) => p === "hand-moves/rows.json")).toEqual([]);
+    expect(v.read("store:hand-moves/rows.log.jsonl").trim().split("\n")).toHaveLength(3);
+    await feed.stop(); // every row again, the change lines gone
+    expect(writes.filter((p) => p === "hand-moves/rows.json")).toEqual(["hand-moves/rows.json"]);
+    expect(v.exists("store:hand-moves/rows.log.jsonl")).toBe(false);
+    vi.restoreAllMocks();
   });
 });

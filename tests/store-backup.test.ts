@@ -23,7 +23,7 @@ import { mergeWithDefaults, type DatanotesSettings } from "../src/core/settings"
 import { logLockActivity, withLogLock } from "../src/core/transaction-log";
 import { parseEvery, prepareStoreRepo, redactRemote, STOP_TIMEOUT_MS, STORE_GITATTRIBUTES, STORE_GITIGNORE, StoreBackup, type BackupEngine } from "../src/node/store-backup";
 import { FIRST_BACKUP_LOCAL_TIMEOUT_MS, main as storeCommand } from "../src/node/store-command";
-import { StoreSetupError } from "../src/node/store-setup";
+import { fileRetry, StoreSetupError } from "../src/node/store-setup";
 import { described } from "./helpers/descriptions";
 
 const ID = "01a1b2c3-0000-7000-8000-000000000001";
@@ -872,10 +872,31 @@ describe("datanotes store backup", { timeout: 60_000 }, () => {
     await expectRefused(["backup", "--vault", vault, "--remote", "u", "--ssh-command", ""], "--ssh-command needs a command, and goes with --remote <url>");
     await expectRefused(["backup", "--vault", vault, "--interval-s", "9"], '--interval-s must be a whole number of seconds, at least 10: "9"');
     await expectRefused(["backup", "--vault", vault, "--interval-s", "operation"], '--interval-s must be a whole number of seconds, at least 10: "operation"');
-    write(store, "engine.lock", JSON.stringify({ kind: "service", pid: 1, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date().toISOString() }));
-    await expectRefused(["backup", "--vault", vault, "--off"], /^an engine holds this database \(pid 1 on /);
+    write(store, "engine.lock", JSON.stringify({ kind: "service", pid: process.ppid, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date().toISOString() }));
+    await expectRefused(["backup", "--vault", vault, "--off"], new RegExp(`^an engine holds this database \\(pid ${process.ppid} on `));
     await expectRefused(["backup", "--vault", tmp("store-backup-empty-")], /^no store yet for /);
     await expect(storeCommand(["bogus"], { env })).rejects.toThrow(/path \| new-id \| backup \| restore/);
+  });
+
+  it("holds the store while it turns the backup on, through the first push; a live engine whose heartbeat stopped refuses it", async () => {
+    const { vault, store, env } = stored();
+    const remote = bare();
+    const seen: unknown[] = [];
+    const run: GitRunner = async (args, cwd, o) => {
+      if (gitSubcommand(args) === "push") seen.push(JSON.parse(fs.readFileSync(path.join(store, "engine.lock"), "utf8")));
+      return runGit(args, cwd, o);
+    };
+    expect(await storeCommand(["backup", "--vault", vault, "--remote", remote], { env, write: () => undefined, run })).toBe(0);
+    expect(seen.length).toBeGreaterThan(0);
+    for (const l of seen) expect(l).toMatchObject({ pid: process.pid, host: os.hostname(), port: 0 });
+    expect(fs.existsSync(path.join(store, "engine.lock"))).toBe(false);
+    // the lock never goes into the backup
+    expect(git(remote, "ls-tree", "-r", "--name-only", "main")).not.toContain("engine.lock");
+    const beat = Date.now() - Math.min(3_600_000, os.uptime() * 1000 - 5_000);
+    const hung = JSON.stringify({ kind: "service", pid: process.ppid, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date(beat).toISOString() });
+    write(store, "engine.lock", hung);
+    await expect(storeCommand(["backup", "--vault", vault, "--off"], { env, write: () => undefined })).rejects.toThrow(`an engine holds this database (pid ${process.ppid} on ${os.hostname()}, port 9)`);
+    expect(fs.readFileSync(path.join(store, "engine.lock"), "utf8")).toBe(hung);
   });
 });
 
@@ -934,7 +955,8 @@ describe("datanotes store restore", { timeout: 60_000 }, () => {
     const other = "01a1b2c3-0000-7000-8000-0000000000ff";
     const { remote, vault, home, env } = await backedUp(other);
     await refused(["restore", "--from", remote, "--vault", vault], env, `is the store backup of the database ${other}, not of this vault's database ${ID}`);
-    expect(fs.readdirSync(home)).toEqual([]); // the clone is gone, nothing registered
+    // the clone is gone, nothing registered; the claimed store folder is gone (the setup lock's folder stays, as after any start)
+    expect(fs.readdirSync(home).filter((f) => f !== "setup")).toEqual([]);
     await refused(["restore", "--from", bare(), "--vault", vault], env, /holds no commit: it is not a store backup/);
     await refused(["restore", "--from", path.join(tmp("store-backup-gone-"), "x.git"), "--vault", vault], env, /^git clone .* failed: /);
     await refused(["restore", "--vault", vault], env, "pass --from <url>: the git repository the store was backed up to");
@@ -945,7 +967,7 @@ describe("datanotes store restore", { timeout: 60_000 }, () => {
     await refused(["restore", "--from", remote, "--vault", noId], env, "datanotes/metastore.yaml has no id: the store backup cannot be matched to the database");
     // while an engine holds the store
     const target = path.join(home, ID);
-    write(target, "engine.lock", JSON.stringify({ kind: "service", pid: 1, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date().toISOString() }));
+    write(target, "engine.lock", JSON.stringify({ kind: "service", pid: process.ppid, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date().toISOString() }));
     let err: unknown;
     try {
       await storeCommand(["restore", "--from", remote, "--vault", vault], { env, write: () => undefined });
@@ -961,6 +983,158 @@ describe("datanotes store restore", { timeout: 60_000 }, () => {
     write(path.join(home, ID), "journal/old.jsonl", "old\n");
     await refused(["restore", "--from", remote, "--vault", vault, "--force"], env, /is the store backup of the database/);
     expect(fs.readFileSync(path.join(home, ID, "journal", "old.jsonl"), "utf8")).toBe("old\n");
-    expect(fs.readdirSync(home)).toEqual([ID]);
+    expect(fs.readdirSync(home).filter((f) => f !== "setup")).toEqual([ID]);
+    expect(fs.existsSync(path.join(home, ID, "engine.lock"))).toBe(false);
+  });
+
+  it("holds the store while it restores: the clone runs with the store claimed and the old store untouched; a live engine whose heartbeat stopped refuses it", async () => {
+    const { remote, vault, home, env } = await backedUp();
+    const target = path.join(home, ID);
+    write(target, "journal/old.jsonl", "old\n");
+    const seen: { lock: unknown; old: boolean }[] = [];
+    const run: GitRunner = async (args, cwd, o) => {
+      if (gitSubcommand(args) === "clone") seen.push({ lock: JSON.parse(fs.readFileSync(path.join(target, "engine.lock"), "utf8")), old: fs.existsSync(path.join(target, "journal", "old.jsonl")) });
+      return runGit(args, cwd, o);
+    };
+    expect(await storeCommand(["restore", "--from", remote, "--vault", vault, "--force", "--no-backup"], { env, write: () => undefined, run })).toBe(0);
+    expect(seen).toEqual([{ lock: expect.objectContaining({ pid: process.pid, port: 0 }), old: true }]);
+    expect(fs.existsSync(path.join(target, "engine.lock"))).toBe(false);
+    expect(fs.existsSync(path.join(target, "journal", "2026-10.jsonl"))).toBe(true);
+    const aside = fs.readdirSync(home).find((f) => f.startsWith(`${ID}.before-restore-`))!;
+    expect(fs.existsSync(path.join(home, aside, "engine.lock"))).toBe(false);
+    expect(fs.readFileSync(path.join(home, aside, "journal", "old.jsonl"), "utf8")).toBe("old\n");
+    const beat = Date.now() - Math.min(3_600_000, os.uptime() * 1000 - 5_000);
+    const hung = JSON.stringify({ kind: "service", pid: process.ppid, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date(beat).toISOString() });
+    write(target, "engine.lock", hung);
+    let err: unknown;
+    try {
+      await storeCommand(["restore", "--from", remote, "--vault", vault, "--force"], { env, write: () => undefined });
+    } catch (x) {
+      err = x;
+    }
+    expect((err as Error).message).toBe(`an engine holds this database (pid ${process.ppid} on ${os.hostname()}, port 9)`);
+    expect(fs.readFileSync(path.join(target, "engine.lock"), "utf8")).toBe(hung);
+  });
+
+  describe("when the swap into place fails", () => {
+    const retry = { ...fileRetry };
+    let undo: (() => void)[] = [];
+    afterEach(() => {
+      for (const u of undo) u();
+      undo = [];
+      Object.assign(fileRetry, retry);
+    });
+    /** Make `fs[name]` fail with EPERM while `when` picks its call (its first two arguments). */
+    const failing = (name: "renameSync" | "copyFileSync", when: (from: string, to: string) => boolean) => {
+      const real = fs[name] as (...a: unknown[]) => unknown;
+      (fs as unknown as Record<string, unknown>)[name] = (...a: unknown[]) => {
+        if (when(String(a[0]), String(a[1]))) throw Object.assign(new Error(`EPERM: operation not permitted, ${name}`), { code: "EPERM" });
+        return real(...a);
+      };
+      undo.push(() => ((fs as unknown as Record<string, unknown>)[name] = real));
+    };
+    const error = async (args: string[], env: Record<string, string>) => {
+      let err: unknown;
+      try {
+        await storeCommand(args, { env, write: () => undefined });
+      } catch (x) {
+        err = x;
+      }
+      expect(err).toBeInstanceOf(StoreSetupError);
+      expect((err as StoreSetupError).docs).toBe("https://datanotes.dev/guides/history/back-up.md#restore-the-store-from-its-backup");
+      return err as StoreSetupError;
+    };
+
+    it("puts the store that was there back and removes the clone when the clone cannot take its place", async () => {
+      fileRetry.delayMs = 1;
+      const { remote, vault, home, env } = await backedUp();
+      const target = path.join(home, ID);
+      write(target, "journal/old.jsonl", "old\n");
+      const tmpDir = `${target}.restoring-${process.pid}`;
+      failing("renameSync", (from) => from === tmpDir);
+      const err = await error(["restore", "--from", remote, "--vault", vault, "--force"], env);
+      expect(err.message).toBe(`could not put the restored store in place (EPERM): the store that was there is back in ${target}; the clone ${tmpDir} is removed`);
+      expect(err.hint).toBe("Close what holds files in the store folder (an engine started meanwhile, a virus scan, an editor), then run datanotes store restore again.");
+      expect(fs.readFileSync(path.join(target, "journal", "old.jsonl"), "utf8")).toBe("old\n");
+      expect(fs.readdirSync(home).filter((f) => f !== "setup")).toEqual([ID]);
+      expect(fs.existsSync(path.join(target, "engine.lock"))).toBe(false);
+    });
+
+    it("names the folder of the store that was there when it cannot go back either", async () => {
+      fileRetry.delayMs = 1;
+      const { remote, vault, home, env } = await backedUp();
+      const target = path.join(home, ID);
+      write(target, "journal/old.jsonl", "old\n");
+      const tmpDir = `${target}.restoring-${process.pid}`;
+      failing("renameSync", (from, to) => from === tmpDir || (to === target && from.startsWith(`${target}.before-restore-`)));
+      const err = await error(["restore", "--from", remote, "--vault", vault, "--force"], env);
+      const aside = path.join(home, fs.readdirSync(home).find((f) => f.startsWith(`${ID}.before-restore-`))!);
+      expect(err.message).toBe(`could not put the restored store in place (EPERM): the store that was there is in ${aside}; the clone ${tmpDir} is removed`);
+      expect(err.hint).toBe(`Close what holds files in the store folder (an engine started meanwhile, a virus scan, an editor). Rename ${aside} back to ${target}, then run datanotes store restore again.`);
+      expect(fs.readFileSync(path.join(aside, "journal", "old.jsonl"), "utf8")).toBe("old\n");
+      expect(fs.existsSync(tmpDir)).toBe(false);
+    });
+
+    it("never renames over a store an engine made meanwhile: says to stop it and names both folders", async () => {
+      fileRetry.delayMs = 1;
+      const { remote, vault, home, env } = await backedUp();
+      const target = path.join(home, ID);
+      write(target, "journal/old.jsonl", "old\n");
+      const tmpDir = `${target}.restoring-${process.pid}`;
+      // the clone cannot take the store's place, and an engine starts in that moment
+      failing("renameSync", (from) => {
+        if (from !== tmpDir) return false;
+        write(target, "journal/new.jsonl", "new\n");
+        return true;
+      });
+      const err = await error(["restore", "--from", remote, "--vault", vault, "--force"], env);
+      const aside = path.join(home, fs.readdirSync(home).find((f) => f.startsWith(`${ID}.before-restore-`))!);
+      expect(err.message).toBe(`could not put the restored store in place (EPERM): the store that was there is in ${aside}; the clone ${tmpDir} is removed`);
+      expect(err.hint).toBe(`Stop the engine that started (datanotes stop), move away the store it made in ${target}, rename ${aside} back to ${target}, then run datanotes store restore again.`);
+      expect(err.docs).toMatch(/restore-the-store-from-its-backup$/);
+      expect(fs.readFileSync(path.join(aside, "journal", "old.jsonl"), "utf8")).toBe("old\n");
+      expect(fs.readFileSync(path.join(target, "journal", "new.jsonl"), "utf8")).toBe("new\n");
+    });
+
+    it("removes the clone when the store cannot be moved aside, or the lock not copied, and leaves the store unchanged", async () => {
+      fileRetry.delayMs = 1;
+      const { remote, vault, home, env } = await backedUp();
+      const target = path.join(home, ID);
+      write(target, "journal/old.jsonl", "old\n");
+      const tmpDir = `${target}.restoring-${process.pid}`;
+      failing("renameSync", (from) => from === target);
+      let err = await error(["restore", "--from", remote, "--vault", vault, "--force"], env);
+      expect(err.message).toBe(`could not put the restored store in place (EPERM): the store ${target} is unchanged; the clone ${tmpDir} is removed`);
+      expect(fs.readdirSync(home).filter((f) => f !== "setup")).toEqual([ID]);
+      for (const u of undo) u();
+      undo = [];
+      failing("copyFileSync", (_from, to) => to === path.join(tmpDir, "engine.lock"));
+      err = await error(["restore", "--from", remote, "--vault", vault, "--force"], env);
+      expect(err.message).toBe(`could not put the restored store in place (EPERM): the store ${target} is unchanged; the clone ${tmpDir} is removed`);
+      expect(fs.readdirSync(home).filter((f) => f !== "setup")).toEqual([ID]);
+      expect(fs.readFileSync(path.join(target, "journal", "old.jsonl"), "utf8")).toBe("old\n");
+      expect(fs.existsSync(path.join(target, "engine.lock"))).toBe(false);
+    });
+
+    it("removes the clone when a store that held only a lock is gone and the clone cannot take its place", async () => {
+      fileRetry.delayMs = 1;
+      const { remote, vault, home, env } = await backedUp();
+      const target = path.join(home, ID);
+      const tmpDir = `${target}.restoring-${process.pid}`;
+      failing("renameSync", (from) => from === tmpDir);
+      const err = await error(["restore", "--from", remote, "--vault", vault], env);
+      expect(err.message).toBe(`could not put the restored store in place (EPERM): there was no store in ${target}, and there is none now; the clone ${tmpDir} is removed`);
+      expect(fs.readdirSync(home).filter((f) => f !== "setup")).toEqual([]);
+    });
+  });
+
+  it("restores into a store that held only the lock of an engine that is gone, without --force", async () => {
+    const { remote, vault, home, env } = await backedUp();
+    const target = path.join(home, ID);
+    write(target, "engine.lock", JSON.stringify({ kind: "service", pid: process.ppid, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date(0).toISOString() }));
+    expect(await storeCommand(["restore", "--from", remote, "--vault", vault], { env, write: () => undefined })).toBe(0);
+    expect(fs.existsSync(path.join(target, "engine.lock"))).toBe(false);
+    expect(fs.existsSync(path.join(target, "journal", "2026-10.jsonl"))).toBe(true);
+    expect(fs.readdirSync(home).filter((f) => f.startsWith(`${ID}.`))).toEqual([]);
   });
 });

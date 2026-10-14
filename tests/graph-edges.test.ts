@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { INDEX_RETRY, OperationInputError } from "../src/core/engine";
 import { graphIndex, graphNeighbors, graphPath, graphTraverse, MAX_GRAPH_NODES, type GraphNodeSet } from "../src/core/graph";
 import { loadMetastore } from "../src/core/metastore";
+import { bumpVaultGeneration } from "../src/core/file-cache";
 import { createDbVault, METASTORE, type DbVault } from "./helpers/db-vault";
 
 INDEX_RETRY.delayMs = 1;
@@ -103,12 +104,12 @@ describe("start sets", () => {
   };
 
   it("must be an object", async () => {
-    await refused(null, `"from" must be an object with "paths" or "table"`);
-    await refused("P/Alice", `"from" must be an object with "paths" or "table"`);
+    await refused(null, `"from" must be an object with "paths", "table" or "tables"`);
+    await refused("P/Alice", `"from" must be an object with "paths", "table" or "tables"`);
   });
 
-  it("need paths or a table, and where only with a table", async () => {
-    await refused({}, `"from" needs "paths" or "table"`);
+  it("need paths, a table or tables, and where only with a table", async () => {
+    await refused({}, `"from" needs "paths", "table" or "tables"`);
     await refused({ where: { name: "Alice" } }, `from: "where" needs "table"`);
   });
 
@@ -118,7 +119,65 @@ describe("start sets", () => {
 
   it("the end set of a path is checked the same way", async () => {
     const v = await vault();
-    await expect(graphPath(v.app, v.settings, { from: { paths: ["P/Alice"] }, to: {} })).rejects.toThrow(`"to" needs "paths" or "table"`);
+    await expect(graphPath(v.app, v.settings, { from: { paths: ["P/Alice"] }, to: {} })).rejects.toThrow(`"to" needs "paths", "table" or "tables"`);
+  });
+
+  it("a refused start set says how to write one, and where to read about it", async () => {
+    const v = await vault();
+    const e = (await graphNeighbors(v.app, v.settings, { from: {} }).then(() => null, (x: unknown) => x)) as OperationInputError;
+    expect({ hint: e.hint, docs: e.docs }).toEqual({
+      hint: `Pass {"paths": [...]}, {"table": ..., "where": {...}} or {"tables": [...]}: ["*"] is every table, ["personal.*"] every table of a catalog.`,
+      docs: "https://datanotes.dev/guides/search/link-graph.md#read-the-whole-graph-in-one-call",
+    });
+  });
+
+  it("tables: every table's rows with *, a catalog's or a schema's with a pattern, or tables by name", async () => {
+    const v = await vault();
+    const paths = async (tables: string[]) => (await graphNeighbors(v.app, v.settings, { from: { tables }, direction: "out" })).nodes.map((x) => x.path);
+    const everyRow = ["E/Dinner.md", "M/Score.md", "P/Alice.md", "P/Paul.md"];
+    expect(await paths(["*"])).toEqual(everyRow);
+    expect(await paths(["main.*"])).toEqual(everyRow);
+    expect(await paths(["main.metrics.*"])).toEqual(["M/Score.md"]);
+    expect(await paths(["person", "main.metrics.event", "person"])).toEqual(["M/Score.md", "P/Alice.md", "P/Paul.md"]);
+    expect(await paths(["other.*"])).toEqual([]);
+    // with paths: the union, each note once
+    const both = await graphNeighbors(v.app, v.settings, { from: { paths: ["Notes/Call", "P/Alice"], tables: ["person"] } });
+    expect(both.nodes.map((x) => x.path)).toEqual(["Notes/Call.md", "P/Alice.md", "P/Paul.md"]);
+  });
+
+  it("tables: the whole graph in one call is the union of the calls per table", async () => {
+    const v = await vault();
+    const all = await graphNeighbors(v.app, v.settings, { from: { tables: ["*"] }, direction: "out" });
+    const perTable = [];
+    for (const table of ["main.metrics.event", "main.public.event", "main.public.person"]) {
+      perTable.push(...(await graphNeighbors(v.app, v.settings, { from: { table }, direction: "out" })).nodes);
+    }
+    expect(all.nodes).toEqual(perTable.sort((a, b) => a.path.localeCompare(b.path)));
+  });
+
+  it("tables: refused when not a list of names, for a pattern it does not know, and for an unknown or ambiguous table", async () => {
+    await refused({ tables: "*" }, 'from: "tables" must be a list of table names or patterns');
+    await refused({ tables: [1] }, 'from: "tables" must be a list of table names or patterns');
+    await refused({ tables: ["main.pub*"] }, 'from: "main.pub*" is not a table pattern');
+    await refused({ tables: ["persons"] }, 'from.tables: unknown table "persons"');
+    await refused({ tables: ["event"] }, 'from.tables: "event" matches main.metrics.event, main.public.event');
+    const v = await vault();
+    const e = (await graphNeighbors(v.app, v.settings, { from: { tables: ["persons"] } }).then(() => null, (x: unknown) => x)) as OperationInputError;
+    expect(e.hint).toContain("Did you mean \"person\"?");
+  });
+
+  it("calls at the same time share one build of the graph", async () => {
+    const v = await vault();
+    const [a, b] = await Promise.all([graphIndex(v.app, v.settings), graphIndex(v.app, v.settings)]);
+    expect(a).toBe(b);
+    expect(await graphIndex(v.app, v.settings)).toBe(a); // kept once built
+    // the vault changes while a build runs: the next call builds the new graph, not the old one
+    const old = graphIndex(v.app, v.settings);
+    bumpVaultGeneration(v.app);
+    const fresh = graphIndex(v.app, v.settings);
+    const [o, f] = await Promise.all([old, fresh]);
+    expect(f).not.toBe(o);
+    expect(await graphIndex(v.app, v.settings)).toBe(f);
   });
 
   it(`at most ${MAX_GRAPH_NODES} start notes`, async () => {

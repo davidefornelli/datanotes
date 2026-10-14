@@ -5,14 +5,14 @@
  */
 
 import type { App, TFile } from "./host";
-import { catalogRowFiles } from "./row-files";
+import { catalogRowFilesOf } from "./row-files";
 import { catalogLoadedTable, loadRows, notifyApplied, whileWriting } from "./engine";
 import type { DatanotesSettings } from "./settings";
 import { storePath } from "./store";
 import { DEFAULT_ARCHIVE_FOLDER } from "./table-loader";
 import { DEFAULT_SCHEMA } from "./types-table";
 import { isValidTimeZone } from "./datetime";
-import { catalogTables, loadMetastore, METASTORE_FILE, metastorePath, NEW_DATABASE_CONFIG, primeMetastore, rebaseTablePaths, setConfig, tableTags } from "./metastore";
+import { catalogTables, loadMetastore, METASTORE_FILE, metastorePath, NEW_DATABASE_CONFIG, primeWrittenMetastore, rebaseTablePaths, setConfig, tableTags } from "./metastore";
 import { GuidedError, guide, identifierHint } from "./hints";
 import { applyDiff, diffOrdered, type JournalRow } from "./changeset";
 import { writeFrontmatter } from "./frontmatter";
@@ -162,7 +162,7 @@ async function writeDatabaseConfig(app: App, settings: DatanotesSettings, cfg: D
     await ensureFolder(app, path.slice(0, path.lastIndexOf("/")));
     await app.vault.create(path, after);
   }
-  primeMetastore(app, settings, after);
+  await primeWrittenMetastore(app, settings, after);
 }
 
 export interface DescribedTable {
@@ -207,7 +207,9 @@ export async function describeDatabase(app: App, settings: DatanotesSettings): P
   const ms = await loadMetastore(app, settings);
   const catalogs: DatabaseDescription["catalogs"] = [];
   if (ms) {
-    const byTable = new Map(catalogTables(ms.model).map((x) => [x.ref.full, x]));
+    const byTable = new Map(catalogTables(ms.model).map((x) => [x.ref.full, catalogLoadedTable(settings, ms, x.ref)]));
+    // the rows of every table in one pass over the notes, not one pass per table
+    const rowFiles = catalogRowFilesOf(app, settings, [...byTable].map(([full, t]) => ({ full, def: t.def })));
     const unreadable = new Map<string, number>();
     for (const u of await unreadableRows(app, settings, ms.model)) unreadable.set(u.table, (unreadable.get(u.table) ?? 0) + 1);
     for (const [catalog, cat] of Object.entries(ms.model.catalogs)) {
@@ -220,13 +222,13 @@ export async function describeDatabase(app: App, settings: DatanotesSettings): P
           ...(sch.description ? { description: sch.description } : {}),
           tables: Object.entries(sch.tables).map(([name, entry]) => {
             const full = `${catalog}.${schema}.${name}`;
-            const t = catalogLoadedTable(settings, ms, byTable.get(full)!.ref);
+            const t = byTable.get(full)!;
             const tags = tableTags(entry);
             const missing = missingDescriptions(t.def.options.description, t.def.columns);
             return {
               name,
               qualified: full,
-              row_count: catalogRowFiles(app, settings, full, t.def).length,
+              row_count: rowFiles.get(full)!.length,
               ...(entry.description ? { description: entry.description } : {}),
               ...(tags ? { tags } : {}),
               ...(missing ? { missing_descriptions: missing } : {}),
@@ -492,7 +494,7 @@ export async function recordDatabaseMove(
         const after = rebaseTablePaths(ms.text, from, to, entries);
         if (after !== ms.text) {
           await app.vault.process(ms.file, () => after);
-          primeMetastore(app, settings, after);
+          await primeWrittenMetastore(app, settings, after);
         }
       }
       const linksRepaired: string[] = [];

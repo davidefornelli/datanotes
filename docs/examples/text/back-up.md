@@ -25,6 +25,8 @@ npx -y datanotes store backup --vault your_vault_folder \
 
 The command saves the setting, makes the store a git repository and pushes it once. A wrong address or a missing credential shows at once: the command then exits with code 1, and the engine retries later.
 
+The command holds the store while it runs, so an engine you start meanwhile refuses to start.
+
 The first commit and push can take minutes on a large store, such as 3,400 files and 150 MB. The command prints each step and waits for it. The push may take up to 10 minutes, or `DATANOTES_GIT_NETWORK_TIMEOUT_S` seconds. A step that fails leaves no git lock behind, so you can run the command again.
 
 Run `datanotes store backup --vault your_vault_folder` to see the setting. Add `--off` to turn the backup off: the store’s repository stays as it is.
@@ -59,11 +61,13 @@ C:/Windows/System32/OpenSSH/ssh.exe -T git@github.com
 
 The backup looks at the store on a regular schedule, every 60 seconds by default. At each look:
 
-1. If nothing changed in the store, it does nothing.
+1. If nothing changed in the store, it does nothing. The engine tells the backup which files it wrote, so this look runs no git at all.
 2. If something changed, it waits until the engine is idle: no operation running, and none for 3 seconds.
 3. It commits between two operations, then pushes.
 
-An operation writes several files of the store: a journal line, new table versions, sometimes blobs. A commit in the middle of one would save half of it. So the commit holds the engine's write lock, like a short read lock, for `git add` and `git commit` only. An operation that arrives meanwhile waits for the commit, usually a fraction of a second. The push runs after the lock is released.
+An operation writes several files of the store: a journal line, new table versions, sometimes blobs. A commit in the middle of one would save half of it. So the commit holds the engine's write lock, like a short read lock, for `git add` and `git commit` only. A first `git add` runs before the lock, so the one under it stages only the folders written since. An operation that arrives meanwhile waits for the commit, usually a fraction of a second. The push runs after the lock is released.
+
+The store's repository keeps git's cache of its folders (`core.untrackedCache` and `feature.manyFiles`), so git doesn't read every folder again at each commit.
 
 When the engine stays busy, the backup tries again at the next look. After 5 busy looks in a row, the next one commits at the first gap between two operations anyway.
 
@@ -147,7 +151,9 @@ npx -y datanotes store restore --vault your_vault_folder \
   --from git@github.com:you/vault-store.git
 ```
 
-The command reads the database’s id in the vault’s `metastore.yaml`. It clones the backup into `<data home>/<database id>/` and checks that the backup belongs to that database. It then writes new settings, with a new owner token and the backup turned on.
+The command reads the database’s id in the vault’s `metastore.yaml`. It clones the backup next to the store and checks that the backup belongs to that database. Only then does it put the clone in place, at `<data home>/<database id>/`. It then writes new settings, with a new owner token and the backup turned on.
+
+The command holds the store while it runs, so an engine you start meanwhile refuses to start.
 
 Undo, history and time travel then work as before. Two things don’t come back, and you set them again:
 
@@ -167,6 +173,8 @@ Run one engine per backup repository. Two engines that push to the same reposito
 
 Git keeps every version of every file, so the repository only grows. `vacuum_table` deletes old history from the store, and the next commit records the deletion, but earlier commits still hold the files.
 
+The transaction log is a few large files, called segments, instead of one file per version. Git then stores and compares far fewer files. [How the engine writes the log](/start/how-it-works/#how-the-engine-writes-the-log) explains both formats.
+
 To start again with a small repository, keep the old one as an archive:
 
 1. Stop the engine.
@@ -179,7 +187,7 @@ The new repository starts from the store as it is now. Delete the old repository
 
 ## Keep each file under 95 MB
 
-GitHub refuses a push with a file over 100 MB, every time. So before each push, the backup looks for a file over 95 MB in the commits to push. When it finds one, it doesn’t push, and doesn’t try again until the file is gone. `datanotes status` shows the backup as failing, with the file and its size, and the fix in `hint`.
+GitHub refuses a push with a file over 100 MB, every time. The engine never writes such a file itself: it splits each checkpoint of the transaction log into files of at most 4 MB of text. So before each push, the backup looks for a file over 95 MB in the commits to push, such as one a person copied into the store. When it finds one, it doesn’t push, and doesn’t try again until the file is gone. `datanotes status` shows the backup as failing, with the file and its size, and the fix in `hint`.
 
 To fix it:
 

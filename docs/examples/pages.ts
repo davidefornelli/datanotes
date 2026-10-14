@@ -379,6 +379,7 @@ export const PAGES: GuidePage[] = [
     ].join("\n\n"),
     examples: [
       ["vault", "See what a note links to and what links to it"],
+      ["vault", "Read the whole graph in one call"],
       ["vault", "Walk the links from a note"],
       ["vault", "Find how two notes are connected"],
     ],

@@ -18,12 +18,15 @@
  * unless told otherwise, and answers no CORS preflight, so web pages cannot call it.
  */
 
+import { gzip } from "node:zlib";
 import type { App } from "../core/host";
 import { ACTOR_HEADER, parseActor, runWithActor } from "../core/actor";
 import { ROUTE_PREFIX, dispatch as plainDispatch, operationOf, type Handler, type HandlerResponse } from "./rest";
 import { CALLABLE_OPERATIONS } from "../api/requests";
 import type { Actor } from "../core/actor";
 import { telemetry } from "../core/telemetry";
+import { activeSpan, tracingOn, withSpan } from "../core/tracing";
+import { parseTraceparent, TRACEPARENT_HEADER, TRACESTATE_HEADER } from "../api/tracing";
 import type { SessionIdentities } from "./identities";
 import { opOfKind, wireEvent, type ChangeFeed } from "../core/change-feed";
 import { docsResponse } from "./docs-ui";
@@ -86,6 +89,8 @@ interface NodeReq {
   method?: string;
   url?: string;
   headers: Record<string, string | string[] | undefined>;
+  /** Where the request comes from (Node's `IncomingMessage.socket`). */
+  socket?: { remoteAddress?: string };
   on(ev: "data", cb: (chunk: Uint8Array) => void): void;
   on(ev: "end" | "error", cb: (e?: unknown) => void): void;
   destroy(): void;
@@ -93,7 +98,7 @@ interface NodeReq {
 interface NodeRes {
   statusCode: number;
   setHeader(k: string, v: string): void;
-  end(body?: string): void;
+  end(body?: string | Uint8Array): void;
   write?(chunk: string): boolean;
   flushHeaders?(): void;
   on?(ev: "close" | "finish", cb: () => void): void;
@@ -132,13 +137,60 @@ export interface HttpServerOptions {
   dispatch?: (route: string, handler: Handler, body: unknown) => Promise<HandlerResponse>;
   /** The docs `GET /datanotes/manual/` serves (default: the package's own). */
   docs?: DocsLibrary;
+  /** Which clients get large answers compressed (the `httpCompression` setting); default: none. */
+  compression?: () => HttpCompression;
 }
 
-function send(res: NodeRes, status: number, body: unknown, type = "application/json", headers: Record<string, string> = {}): void {
+/** `remote`: clients on other machines that accept gzip; `always`: this machine's too; `off`: none. */
+export type HttpCompression = "remote" | "always" | "off";
+
+/** Answers this long or longer (characters) are compressed for a client that may get them so. */
+export const GZIP_MIN_CHARS = 16_384;
+
+/** The responses to compress: decided per request, from its `Accept-Encoding` and its origin. */
+const GZIP = new WeakSet<object>();
+
+/** Whether an `Accept-Encoding` header accepts gzip (`gzip`, `x-gzip` or `*`, with a quality above 0). */
+export function acceptsGzip(header: string | undefined): boolean {
+  let named: number | undefined;
+  let any: number | undefined;
+  for (const part of (header ?? "").split(",")) {
+    const [name, ...params] = part.trim().toLowerCase().split(";");
+    const q = params.map((x) => x.trim()).find((x) => x.startsWith("q="));
+    const quality = q === undefined ? 1 : Number(q.slice(2));
+    if (name === "gzip" || name === "x-gzip") named = quality;
+    else if (name === "*") any = quality;
+  }
+  return (named ?? any ?? 0) > 0;
+}
+
+/** An address of this machine (IPv4 127.0.0.0/8, IPv6 ::1, or IPv4 written as IPv6). */
+export function isLoopback(address: string | undefined): boolean {
+  const a = (address ?? "").replace(/^::ffff:/i, "");
+  return a.startsWith("127.") || a === "::1";
+}
+
+function send(res: NodeRes, status: number, body: unknown, type = "application/json", headers: Record<string, string> = {}, text?: string): void {
   for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
   res.statusCode = status;
   res.setHeader("Content-Type", type === "application/json" ? "application/json; charset=utf-8" : type);
-  res.end(type === "application/json" ? JSON.stringify(body) : String(body));
+  // `text`: the body already serialized (a cached read), sent as it is
+  const out = text ?? (type === "application/json" ? JSON.stringify(body) : String(body));
+  if (!GZIP.has(res) || out.length < GZIP_MIN_CHARS) {
+    res.end(out);
+    return;
+  }
+  // compressed off the event loop (the thread pool), quickly: JSON shrinks well at a low level
+  gzip(out, { level: 3 }, (e, zipped) => {
+    /* v8 ignore next 4 -- defensive: zlib fails only without memory; the answer then goes as it is */
+    if (e) {
+      res.end(out);
+      return;
+    }
+    res.setHeader("Content-Encoding", "gzip");
+    res.setHeader("Vary", "Accept-Encoding");
+    res.end(zipped);
+  });
 }
 
 function header(req: NodeReq, name: string): string | undefined {
@@ -233,6 +285,8 @@ export class HttpApiServer {
    * counted: it stays open as long as its client.
    */
   private track(req: NodeReq, res: NodeRes): void {
+    const mode = this.opts.compression?.() ?? "off";
+    if (mode !== "off" && acceptsGzip(header(req, "accept-encoding")) && (mode === "always" || !isLoopback(req.socket?.remoteAddress))) GZIP.add(res);
     const answer = () => this.handle(req, res).catch((e: unknown) => send(res, 500, { error: messageOf(e) }));
     if ((req.method ?? "GET").toUpperCase() === "GET" && /^\/datanotes\/changes\/stream\/?(\?|$)/.test(req.url ?? "")) {
       void answer();
@@ -301,7 +355,58 @@ export class HttpApiServer {
     });
   }
 
-  private async handle(req: NodeReq, res: NodeRes): Promise<void> {
+  /**
+   * Answer a request in a SERVER span `<METHOD> <route>` (OpenTelemetry HTTP conventions), which
+   * continues the caller's trace when it sends `traceparent`. Not traced: `GET /`, the API's
+   * description and console, the change stream (open for hours).
+   */
+  private handle(req: NodeReq, res: NodeRes): Promise<void> {
+    if (!tracingOn()) return this.answer(req, res);
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const method = (req.method ?? "GET").toUpperCase();
+    const route = this.routeOf(url.pathname);
+    if (route === null) return this.answer(req, res);
+    const remote = parseTraceparent(header(req, TRACEPARENT_HEADER), header(req, TRACESTATE_HEADER));
+    const agent = header(req, "user-agent");
+    const socket = (req as { socket?: { remoteAddress?: string; remotePort?: number } }).socket;
+    return withSpan(
+      route ? `${method} ${route}` : method,
+      {
+        kind: "server",
+        newTrace: true,
+        ...(remote ? { remote } : {}),
+        attributes: {
+          "http.request.method": method,
+          "http.route": route || undefined,
+          "url.path": url.pathname,
+          "url.scheme": "http",
+          "network.protocol.name": "http",
+          "client.address": socket?.remoteAddress,
+          "client.port": socket?.remotePort,
+          "user_agent.original": agent,
+        },
+      },
+      async (span) => {
+        await this.answer(req, res);
+        span.setAttribute("http.response.status_code", res.statusCode);
+        if (res.statusCode >= 500) span.setStatus("error", `HTTP ${res.statusCode}`).setAttribute("error.type", String(res.statusCode));
+        else if (res.statusCode >= 400) span.setAttribute("error.type", String(res.statusCode));
+      },
+    );
+  }
+
+  /** `http.route` of a path: the route's template, "" for an unknown one, null for those not traced. */
+  private routeOf(path: string): string | null {
+    if (path === "/" || path === `${ROUTE_PREFIX}/openapi.json` || path === `${ROUTE_PREFIX}/docs` || path.startsWith(`${ROUTE_PREFIX}/docs/`)) return null;
+    if (path === `${ROUTE_PREFIX}/changes/stream` || path === `${ROUTE_PREFIX}/changes/stream/`) return null;
+    if (path === MANUAL_PATH || path.startsWith(`${MANUAL_PATH}/`)) return `${MANUAL_PATH}/{page}`;
+    if (!path.startsWith(`${ROUTE_PREFIX}/`)) return "";
+    const route = path.slice(ROUTE_PREFIX.length);
+    const key = route.endsWith("/") ? route : `${route}/`;
+    return this.opts.handlers[key] ? `${ROUTE_PREFIX}${key}` : "";
+  }
+
+  private async answer(req: NodeReq, res: NodeRes): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
     const method = (req.method ?? "GET").toUpperCase();
@@ -341,6 +446,14 @@ export class HttpApiServer {
     // `auth` is the credential, which the client cannot claim: "owner", or the named token's name;
     // a named token's requests without an agent behind them name the token as the harness too
     const actor: Actor = named ? { ...(headerActor ?? { harness: named.name }), auth: named.name } : { ...(headerActor ?? {}), auth: "owner" };
+    // who called: the token's name (never the token), and what the agent says of itself
+    activeSpan().setAttributes({
+      "datanotes.token.name": actor.auth,
+      "datanotes.client.harness": actor.harness,
+      "datanotes.client.model": actor.model,
+      "datanotes.session": actor.session,
+      "gen_ai.tool.name": actor.tool,
+    });
 
     if (method === "GET" && (path === `${ROUTE_PREFIX}/changes/stream` || path === `${ROUTE_PREFIX}/changes/stream/`)) {
       await this.stream(req, res, url);
@@ -393,7 +506,9 @@ export class HttpApiServer {
         }
       }
       const out = await runWithActor(actor, () => (this.opts.dispatch ?? plainDispatch)(route, handler, body));
-      send(res, out.status, out.json);
+      // a cached read carries its JSON text: the answer is not serialized again
+      if (out.body !== undefined) send(res, out.status, undefined, "application/json", {}, out.body);
+      else send(res, out.status, out.json);
       return;
     }
 

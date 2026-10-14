@@ -21,7 +21,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { buildMarkdownWithFrontmatter, readOrderedFromMarkdown } from "../core/frontmatter";
+import { buildMarkdownWithFrontmatter, detached, readOrderedFromMarkdown } from "../core/frontmatter";
 import type {
   App,
   CachedMetadata,
@@ -39,17 +39,27 @@ import type {
   StoreAdapter,
   VaultAdapter,
 } from "../core/host";
-import { basename, dirname, LinkResolver, linkText, parseLinks, rewriteLinks, type LinkRef } from "./links";
+import { addLinkLookupNames, basename, dirname, fileLookupNames, LinkResolver, linkLookupNames, linkText, parseLinks, rewriteLinks } from "./links";
 import { eachLimit, MOVE_WRITES } from "../core/database-move";
-import { contentHash } from "../core/file-cache";
+import { contentHash, primeFiles, setTextSource } from "../core/file-cache";
+import { intern, internAll } from "../core/intern";
+import { setSearchSource } from "../core/vault-read";
+import { IndexDb, IndexKeeper, RACY_MS, type FileRecord, type IndexSource, type NoteLinks, type NoteRecord } from "./index-db";
+import type { OrderedFrontmatter } from "../core/types";
 import { readVaultConfig, type VaultConfig } from "./vault-config";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./private-files";
 
+/** A file's stat on the Node host: FileStats and its change time. */
+export interface NodeFileStats extends FileStats {
+  /** The status change time (fs.Stats.ctimeMs: POSIX ctime, NTFS ChangeTime): it moves with every write, also one that restores the old mtime. */
+  changed?: number;
+}
+
 export class NodeFile implements TFile {
-  stat: FileStats;
+  stat: NodeFileStats;
   constructor(
     public path: string,
-    stat: FileStats,
+    stat: NodeFileStats,
   ) {
     this.stat = stat;
   }
@@ -76,13 +86,18 @@ export class NodeFolder implements TFolder {
   }
 }
 
+/** A name listed in folder `dir`, as a vault path. */
+function joined(dir: string, name: string): string {
+  return dir === "" ? name : `${dir}/${name}`;
+}
+
 function hidden(rel: string): boolean {
   return rel.split("/").some((p) => p.startsWith("."));
 }
 
-function statsOf(s: fs.Stats): FileStats {
+function statsOf(s: fs.Stats): NodeFileStats {
   /* v8 ignore next -- platform: only a filesystem without birth time (some Linux ones) reports 0 */
-  return { ctime: s.birthtimeMs || s.ctimeMs, mtime: s.mtimeMs, size: s.size };
+  return { ctime: s.birthtimeMs || s.ctimeMs, mtime: s.mtimeMs, size: s.size, changed: s.ctimeMs };
 }
 
 /** Makes every temporary file name unique, also for two writes of a file in the same millisecond. */
@@ -210,6 +225,16 @@ class NodeAdapter implements VaultAdapter {
   rmdir(p: string, recursive: boolean): Promise<void> {
     return fsp.rm(this.abs(p), { recursive });
   }
+  async stat(p: string): Promise<{ size: number; mtime: number } | null> {
+    try {
+      const s = await fsp.stat(this.abs(p));
+      return { size: s.size, mtime: s.mtimeMs };
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw e;
+    }
+  }
 }
 
 /**
@@ -238,6 +263,25 @@ const isNote = (rel: string) => /\.md$/i.test(rel);
  */
 const MIN_PAIRED_TEXT = 32;
 
+/** How many folder listings or file stats the start's walk keeps in flight. */
+export const SCAN_CONCURRENCY = 64;
+
+/** How many notes the start reads at a time (the thread pool runs them; see threadpool.ts). */
+export const READ_CONCURRENCY = 64;
+
+/**
+ * The records the start took from the index on disk are interned this many at a time, one slice
+ * per turn of the event loop once the engine answers ({@link NodeMetadataCache.internRecords}).
+ * Tests change it.
+ */
+export const INTERN_SLICE = { records: 1000 };
+
+/** What a file's stat says of its identity: the same file under another name has the same id. */
+export interface FileIdentity {
+  /** `<device>:<inode>` (the NTFS file id on Windows). */
+  id: string;
+}
+
 export class NodeVault implements Vault {
   readonly adapter: VaultAdapter;
   readonly events = new EventEmitter();
@@ -245,6 +289,10 @@ export class NodeVault implements Vault {
   private files = new Map<string, NodeFile>();
   private folders = new Map<string, NodeFolder>();
   private root = new NodeFolder("");
+  /** The lists `getFiles` and `getMarkdownFiles` give, kept until a file comes, goes or moves. */
+  private lists: { all: TFile[]; md: TFile[] } | null = null;
+  /** The file ids the last walk ({@link scan}) saw, by path (for the persistent index). */
+  walkIds: Map<string, string> | null = null;
 
   constructor(
     readonly basePath: string,
@@ -259,6 +307,17 @@ export class NodeVault implements Vault {
     return resolveInVault(this.basePath, rel);
   }
 
+  /**
+   * The absolute path of a path the walk listed (names a folder listing gave, joined with `/`): no
+   * check for a way out of the vault, which such a path cannot have: over a whole vault, the
+   * `path.resolve` of {@link abs} took more time than the walk's own calls.
+   */
+  listedAbs(rel: string): string {
+    if (rel === "") return this.basePath;
+    const base = this.basePath.endsWith(path.sep) ? this.basePath : this.basePath + path.sep;
+    return base + (path.sep === "/" ? rel : rel.split("/").join(path.sep));
+  }
+
   // --- index ---
 
   /** Read the whole folder tree into the index (silently: no events). */
@@ -267,6 +326,7 @@ export class NodeVault implements Vault {
     this.folders.clear();
     this.root = new NodeFolder("");
     this.folders.set("", this.root);
+    this.filesChanged();
     const walk = (dir: string) => {
       for (const e of fs.readdirSync(this.abs(dir), { withFileTypes: true })) {
         if (e.name.startsWith(".")) continue;
@@ -283,32 +343,154 @@ export class NodeVault implements Vault {
   }
 
   /**
+   * {@link scanSync} without blocking, and in one walk for the whole start: the folders are listed
+   * and the files' stats taken with up to `concurrency` calls in flight, then the index is built in
+   * the order a walk lists them (the order {@link scanSync} gives). The same walk finds the
+   * temporary files of renames in case only a crash left half done (`renameTemps`, for
+   * {@link recoverRenames} once the engine holds its lock) and each file's id ({@link walkIds}).
+   */
+  async scan(concurrency = SCAN_CONCURRENCY): Promise<{ renameTemps: string[] }> {
+    const { listing, stats, renameTemps } = await this.walkTree(concurrency);
+    this.files.clear();
+    this.folders.clear();
+    this.root = new NodeFolder("");
+    this.folders.set("", this.root);
+    this.filesChanged();
+    const ids = new Map<string, string>();
+    const build = (dir: string) => {
+      for (const e of listing.get(dir) ?? []) {
+        if (e.name.startsWith(".")) continue;
+        const p = joined(dir, e.name);
+        if (e.isDirectory()) {
+          this.addFolder(p);
+          build(p);
+          continue;
+        }
+        const st = e.isFile() ? stats.get(p) : undefined;
+        if (!st) continue;
+        this.addFile(p, statsOf(st));
+        ids.set(p, `${st.dev}:${st.ino}`);
+      }
+    };
+    build("");
+    this.walkIds = ids;
+    return { renameTemps };
+  }
+
+  /**
+   * The paths whose state on disk differs from the index now (a file new, changed or gone, a
+   * folder new or gone), found without blocking: a walk as {@link scan}'s, many calls in flight.
+   * The watcher's comparison after the start's walk hands them to {@link syncPaths}, which checks
+   * each again.
+   */
+  async changedSinceWalk(concurrency = SCAN_CONCURRENCY): Promise<string[]> {
+    const { listing, stats } = await this.walkTree(concurrency);
+    const out: string[] = [];
+    const listed = new Set<string>();
+    for (const [dir, ents] of listing) {
+      for (const e of ents) {
+        if (e.name.startsWith(".")) continue;
+        const p = joined(dir, e.name);
+        listed.add(p);
+        if (e.isDirectory()) {
+          if (!this.folders.has(p)) out.push(p);
+          continue;
+        }
+        const st = stats.get(p);
+        const f = this.files.get(p);
+        // a file gone between its listing and its stat is reported by the OS, or the next check
+        if (st && (!f || f.stat.mtime !== st.mtimeMs || f.stat.size !== st.size)) out.push(p);
+      }
+    }
+    for (const p of [...this.files.keys(), ...this.folders.keys()]) if (p !== "" && !listed.has(p)) out.push(p);
+    return out;
+  }
+
+  /** Every folder listed and every file stat-ed, `concurrency` calls at a time (dot-folders left out). */
+  private async walkTree(concurrency: number): Promise<{ listing: Map<string, fs.Dirent[]>; stats: Map<string, fs.Stats>; renameTemps: string[] }> {
+    const listing = new Map<string, fs.Dirent[]>();
+    for (let level = [""]; level.length > 0; ) {
+      const next: string[] = [];
+      await eachLimit(level, concurrency, async (dir) => {
+        let ents: fs.Dirent[];
+        try {
+          ents = await fsp.readdir(this.listedAbs(dir), { withFileTypes: true });
+        } catch (e) {
+          if (dir === "") throw e;
+          ents = []; // removed since its parent was listed: the watcher reports it
+        }
+        listing.set(dir, ents);
+        for (const e of ents) if (e.isDirectory() && !e.name.startsWith(".")) next.push(joined(dir, e.name));
+      });
+      level = next;
+    }
+    const files: string[] = [];
+    const renameTemps: string[] = [];
+    for (const [dir, ents] of listing) {
+      for (const e of ents) {
+        if (!e.isFile()) continue;
+        if (!e.name.startsWith(".")) files.push(joined(dir, e.name));
+        else if (e.name.startsWith(RENAME_TEMP_PREFIX)) renameTemps.push(joined(dir, e.name));
+      }
+    }
+    const stats = new Map<string, fs.Stats>();
+    await eachLimit(files, concurrency, async (p) => {
+      try {
+        stats.set(p, await fsp.stat(this.listedAbs(p)));
+      } catch {
+        // removed since its folder was listed: the watcher reports it
+      }
+    });
+    return { listing, stats, renameTemps };
+  }
+
+  /**
    * Finish the renames in case only a crash left half done (between their two renames: the file
    * under its temporary name, `.datanotes-rename-…--<target>`): each is renamed to its target,
-   * unless a file has that name (in any case) by now. Run before {@link scanSync} (at start).
-   * Returns the files put back (their vault paths) and the temporary files left (none to put back,
-   * or no target in the name).
+   * unless a file has that name (in any case) by now. `temps`: the temporary files a walk found
+   * ({@link scan}); without, the vault is walked for them. Returns the files put back (their vault
+   * paths) and the temporary files left (none to put back, or no target in the name).
    */
-  recoverRenames(): { recovered: string[]; left: string[] } {
+  recoverRenames(temps?: readonly string[]): { recovered: string[]; left: string[] } {
     const out = { recovered: [] as string[], left: [] as string[] };
+    for (const rel of temps ?? this.renameTemps()) {
+      const dir = dirname(rel);
+      const target = RENAME_TEMP.exec(basename(rel))?.[1];
+      const to = target === undefined ? null : dir === "" ? target : `${dir}/${target}`;
+      // a file system that ignores case finds a file of that name in another case too
+      if (to === null || fs.existsSync(this.abs(to))) {
+        out.left.push(rel);
+        continue;
+      }
+      try {
+        fs.renameSync(this.abs(rel), this.abs(to));
+      } catch (e) {
+        /* v8 ignore next -- a rename the file system refuses (a reader holding the file on Windows) */
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+        continue; // gone since the walk
+      }
+      out.recovered.push(to);
+    }
+    return out;
+  }
+
+  /** The temporary files of renames in case only, in every folder of the vault (dot-folders aside). */
+  private renameTemps(): string[] {
+    const out: string[] = [];
     const walk = (dir: string) => {
       for (const e of fs.readdirSync(this.abs(dir), { withFileTypes: true })) {
         const rel = dir === "" ? e.name : `${dir}/${e.name}`;
         if (e.isDirectory() && !e.name.startsWith(".")) walk(rel);
-        if (!e.isFile() || !e.name.startsWith(RENAME_TEMP_PREFIX)) continue;
-        const target = RENAME_TEMP.exec(e.name)?.[1];
-        const to = target === undefined ? null : dir === "" ? target : `${dir}/${target}`;
-        // a file system that ignores case finds a file of that name in another case too
-        if (to === null || fs.existsSync(this.abs(to))) {
-          out.left.push(rel);
-          continue;
-        }
-        fs.renameSync(this.abs(rel), this.abs(to));
-        out.recovered.push(to);
+        else if (e.isFile() && e.name.startsWith(RENAME_TEMP_PREFIX)) out.push(rel);
       }
     };
     walk("");
     return out;
+  }
+
+  /** A file came, went or moved: the lists of files are made again when asked for. */
+  private filesChanged(): void {
+    this.lists = null;
   }
 
   private parentOf(rel: string): NodeFolder {
@@ -319,33 +501,40 @@ export class NodeVault implements Vault {
   private addFolder(rel: string): NodeFolder {
     const hit = this.folders.get(rel);
     if (hit) return hit;
-    const f = new NodeFolder(rel);
-    this.folders.set(rel, f);
-    if (rel !== "") this.parentOf(rel).children.push(f);
+    const p = intern(rel);
+    const f = new NodeFolder(p);
+    this.folders.set(p, f);
+    if (p !== "") this.parentOf(p).children.push(f);
     return f;
   }
 
-  private addFile(rel: string, stat: FileStats): NodeFile {
+  private addFile(rel: string, stat: NodeFileStats): NodeFile {
     const hit = this.files.get(rel);
     if (hit) {
       hit.stat = stat;
       return hit;
     }
-    const f = new NodeFile(rel, stat);
-    this.files.set(rel, f);
-    this.parentOf(rel).children.push(f);
+    const p = intern(rel);
+    const f = new NodeFile(p, stat);
+    this.files.set(p, f);
+    this.filesChanged();
+    this.parentOf(p).children.push(f);
     return f;
   }
 
   private detach(item: TAbstractFile): void {
     const parent = this.folders.get(dirname(item.path));
-    if (parent) parent.children = parent.children.filter((c) => c !== item);
+    if (!parent) return;
+    // in place, without a copy of the list: a folder emptied file by file stays linear per file
+    const i = parent.children.indexOf(item);
+    if (i >= 0) parent.children.splice(i, 1);
   }
 
   private dropFile(rel: string): NodeFile | null {
     const f = this.files.get(rel);
     if (!f) return null;
     this.files.delete(rel);
+    this.filesChanged();
     this.detach(f);
     return f;
   }
@@ -353,17 +542,40 @@ export class NodeVault implements Vault {
   private dropFolder(rel: string): NodeFolder | null {
     const f = this.folders.get(rel);
     if (!f || rel === "") return null;
-    for (const c of [...f.children]) {
-      if (c instanceof NodeFolder) this.dropFolder(c.path);
-      else this.dropFile(c.path);
-    }
-    this.folders.delete(rel);
+    this.forgetTree(f);
     this.detach(f);
     return f;
   }
 
+  /** Drop a folder and everything under it from the index (its own place in its parent is the caller's). */
+  private forgetTree(folder: NodeFolder): void {
+    for (const c of folder.children) {
+      if (c instanceof NodeFolder) this.forgetTree(c);
+      else this.files.delete(c.path);
+    }
+    this.filesChanged();
+    folder.children = [];
+    this.folders.delete(folder.path);
+  }
+
+  /**
+   * The id of a file on disk (`<device>:<inode>`, the NTFS file id on Windows): the walk's while the
+   * file did not change since, else from a stat now; null when there is none.
+   */
+  fileId(rel: string): string | null {
+    const id = this.walkIds?.get(rel);
+    if (id !== undefined) return id;
+    const st = this.statOf(rel);
+    return st ? `${st.dev}:${st.ino}` : null;
+  }
+
   private emit(name: string, ...args: unknown[]): void {
     const [item, old] = args as [TAbstractFile, string | undefined];
+    // a file changed: its id may have changed too (an atomic write is a new file)
+    if (this.walkIds && item instanceof NodeFile) {
+      this.walkIds.delete(item.path);
+      if (old !== undefined) this.walkIds.delete(old);
+    }
     if (this.listener && item instanceof NodeFile) {
       if (name === "create" || name === "modify") this.listener.changed(item, name === "create");
       else if (name === "delete") this.listener.deleted(item.path);
@@ -548,9 +760,10 @@ export class NodeVault implements Vault {
     this.indexFolder(dirname(to));
     this.detach(f);
     this.files.delete(from);
-    f.path = to;
+    f.path = intern(to);
     f.stat = statsOf(st);
-    this.files.set(to, f);
+    this.files.set(f.path, f);
+    this.filesChanged();
     this.parentOf(to).children.push(f);
     this.emit("rename", f, from, { external: true } satisfies RenameInfo);
     if (!sameText && (was === undefined || was !== this.hashOnDisk(to))) this.emit("modify", f);
@@ -686,12 +899,22 @@ export class NodeVault implements Vault {
     return this.files.get(rel) ?? this.folders.get(rel) ?? null;
   }
 
+  /** The notes, in the index's order. The same list until a file comes, goes or moves: do not change it. */
   getMarkdownFiles(): TFile[] {
-    return [...this.files.values()].filter((f) => f.extension === "md");
+    return this.listed().md;
   }
 
+  /** Every file, in the index's order. The same list until a file comes, goes or moves: do not change it. */
   getFiles(): TFile[] {
-    return [...this.files.values()];
+    return this.listed().all;
+  }
+
+  private listed(): { all: TFile[]; md: TFile[] } {
+    if (!this.lists) {
+      const all = [...this.files.values()];
+      this.lists = { all, md: all.filter((f) => f.extension === "md") };
+    }
+    return this.lists;
   }
 
   getAllLoadedFiles(): TAbstractFile[] {
@@ -831,6 +1054,7 @@ export class NodeVault implements Vault {
     else await renameRetrying(this.abs(from), this.abs(to));
     const moved = new Map<string, string>();
     const renamed: [TAbstractFile, string][] = [];
+    this.filesChanged();
     if (isFolder) {
       const folder = this.folders.get(from)!;
       const files = [...this.files.values()].filter((f) => f.path.startsWith(`${from}/`));
@@ -839,19 +1063,19 @@ export class NodeVault implements Vault {
       this.folders.delete(from);
       for (const f of subfolders) this.folders.delete(f.path);
       for (const f of files) this.files.delete(f.path);
-      folder.path = to;
-      this.folders.set(to, folder);
+      folder.path = intern(to);
+      this.folders.set(folder.path, folder);
       this.parentOf(to).children.push(folder);
       renamed.push([folder, from]);
       for (const f of subfolders) {
         const old = f.path;
-        f.path = to + old.slice(from.length);
+        f.path = intern(to + old.slice(from.length));
         this.folders.set(f.path, f);
         renamed.push([f, old]);
       }
       for (const f of files) {
         const old = f.path;
-        f.path = to + old.slice(from.length);
+        f.path = intern(to + old.slice(from.length));
         this.files.set(f.path, f);
         moved.set(old, f.path);
         renamed.push([f, old]);
@@ -860,8 +1084,8 @@ export class NodeVault implements Vault {
       const f = this.files.get(from)!;
       this.detach(f);
       this.files.delete(from);
-      f.path = to;
-      this.files.set(to, f);
+      f.path = intern(to);
+      this.files.set(f.path, f);
       this.parentOf(to).children.push(f);
       await this.refreshStat(f);
       moved.set(from, to);
@@ -903,12 +1127,92 @@ export class NodeVault implements Vault {
   }
 }
 
+/** A link of a note as the index keeps it: its target, without its place in the text (read again to rewrite it). */
+export interface NoteLink {
+  linkpath: string;
+  subpath: string;
+}
+
 interface NoteMeta {
-  frontmatter?: Record<string, unknown>;
-  tags: { tag: string }[];
-  links: LinkRef[];
+  /** What `getFileCache` gives: the same object every time, as Obsidian does (callers do not change it). */
+  cache: CachedMetadata;
+  links: NoteLink[];
   /** Hash of the text read (a note moved outside is recognized by it). */
   hash: string;
+}
+
+/** A note's text as the start read it, with its parse, for the engine's file cache. */
+interface StartText {
+  content: string;
+  hash: string;
+  frontmatter?: { ordered: OrderedFrontmatter; body: string };
+}
+
+/** A note the start found in the index on disk: its hash and parse for the engine's file cache, no text. */
+interface KnownNote {
+  hash: string;
+  parse?: { ordered: OrderedFrontmatter; bodyStart: number };
+}
+
+/** The index on disk at start: the files it records, whether their links can be trusted, and its keeper. */
+export interface StartIndex {
+  files: ReadonlyMap<string, FileRecord>;
+  /** The links recorded agree with the files recorded (the last write left the index caught up). */
+  links: boolean;
+  keeper: IndexKeeper;
+}
+
+/** How a start indexed the vault: its notes, how many it read, how many it found moved by their file id. */
+export interface IndexedVault {
+  notes: number;
+  read: number;
+  moved: number;
+}
+
+/** A note at start: its metadata and record, and where it came from (read, read again, recorded, moved). */
+interface Known {
+  meta: NoteMeta;
+  record: NoteRecord;
+  /** Where its links led, as recorded (null: resolve them). */
+  links: NoteLinks | null;
+  text?: StartText;
+  /** Read and parsed. */
+  read?: boolean;
+  /** Read again within the racy window, the same text as recorded. */
+  again?: boolean;
+  /** The path it was recorded under (moved while the engine was stopped). */
+  from?: string;
+}
+
+/**
+ * Whether a recorded file still has its stat and was recorded well after its last write (git's
+ * racy rule). `samePath`: the change time too (a write that restored the old mtime moves it); a
+ * file found under another path by its id does not compare it (a rename moves it on Linux).
+ */
+function unchanged(r: FileRecord, stat: NodeFileStats, samePath = true): boolean {
+  if (r.note == null || r.mtime !== stat.mtime || r.size !== stat.size || stat.mtime >= r.indexedAt - RACY_MS) return false;
+  return !samePath || r.changed === null || stat.changed === undefined || r.changed === stat.changed;
+}
+
+/**
+ * A note's metadata from its record: what parsing its text gives. The record's strings (JSON of
+ * the index on disk: new copies) are interned later, in place ({@link internRecord}): the metadata
+ * holds the same strings, and V8 turns each into a forward to its one copy.
+ */
+function metaOf(r: NoteRecord): NoteMeta {
+  const frontmatter = r.parse && r.parse.ordered.length > 0 ? (Object.fromEntries(r.parse.ordered) as Record<string, unknown>) : undefined;
+  return {
+    cache: { ...(frontmatter ? { frontmatter } : {}), tags: r.tags.map((tag) => ({ tag })) },
+    links: r.links.map(([linkpath, subpath]) => ({ linkpath, subpath })),
+    hash: r.hash,
+  };
+}
+
+/** Intern a record's front matter, tags and links in place (its hash is unique to its note: left as it is). */
+function internRecord(r: NoteRecord): void {
+  if (r.parse) internAll(r.parse.ordered);
+  internAll(r.tags);
+  internAll(r.links);
 }
 
 // A tag starts after whitespace or at the start of a line (not after "(") and is not all digits.
@@ -922,7 +1226,7 @@ function tagsOf(body: string): { tag: string }[] {
     .replace(/`[^`\n]*`/g, "")
     .replace(/!?\[\[[^\]\n]*\]\]/g, " ")
     .replace(/!?\[[^\]\n]*\]\([^)\n]*\)/g, " ");
-  for (const m of noCode.matchAll(TAG_RE)) out.push({ tag: `#${m[1]}` });
+  for (const m of noCode.matchAll(TAG_RE)) out.push({ tag: detached(`#${m[1]}`) });
   return out;
 }
 
@@ -930,64 +1234,223 @@ export class NodeMetadataCache implements MetadataCache {
   readonly events = new EventEmitter();
   private meta = new Map<string, NoteMeta>();
   private linkResolver: LinkResolver;
+  /**
+   * Links are resolved as files come and go: a file created, deleted or renamed re-resolves only
+   * the notes whose links look up its name ({@link lookers}), never every link of the vault.
+   */
   private resolved: Record<string, Record<string, number>> = {};
   private unresolved: Record<string, Record<string, number>> = {};
+  /** `resolved` transposed: target path → (source path → number of links), the backlinks. */
+  private inbound = new Map<string, Map<string, number>>();
+  /** The names each note's links look up (see `linkLookupNames`), and the notes looking up each name. */
+  private names = new Map<string, readonly string[]>();
+  private lookers = new Map<string, Set<string>>();
   private resolveTimer: ReturnType<typeof setTimeout> | null = null;
-  /**
-   * Files were created, deleted or renamed since the links were last resolved: they are resolved
-   * again on the next read of them, once for a whole burst (a folder of 2000 notes moved by hand
-   * is one resolution, not one per note).
-   */
-  private stale = false;
+  /** The records the start took from the index on disk, interned from `internAt` on ({@link internRecords}). */
+  private uninterned: NoteRecord[] = [];
+  private internAt = 0;
+  private interning: Promise<void> | null = null;
+  private internNext: ReturnType<typeof setImmediate> | null = null;
+  private internDone: (() => void) | null = null;
 
   constructor(private readonly vault: NodeVault) {
     this.events.setMaxListeners(0);
     this.linkResolver = new LinkResolver(this.fileIndex());
   }
 
-  private fresh(): void {
-    if (!this.stale) return;
-    this.stale = false;
-    this.linkResolver.rebuild(this.fileIndex());
-    this.resolveAll();
-  }
-
   get resolver(): LinkResolver {
-    this.fresh();
     return this.linkResolver;
   }
 
   /** source path → (target path → number of links). */
   get resolvedLinks(): Record<string, Record<string, number>> {
-    this.fresh();
     return this.resolved;
   }
 
   get unresolvedLinks(): Record<string, Record<string, number>> {
-    this.fresh();
     return this.unresolved;
   }
+
+  /** The notes linking to `path`, each with its number of links to it (Obsidian's backlinks). */
+  backlinksOf(path: string): Record<string, number> {
+    return Object.fromEntries(this.inbound.get(path) ?? []);
+  }
+
+  /** The vault index on disk, while the host keeps it up to date ({@link indexAllAsync}). */
+  keeper: IndexKeeper | null = null;
+
+  /**
+   * The notes as the start read them (a text with its parse) or found them in the index on disk (a
+   * parse and hash, no text), until the host hands them to the engine's file cache ({@link
+   * openNodeVault}): the engine's first reads of every row then read nothing again.
+   */
+  startTexts: Map<NodeFile, StartText | KnownNote> | null = null;
 
   /** Parse every note and resolve every link (startup). */
   indexAll(): void {
     this.meta.clear();
-    for (const f of this.vault.getMarkdownFiles()) this.meta.set(f.path, this.parse(fs.readFileSync(this.vault.abs(f.path), "utf8")));
-    this.stale = false;
+    const texts = new Map<NodeFile, StartText>();
+    for (const f of this.vault.getMarkdownFiles()) {
+      const r = this.read(fs.readFileSync(this.vault.abs(f.path), "utf8"));
+      texts.set(f as NodeFile, r.text);
+      this.meta.set(f.path, r.meta);
+    }
+    this.startTexts = texts;
     this.linkResolver.rebuild(this.fileIndex());
     this.resolveAll();
   }
 
-  private parse(text: string): NoteMeta {
+  /**
+   * {@link indexAll} without blocking: the notes are read `concurrency` at a time (the thread
+   * pool reads while the main thread parses), and kept in the order of the vault's list of notes.
+   * A note gone since the walk is left out: the watcher reports it.
+   *
+   * With the vault index on disk (`index`: its records and keeper), a note whose stat is the one
+   * recorded, and that was not written within RACY_MS of being recorded, is not read: its record
+   * gives its metadata, its parse and hash for the engine's file cache, and where its links lead
+   * (resolved again only where a file came or went since). A note recorded under a path that has
+   * no file now, found under another with its file id and stat, was moved while the engine was
+   * stopped: it is not read either. The others are read, and recorded.
+   */
+  async indexAllAsync(concurrency = READ_CONCURRENCY, index: StartIndex | null = null): Promise<IndexedVault> {
+    const files = this.vault.getMarkdownFiles() as NodeFile[];
+    const all = this.vault.getFiles() as NodeFile[];
+    const present = new Set(all.map((f) => f.path));
+    const known = index?.files ?? null;
+    const ids = this.vault.walkIds;
+    // notes recorded under a path that has no file now, by their file id
+    const gone = new Map<string, FileRecord>();
+    if (known) for (const r of known.values()) if (r.note && r.fileId !== null && !present.has(r.path)) gone.set(r.fileId, r);
+    const got: (Known | undefined)[] = new Array(files.length);
+    const toRead: number[] = [];
+    files.forEach((f, i) => {
+      const at = known?.get(f.path);
+      if (at?.note && unchanged(at, f.stat)) {
+        got[i] = { meta: metaOf(at.note), record: at.note, links: index!.links ? at.links : null };
+        return;
+      }
+      const was = at === undefined ? gone.get(ids?.get(f.path) ?? "") : undefined;
+      if (was && unchanged(was, f.stat, false)) {
+        gone.delete(was.fileId!);
+        got[i] = { meta: metaOf(was.note!), record: was.note!, links: null, from: was.path };
+        return;
+      }
+      toRead.push(i);
+    });
+    // the gone notes not found by their id (a copy, a tool that writes a new file), by their hash once read
+    const goneByHash = new Map<string, FileRecord>();
+    for (const r of gone.values()) goneByHash.set(r.note!.hash, r);
+    if (known) for (const r of known.values()) if (r.note && r.fileId === null && !present.has(r.path)) goneByHash.set(r.note.hash, r);
+    await eachLimit(toRead, concurrency, async (i) => {
+      const f = files[i]!;
+      let text: string;
+      try {
+        text = await fsp.readFile(this.vault.listedAbs(f.path), "utf8");
+      } catch {
+        return; // removed since the walk: the watcher reports it
+      }
+      const at = known?.get(f.path);
+      // recorded with this stat, within the racy window: the same text keeps its record
+      if (at?.note && at.mtime === f.stat.mtime && at.size === f.stat.size && contentHash(text) === at.note.hash) {
+        const parse = at.note.parse;
+        const frontmatter = parse ? { frontmatter: { ordered: parse.ordered, body: text.slice(parse.bodyStart) } } : {};
+        got[i] = { meta: metaOf(at.note), record: at.note, links: index!.links ? at.links : null, text: { content: text, hash: at.note.hash, ...frontmatter }, again: true };
+        return;
+      }
+      const r = this.read(text);
+      const was = at === undefined ? goneByHash.get(r.record.hash) : undefined;
+      if (was) goneByHash.delete(was.note!.hash);
+      got[i] = { meta: r.meta, record: r.record, links: null, text: r.text, read: true, ...(was ? { from: was.path } : {}) };
+    });
+    this.meta.clear();
+    const texts = new Map<NodeFile, StartText | KnownNote>();
+    files.forEach((f, i) => {
+      const g = got[i];
+      if (!g) return;
+      this.meta.set(f.path, g.meta);
+      if (!g.read) this.uninterned.push(g.record);
+      texts.set(f as NodeFile, g.text ?? { hash: g.record.hash, ...(g.record.parse ? { parse: g.record.parse } : {}) });
+    });
+    this.startTexts = texts;
+    this.keeper = index?.keeper ?? null;
+    // where the links lead: as recorded, but where a file came or went since (or a recorded target is gone)
+    this.linkResolver.rebuild(this.fileIndex());
+    this.resolved = {};
+    this.unresolved = {};
+    this.inbound.clear();
+    this.names.clear();
+    this.lookers.clear();
+    files.forEach((f, i) => {
+      const g = got[i];
+      if (!g) return;
+      const l = g.links;
+      if (l && Object.keys(l.resolved).every((d) => present.has(d))) this.keep(f.path, l.resolved, l.unresolved);
+      else this.resolveOne(f.path);
+    });
+    if (known && index!.links) {
+      for (const p of present) if (!known.has(p)) this.reresolve(fileLookupNames(p));
+      for (const p of known.keys()) if (!present.has(p)) this.reresolve(fileLookupNames(p));
+    }
+    // the index learns what the start found
+    const k = this.keeper;
+    if (k) {
+      const moved = new Set<string>();
+      files.forEach((f, i) => {
+        const g = got[i];
+        if (g?.from !== undefined) {
+          moved.add(g.from);
+          k.renamed(g.from, f.path);
+        } else if (g?.again) k.touch(f.path); // recorded again, out of the racy window
+        else if (g?.read) k.noteRead(f.path, g.record, g.text!.content);
+      });
+      for (const p of index!.files.keys()) if (!present.has(p) && !moved.has(p)) k.deleted(p);
+      for (const f of all) {
+        const r = known?.get(f.path);
+        if (!/\.md$/i.test(f.path) && (!r || r.note !== null || r.mtime !== f.stat.mtime || r.size !== f.stat.size)) k.touch(f.path);
+      }
+    }
+    return { notes: files.length, read: toRead.length, moved: got.filter((g) => g?.from !== undefined).length };
+  }
+
+  /** A note's metadata from its text; the text with its parse for the engine's file cache (one parse at start); its record for the index on disk. */
+  private read(content: string): { meta: NoteMeta; text: StartText; record: NoteRecord } {
+    let frontmatter: { ordered: OrderedFrontmatter; body: string } | undefined;
+    const meta = this.parse(content, (r) => (frontmatter = r));
+    const record: NoteRecord = {
+      hash: meta.hash,
+      parse: frontmatter ? { ordered: frontmatter.ordered, bodyStart: content.length - frontmatter.body.length } : null,
+      tags: meta.cache.tags!.map((t) => t.tag),
+      links: meta.links.map((l) => [l.linkpath, l.subpath]),
+    };
+    return { meta, text: { content, hash: meta.hash, ...(frontmatter ? { frontmatter } : {}) }, record };
+  }
+
+  private parse(text: string, parsed?: (r: { ordered: OrderedFrontmatter; body: string }) => void): NoteMeta {
     let frontmatter: Record<string, unknown> | undefined;
     let body = text;
     try {
       const r = readOrderedFromMarkdown(text);
+      parsed?.(r);
       body = r.body;
       if (r.ordered.length > 0) frontmatter = Object.fromEntries(r.ordered);
     } catch {
       frontmatter = undefined; // invalid YAML: Obsidian shows no properties
     }
-    return { ...(frontmatter ? { frontmatter } : {}), tags: tagsOf(body), links: parseLinks(text), hash: contentHash(text) };
+    return { cache: { ...(frontmatter ? { frontmatter } : {}), tags: tagsOf(body) }, links: parseLinks(text).map((l) => ({ linkpath: detached(l.linkpath), subpath: detached(l.subpath) })), hash: contentHash(text) };
+  }
+
+  /** What the index on disk asks the host when it writes (see IndexKeeper). */
+  indexSource(): IndexSource {
+    return {
+      stat: (p) => {
+        const f = this.vault.getAbstractFileByPath(p);
+        return f instanceof NodeFile ? { mtime: f.stat.mtime, size: f.stat.size, ctime: f.stat.ctime, ...(f.stat.changed !== undefined ? { changed: f.stat.changed } : {}) } : null;
+      },
+      isNote: (p) => /\.md$/i.test(p),
+      links: (p) => (this.resolved[p] ? { resolved: this.resolved[p]!, unresolved: this.unresolved[p]! } : null),
+      fileId: (p) => this.vault.fileId(p),
+      written: () => void (this.vault.walkIds = null),
+    };
   }
 
   hashOf(p: string): string | undefined {
@@ -996,7 +1459,7 @@ export class NodeMetadataCache implements MetadataCache {
 
   /** Re-read one file (after a write or an external change); a new file may resolve other links. */
   changed(file: NodeFile, created: boolean): void {
-    if (created) this.stale = true;
+    if (created) this.fileAdded(file.path);
     if (/\.md$/i.test(file.path)) {
       let text: string;
       try {
@@ -1005,31 +1468,59 @@ export class NodeMetadataCache implements MetadataCache {
       } catch {
         return;
       }
-      this.meta.set(file.path, this.parse(text));
-      if (!this.stale) this.resolveOne(file.path);
-    }
+      const r = this.read(text);
+      this.meta.set(file.path, r.meta);
+      this.keeper?.noteRead(file.path, r.record, text);
+      this.resolveOne(file.path);
+    } else this.keeper?.touch(file.path);
     if (/\.md$/i.test(file.path)) this.events.emit("changed", file, "", this.getFileCache(file));
     this.announceResolved();
   }
 
   deleted(p: string): void {
+    this.keeper?.deleted(p);
     this.meta.delete(p);
-    this.stale = true;
+    this.forget(p);
+    this.fileRemoved(p);
     this.announceResolved();
   }
 
   renamed(oldPath: string, newPath: string): void {
+    this.keeper?.renamed(oldPath, newPath);
     const m = this.meta.get(oldPath);
     if (m) {
       this.meta.delete(oldPath);
       this.meta.set(newPath, m);
     }
-    this.stale = true;
+    this.forget(oldPath);
+    this.fileRemoved(oldPath);
+    this.fileAdded(newPath);
+    // its relative links read from the new folder
+    if (m) this.resolveOne(newPath);
     this.announceResolved();
   }
 
   private fileIndex() {
     return { paths: () => this.vault.getFiles().map((f) => f.path) };
+  }
+
+  /** A file the vault has now: the links that look up its name may resolve to it. */
+  private fileAdded(p: string): void {
+    this.linkResolver.add(p);
+    this.reresolve(fileLookupNames(p));
+  }
+
+  /** A file gone: the links that resolved to it (they look up its name) resolve again. */
+  private fileRemoved(p: string): void {
+    this.linkResolver.remove(p);
+    this.reresolve(fileLookupNames(p));
+  }
+
+  /** Resolve again the links of every note that looks up one of these names. */
+  private reresolve(names: readonly string[]): void {
+    const sources = new Set<string>();
+    for (const n of names) for (const s of this.lookers.get(n) ?? []) sources.add(s);
+    for (const s of sources) this.resolveOne(s);
   }
 
   private resolveOne(p: string): void {
@@ -1041,15 +1532,117 @@ export class NodeMetadataCache implements MetadataCache {
       if (dest) resolved[dest] = (resolved[dest] ?? 0) + 1;
       else unresolved[l.linkpath] = (unresolved[l.linkpath] ?? 0) + 1;
     }
-    this.resolved[p] = resolved;
-    this.unresolved[p] = unresolved;
+    this.keep(p, resolved, unresolved);
+    this.keeper?.touch(p);
   }
 
-  /** Resolve every note's links again (files were added, removed or renamed); the caller announces it. */
+  /** Keep where a note's links lead, with their backlinks and the names they look up. */
+  private keep(p: string, resolved: Record<string, number>, unresolved: Record<string, number>): void {
+    this.unregister(p);
+    const names = new Set<string>();
+    for (const l of this.meta.get(p)!.links) if (l.linkpath !== "") addLinkLookupNames(names, l.linkpath, p);
+    this.resolved[p] = resolved;
+    this.unresolved[p] = unresolved;
+    for (const [dest, n] of Object.entries(resolved)) {
+      let from = this.inbound.get(dest);
+      if (!from) this.inbound.set(dest, (from = new Map()));
+      from.set(p, n);
+    }
+    // interned: every note that links to a file shares its names
+    const list = [...names].map(intern);
+    this.names.set(p, list);
+    for (const n of list) {
+      let who = this.lookers.get(n);
+      if (!who) this.lookers.set(n, (who = new Set()));
+      who.add(p);
+    }
+  }
+
+  /** Take a note's resolved links and looked-up names out of the indexes (its entries stay in `resolved`). */
+  private unregister(p: string): void {
+    for (const dest of Object.keys(this.resolved[p] ?? {})) {
+      const from = this.inbound.get(dest)!; // registered with the link
+      from.delete(p);
+      if (from.size === 0) this.inbound.delete(dest);
+    }
+    for (const n of this.names.get(p) ?? []) {
+      const who = this.lookers.get(n)!; // registered with the name
+      who.delete(p);
+      if (who.size === 0) this.lookers.delete(n);
+    }
+    this.names.delete(p);
+  }
+
+  /** A note gone from `p` (deleted, or renamed away): its links are no longer resolved. */
+  private forget(p: string): void {
+    this.unregister(p);
+    delete this.resolved[p];
+    delete this.unresolved[p];
+  }
+
+  /** Resolve every note's links again, from scratch (startup). */
   private resolveAll(): void {
     this.resolved = {};
     this.unresolved = {};
+    this.inbound.clear();
+    this.names.clear();
+    this.lookers.clear();
     for (const p of this.meta.keys()) this.resolveOne(p);
+  }
+
+  /**
+   * How the links kept up to date file by file differ from resolving every link of the vault again
+   * now (a debug check: `DATANOTES_INDEX_CHECK`, and the tests); empty when they agree.
+   */
+  verifyLinks(): string[] {
+    const fresh = new LinkResolver(this.fileIndex());
+    const out: string[] = [];
+    const keys = Object.keys(this.resolved);
+    const notes = [...this.meta.keys()];
+    if (JSON.stringify(keys) !== JSON.stringify(notes)) out.push(`resolved notes: ${JSON.stringify(keys)} instead of ${JSON.stringify(notes)}`);
+    const inbound = new Map<string, Map<string, number>>();
+    for (const p of notes) {
+      const resolved: Record<string, number> = {};
+      const unresolved: Record<string, number> = {};
+      for (const l of this.meta.get(p)!.links) {
+        if (l.linkpath === "") continue;
+        const dest = fresh.resolve(l.linkpath, p);
+        if (dest) resolved[dest] = (resolved[dest] ?? 0) + 1;
+        else unresolved[l.linkpath] = (unresolved[l.linkpath] ?? 0) + 1;
+      }
+      for (const [dest, n] of Object.entries(resolved)) {
+        if (!inbound.has(dest)) inbound.set(dest, new Map());
+        inbound.get(dest)!.set(p, n);
+      }
+      if (JSON.stringify(this.resolved[p]) !== JSON.stringify(resolved)) out.push(`${p}: resolves ${JSON.stringify(this.resolved[p])} instead of ${JSON.stringify(resolved)}`);
+      if (JSON.stringify(this.unresolved[p]) !== JSON.stringify(unresolved)) out.push(`${p}: leaves ${JSON.stringify(this.unresolved[p])} unresolved instead of ${JSON.stringify(unresolved)}`);
+    }
+    const sorted = (m: Map<string, Map<string, number>>) => JSON.stringify([...m].map(([d, from]) => [d, [...from].sort()]).sort());
+    if (sorted(this.inbound) !== sorted(inbound)) out.push("backlinks differ from the resolved links");
+    // the names each note looks up, and the notes looking up each name
+    const lookers = new Map<string, Set<string>>();
+    for (const p of notes) {
+      const names = new Set(this.meta.get(p)!.links.flatMap((l) => (l.linkpath === "" ? [] : linkLookupNames(l.linkpath, p))));
+      for (const n of names) {
+        if (!lookers.has(n)) lookers.set(n, new Set());
+        lookers.get(n)!.add(p);
+      }
+    }
+    const names = (m: Map<string, Set<string>>) => JSON.stringify([...m].map(([n, who]) => [n, [...who].sort()]).sort());
+    if (names(this.lookers) !== names(lookers)) out.push("looked-up names differ from the notes' links");
+    return out;
+  }
+
+  /**
+   * Resolve every note's links again from scratch, after {@link verifyLinks} found them out of step
+   * (DATANOTES_INDEX_CHECK): the next check agrees. The resolver is rebuilt first (it may be the
+   * stale part); each note resolved is recorded in the index on disk (resolveOne), and `resolved`
+   * is announced, as after any resolution.
+   */
+  relinkAll(): void {
+    this.linkResolver.rebuild(this.fileIndex());
+    this.resolveAll();
+    this.announceResolved();
   }
 
   /** Obsidian announces `resolved` after a change, asynchronously; bursts are coalesced. */
@@ -1062,14 +1655,12 @@ export class NodeMetadataCache implements MetadataCache {
   }
 
   /** Links of a note (for the file manager's rewrites). */
-  linksOf(p: string): LinkRef[] {
+  linksOf(p: string): NoteLink[] {
     return this.meta.get(p)?.links ?? [];
   }
 
   getFileCache(file: TFile): CachedMetadata | null {
-    const m = this.meta.get(file.path);
-    if (!m) return null;
-    return { ...(m.frontmatter ? { frontmatter: m.frontmatter } : {}), tags: m.tags };
+    return this.meta.get(file.path)?.cache ?? null;
   }
 
   getFirstLinkpathDest(linkpath: string, sourcePath: string): TFile | null {
@@ -1092,9 +1683,48 @@ export class NodeMetadataCache implements MetadataCache {
     if (r.name && r.cb) this.events.off(r.name, r.cb);
   }
 
+  /** How many records the start took from the index on disk are still to intern. */
+  get internPending(): number {
+    return this.uninterned.length - this.internAt;
+  }
+
+  /**
+   * Intern the strings of the records the start took from the index on disk (front matter, tags,
+   * links; see `intern.ts`), INTERN_SLICE.records at a time, one slice per turn of the event loop:
+   * the start does not wait for it (the service begins once it listens). The metadata built from
+   * them holds the same strings, which V8 turns into forwards in place, so the holders made
+   * earlier share the one copy too. Resolves once every record is interned, or the cache is
+   * disposed; a second call answers the same promise.
+   */
+  internRecords(): Promise<void> {
+    if (this.interning) return this.interning;
+    if (this.internPending === 0) return Promise.resolve();
+    const slice = () => {
+      const end = Math.min(this.internAt + INTERN_SLICE.records, this.uninterned.length);
+      for (; this.internAt < end; this.internAt++) internRecord(this.uninterned[this.internAt]!);
+      if (this.internAt < this.uninterned.length) this.internNext = setImmediate(slice);
+      else this.endInterning();
+    };
+    this.interning = new Promise<void>((resolve) => (this.internDone = resolve));
+    this.internNext = setImmediate(slice);
+    return this.interning;
+  }
+
+  /** The records interned or let go: nothing more to do, the promise resolved. */
+  private endInterning(): void {
+    if (this.internNext) clearImmediate(this.internNext);
+    this.internNext = null;
+    this.uninterned = [];
+    this.internAt = 0;
+    this.interning = null;
+    this.internDone?.();
+    this.internDone = null;
+  }
+
   dispose(): void {
     if (this.resolveTimer) clearTimeout(this.resolveTimer);
     this.resolveTimer = null;
+    this.endInterning();
   }
 }
 
@@ -1111,27 +1741,31 @@ export class NodeFileManager implements FileManager {
   async renameFile(file: TAbstractFile, newPath: string): Promise<void> {
     const item = this.vault.getAbstractFileByPath(file.path);
     if (!item) throw new Error(`file not found: ${file.path}`);
-    // Who links to what moves, resolved as the vault is now.
-    const oldResolver = new LinkResolver({ paths: () => this.vault.getFiles().map((f) => f.path) });
+    // Who links to what moves: the notes that move and their backlinks (no pass over every link).
     const from = item.path;
     const isFolder = "children" in item;
     const movingFiles = isFolder ? this.vault.getFiles().filter((f) => f.path.startsWith(`${from}/`)).map((f) => f.path) : [from];
-    const moving = new Set(movingFiles);
     const sources = new Set<string>(movingFiles.filter((p) => /\.md$/i.test(p)));
-    for (const [src, targets] of Object.entries(this.cache.resolvedLinks)) {
-      if (Object.keys(targets).some((t) => moving.has(t))) sources.add(src);
-    }
+    for (const p of movingFiles) for (const src of Object.keys(this.cache.backlinksOf(p))) sources.add(src);
     const texts = new Map<string, string>();
     for (const src of sources) {
       const f = this.vault.getAbstractFileByPath(src);
       if (f && "extension" in f) texts.set(src, await this.vault.read(f as TFile));
+    }
+    // Their links resolved as the vault is now, before the move (no copy of the resolver).
+    const before = new Map<string, Map<string, string | null>>();
+    for (const [src, text] of texts) {
+      const dests = new Map<string, string | null>();
+      for (const l of parseLinks(text)) if (!dests.has(l.linkpath)) dests.set(l.linkpath, this.cache.resolver.resolve(l.linkpath, src));
+      before.set(src, dests);
     }
 
     const moved = await this.vault.move(item, newPath); // the cache follows (rename events)
 
     await eachLimit([...texts], MOVE_WRITES, async ([oldSrc, text]) => {
       const src = moved.get(oldSrc) ?? oldSrc;
-      const next = this.relinked(text, src, oldSrc, oldResolver, moved);
+      const dests = before.get(oldSrc)!; // every source read has its links resolved
+      const next = this.relinked(text, src, oldSrc, (lp) => dests.get(lp) ?? null, moved);
       const f = this.vault.getAbstractFileByPath(src) as NodeFile | null;
       if (f && next !== text) await this.vault.writeText(f, next);
     });
@@ -1139,16 +1773,17 @@ export class NodeFileManager implements FileManager {
 
   /**
    * A note's text (at `src` now, at `oldSrc` before the move) with its links to moved files
-   * (`moved`: old path → new path) rewritten in the vault's link format, as `oldResolver` (the
-   * vault before the move) resolved them; its relative links that would break from a new place too.
+   * (`moved`: old path → new path) rewritten in the vault's link format, as `resolveOld` (the
+   * vault before the move, from the note's old place) resolved them; its relative links that
+   * would break from a new place too.
    */
-  private relinked(text: string, src: string, oldSrc: string, oldResolver: LinkResolver, moved: ReadonlyMap<string, string>): string {
+  private relinked(text: string, src: string, oldSrc: string, resolveOld: (linkpath: string, source: string) => string | null, moved: ReadonlyMap<string, string>): string {
     const newResolver = this.cache.resolver;
     const format = this.vault.config.newLinkFormat;
     return rewriteLinks(
       text,
       src,
-      (lp, s) => oldResolver.resolve(lp, s),
+      resolveOld,
       moved,
       (dest, s) => linkText(newResolver, dest, s, format, true),
       oldSrc,
@@ -1182,7 +1817,7 @@ export class NodeFileManager implements FileManager {
       const text = await this.vault.read(f);
       // a link to an old path that holds a file again follows the move only where it meant the moved file
       const followed = new Map([...moved].filter(([from, to]) => !present.has(from) || to === f.path || reoccupied!(from, f.path, text)));
-      const after = this.relinked(text, f.path, oldSrc, oldResolver, followed);
+      const after = this.relinked(text, f.path, oldSrc, (lp, s) => oldResolver.resolve(lp, s), followed);
       if (after !== text) out.push({ path: f.path, before: text, after });
     }
     return out.sort((a, b) => a.path.localeCompare(b.path));
@@ -1211,6 +1846,8 @@ export interface NodeHost {
   vault: NodeVault;
   metadataCache: NodeMetadataCache;
   fileManager: NodeFileManager;
+  /** The vault index on disk while the host keeps it ({@link indexNodeHost}); null without one. */
+  index?: IndexKeeper | null;
 }
 
 /**
@@ -1218,12 +1855,75 @@ export interface NodeHost {
  * with every write made through the host (external changes: `NodeWatcher`).
  */
 export function openNodeVault(root: string, config?: Partial<VaultConfig>, opts: { store?: string } = {}): NodeHost {
+  const host = createNodeHost(root, config, opts);
+  host.vault.scanSync();
+  host.metadataCache.indexAll();
+  following(host);
+  return host;
+}
+
+/**
+ * {@link openNodeVault} without blocking, the way the service starts: one walk of the vault
+ * (folders listed and files stat-ed many at a time), then the notes read many at a time.
+ */
+export async function openNodeVaultAsync(root: string, config?: Partial<VaultConfig>, opts: { store?: string; index?: { store: string; version: string } | null } = {}): Promise<NodeHost> {
+  const host = createNodeHost(root, config, opts);
+  await host.vault.scan();
+  await indexNodeHost(host, { index: opts.index ?? null });
+  return host;
+}
+
+/**
+ * A host on a vault folder with nothing read yet. The service walks it ({@link NodeVault.scan}),
+ * finds its store from the files the walk found, then reads the notes ({@link indexNodeHost}).
+ */
+export function createNodeHost(root: string, config?: Partial<VaultConfig>, opts: { store?: string } = {}): NodeHost {
   const vault = new NodeVault(path.resolve(root), { ...readVaultConfig(root), ...(config ?? {}) });
-  vault.scanSync();
   const metadataCache = new NodeMetadataCache(vault);
-  metadataCache.indexAll();
-  vault.listener = metadataCache;
   const fileManager = new NodeFileManager(vault, metadataCache);
   const app: App = { vault, metadataCache, fileManager, ...(opts.store ? { store: nodeStoreAdapter(opts.store) } : {}) };
   return { app, vault, metadataCache, fileManager };
+}
+
+/**
+ * Read and parse the notes of a walked vault and resolve their links; the host then follows every
+ * change. `index`: the vault index on disk of this store (`<store>/index/vault.sqlite`, see
+ * index-db.ts) for an engine of this version: the notes it records unchanged are not read, and
+ * the host keeps it up to date; a text the engine's file cache no longer keeps comes from it, and
+ * a search reads only the notes the index's search table names.
+ * `hold`: nothing is written until `host.index.release()`.
+ */
+export async function indexNodeHost(host: NodeHost, o: { index?: { store: string; version: string } | null; hold?: boolean } = {}): Promise<IndexedVault & { rebuilt: string | null; indexed: boolean }> {
+  const opened = o.index ? IndexDb.open(o.index.store, { vault: host.vault.basePath, version: o.index.version }) : null;
+  const keeper = opened ? new IndexKeeper(opened.db, host.metadataCache.indexSource()) : null;
+  // `hold`: what the start found is written once the caller releases the keeper (the service: once it listens)
+  if (o.hold) keeper?.hold();
+  const counts = await host.metadataCache.indexAllAsync(READ_CONCURRENCY, opened && keeper ? { files: opened.files, links: opened.links, keeper } : null);
+  host.index = keeper;
+  if (keeper) {
+    setTextSource(host.app, { textOf: (p, hash) => keeper.textOf(p, hash) });
+    setSearchSource(host.app, { candidates: (words) => keeper.searchCandidates(words) });
+  } else host.vault.walkIds = null;
+  following(host);
+  // not held: a start with nothing to write lets the walk's file ids go now (held: at release)
+  if (keeper && !o.hold) keeper.release();
+  // the records taken from the index interned between other work (held: the caller starts it, the service once it listens)
+  if (!o.hold) void host.metadataCache.internRecords();
+  return { ...counts, rebuilt: opened?.db.rebuilt ?? null, indexed: keeper !== null };
+}
+
+/** Stop a host: the index on disk written and closed, the metadata cache's timers cleared. */
+export function closeNodeHost(host: NodeHost): void {
+  host.index?.close();
+  host.index = null;
+  setTextSource(host.app, null);
+  setSearchSource(host.app, null);
+  host.metadataCache.dispose();
+}
+
+/** The metadata cache follows the vault's changes; the notes read at start go to the engine's file cache. */
+function following(host: NodeHost): void {
+  host.vault.listener = host.metadataCache;
+  primeFiles(host.app, [...host.metadataCache.startTexts!].map(([file, t]) => ({ file, ...t })));
+  host.metadataCache.startTexts = null;
 }

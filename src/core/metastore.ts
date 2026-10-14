@@ -40,6 +40,7 @@ import { COLUMNS_KEY, TABLE_KEY } from "./types-table";
 import type { OrderedFrontmatter } from "./types";
 import { guide, GuidedError } from "./hints";
 import { inDatabase, movePath, normalizeDatabaseFolder } from "./db-paths";
+import { phase } from "./tracing";
 
 export const METASTORE_FILE = "metastore.yaml";
 export const SYSTEM_CATALOG = "system";
@@ -401,25 +402,54 @@ export function setCatalogComment(text: string, catalog: string, schema: string 
   });
 }
 
+/**
+ * The tables and views of a parsed metastore, and the references resolved in it, kept per model:
+ * a parsed model is never changed (an operation writes the file and parses it again), and every
+ * read resolves the `table` property of every row, so building the lists once per model saves
+ * most of a table scan. Each call still returns its own objects.
+ */
+interface ModelIndex {
+  tables?: readonly { ref: CatalogRef; entry: CatalogTableEntry }[];
+  views?: readonly { ref: CatalogRef; view: ViewEntry }[];
+  /** Per kind, reference → the reference, null (none) or the candidates of an ambiguous one. */
+  refs: Record<"table" | "view", Map<string, CatalogRef | null | readonly string[]>>;
+}
+
+const MODEL_INDEX = new WeakMap<Metastore, ModelIndex>();
+
+function modelIndex(model: Metastore): ModelIndex {
+  let ix = MODEL_INDEX.get(model);
+  if (!ix) MODEL_INDEX.set(model, (ix = { refs: { table: new Map(), view: new Map() } }));
+  return ix;
+}
+
 /** Every table of the metastore, sorted by full name. */
 export function catalogTables(model: Metastore): { ref: CatalogRef; entry: CatalogTableEntry }[] {
-  const out: { ref: CatalogRef; entry: CatalogTableEntry }[] = [];
-  for (const [c, cat] of Object.entries(model.catalogs)) {
-    for (const [s, sch] of Object.entries(cat.schemas)) {
-      for (const [t, entry] of Object.entries(sch.tables)) out.push({ ref: refOf(c, s, t), entry });
+  const ix = modelIndex(model);
+  if (!ix.tables) {
+    const out: { ref: CatalogRef; entry: CatalogTableEntry }[] = [];
+    for (const [c, cat] of Object.entries(model.catalogs)) {
+      for (const [s, sch] of Object.entries(cat.schemas)) {
+        for (const [t, entry] of Object.entries(sch.tables)) out.push({ ref: refOf(c, s, t), entry });
+      }
     }
+    ix.tables = out.sort((a, b) => a.ref.full.localeCompare(b.ref.full));
   }
-  return out.sort((a, b) => a.ref.full.localeCompare(b.ref.full));
+  return ix.tables.map(({ ref, entry }) => ({ ref: { ...ref }, entry }));
 }
 
 export function catalogViews(model: Metastore): { ref: CatalogRef; view: ViewEntry }[] {
-  const out: { ref: CatalogRef; view: ViewEntry }[] = [];
-  for (const [c, cat] of Object.entries(model.catalogs)) {
-    for (const [s, sch] of Object.entries(cat.schemas)) {
-      for (const [v, view] of Object.entries(sch.views)) out.push({ ref: refOf(c, s, v), view });
+  const ix = modelIndex(model);
+  if (!ix.views) {
+    const out: { ref: CatalogRef; view: ViewEntry }[] = [];
+    for (const [c, cat] of Object.entries(model.catalogs)) {
+      for (const [s, sch] of Object.entries(cat.schemas)) {
+        for (const [v, view] of Object.entries(sch.views)) out.push({ ref: refOf(c, s, v), view });
+      }
     }
+    ix.views = out.sort((a, b) => a.ref.full.localeCompare(b.ref.full));
   }
-  return out.sort((a, b) => a.ref.full.localeCompare(b.ref.full));
+  return ix.views.map(({ ref, view }) => ({ ref: { ...ref }, view }));
 }
 
 export function defaultCatalog(model: Metastore): string | undefined {
@@ -447,6 +477,27 @@ export function resolveCatalogRef(
   refText: string,
   kind: "table" | "view" = "table",
 ): CatalogRef | null {
+  const found = knownRef(model, refText, kind);
+  if (found === null) return null;
+  if (isCatalogRef(found)) return { ...found };
+  throw new AmbiguousCatalogRefError(refText, [...found]);
+}
+
+/** {@link findCatalogRef}, once per model and reference (shared: never changed by callers). */
+function knownRef(model: Metastore, refText: string, kind: "table" | "view"): CatalogRef | null | readonly string[] {
+  // a map per kind: every read asks it of every note, and no key is built for that
+  const refs = modelIndex(model).refs[kind];
+  let found = refs.get(refText);
+  if (found === undefined) refs.set(refText, (found = findCatalogRef(model, refText, kind)));
+  return found;
+}
+
+function isCatalogRef(v: CatalogRef | readonly string[]): v is CatalogRef {
+  return !Array.isArray(v);
+}
+
+/** {@link resolveCatalogRef} without the memo: the reference, null, or the candidates when ambiguous. */
+function findCatalogRef(model: Metastore, refText: string, kind: "table" | "view"): CatalogRef | null | readonly string[] {
   let ref = refText.trim();
   const hash = ref.indexOf(`${METASTORE_FILE}#`);
   if (hash >= 0) ref = ref.slice(hash + METASTORE_FILE.length + 1);
@@ -461,18 +512,16 @@ export function resolveCatalogRef(
   } else if (parts.length === 1) {
     matches = all.filter((r) => r.table === parts[0]);
   }
-  if (matches.length > 1) throw new AmbiguousCatalogRefError(refText, matches.map((m) => m.full));
+  if (matches.length > 1) return matches.map((m) => m.full);
   return matches[0] ?? null;
 }
 
 /** Normalise a row's `table` property value to a full name (null when it names no table). */
 export function rowTableFull(model: Metastore, value: unknown): string | null {
   if (typeof value !== "string" || value.trim() === "") return null;
-  try {
-    return resolveCatalogRef(model, value)?.full ?? null;
-  } catch {
-    return null;
-  }
+  // every read asks it of every note: no copy, and an ambiguous name is no table
+  const found = knownRef(model, value, "table");
+  return found !== null && isCatalogRef(found) ? found.full : null;
 }
 
 const TABLE_PROPERTY_KEYS = ["partition", "filename", "archive", "exclude"] as const;
@@ -618,14 +667,25 @@ function ensureMapIn(doc: ReturnType<typeof parseDocument>, path: string[]): voi
 
 /** Set (or with `null` remove) a table entry; comments elsewhere in the file are kept. */
 export function setTableEntry(text: string, ref: CatalogRef, entry: CatalogTableEntry | null): string {
+  return setTableEntries(text, [[ref, entry]]);
+}
+
+/**
+ * {@link setTableEntry} for several tables, in order: the text is parsed and printed once (a
+ * large metastore takes tens of milliseconds each way).
+ */
+export function setTableEntries(text: string, edits: readonly (readonly [CatalogRef, CatalogTableEntry | null])[]): string {
+  if (edits.length === 0) return text;
   return editDocument(text, (doc) => {
-    const path = ["catalogs", ref.catalog, "schemas", ref.schema, "tables", ref.table];
-    if (entry === null) {
-      doc.deleteIn(path);
-      return;
+    for (const [ref, entry] of edits) {
+      const path = ["catalogs", ref.catalog, "schemas", ref.schema, "tables", ref.table];
+      if (entry === null) {
+        doc.deleteIn(path);
+        continue;
+      }
+      ensureMapIn(doc, path.slice(0, -1));
+      doc.setIn(path, doc.createNode(entry));
     }
-    ensureMapIn(doc, path.slice(0, -1));
-    doc.setIn(path, doc.createNode(entry));
   });
 }
 
@@ -713,6 +773,8 @@ interface CacheEntry {
   path: string;
   text: string;
   model: Metastore;
+  /** The file's size and time when \`text\` was read (hosts with `stat`): unchanged, it is not read again. */
+  stamp?: { size: number; mtime: number };
 }
 
 const CACHE = new WeakMap<object, CacheEntry>();
@@ -728,10 +790,17 @@ export async function loadMetastore(
     CACHE.delete(app);
     return null;
   }
-  const text = await app.vault.read(file as TFile);
   const cached = CACHE.get(app);
-  const model = cached && cached.path === path && cached.text === text ? cached.model : parseMetastore(text);
-  CACHE.set(app, { path, text, model });
+  // Every operation loads it: a file of hundreds of KB is read again only when its size or time
+  // changed (taken before the read: a change meanwhile reads it again next time).
+  const stamp = app.vault.adapter.stat ? await app.vault.adapter.stat(path) : null;
+  if (stamp && cached?.stamp && cached.path === path && cached.stamp.size === stamp.size && cached.stamp.mtime === stamp.mtime) {
+    return { file: file as TFile, text: cached.text, model: cached.model };
+  }
+  const text = await app.vault.read(file as TFile);
+  // parsed again only when its text changed: a span then (the parse of a large metastore costs)
+  const model = cached && cached.path === path && cached.text === text ? cached.model : phase("engine.metastore.parse", () => parseMetastore(text), { "datanotes.metastore.chars": text.length });
+  CACHE.set(app, { path, text, model, ...(stamp ? { stamp: { size: stamp.size, mtime: stamp.mtime } } : {}) });
   return { file: file as TFile, text, model };
 }
 
@@ -748,4 +817,31 @@ export function primeMetastore(app: App, settings: Pick<DatanotesSettings, "data
   } catch {
     CACHE.delete(app);
   }
+}
+
+/** The length of a text in UTF-8 bytes, as a file holding it has. */
+function utf8Length(text: string): number {
+  let n = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    // each half of a surrogate pair: the pair is one character of four bytes
+    else if (c >= 0xd800 && c <= 0xdfff) n += 2;
+    else n += 3;
+  }
+  return n;
+}
+
+/**
+ * {@link primeMetastore} for a text the engine just wrote to the file: with the file's size and
+ * time now (when its size is the text's), so the next load reads nothing.
+ */
+export async function primeWrittenMetastore(app: App, settings: Pick<DatanotesSettings, "databaseFolder">, text: string): Promise<void> {
+  primeMetastore(app, settings, text);
+  const c = CACHE.get(app);
+  const adapter = app.vault.adapter;
+  if (!c || !adapter.stat) return;
+  const s = await adapter.stat(c.path).catch(() => null);
+  if (s && s.size === utf8Length(text) && CACHE.get(app) === c) c.stamp = { size: s.size, mtime: s.mtime };
 }

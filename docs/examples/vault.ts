@@ -69,6 +69,17 @@ const chapter: Chapter = {
       steps: [{ op: "graph_neighbors", args: { from_nodes: { table: "actor", where: { name: "Cary Grant" } } } }],
     },
     {
+      title: "Read the whole graph in one call",
+      say: "`tables` starts from the rows of several tables at once. Name the tables, or use a pattern: `*` is every table, `main.*` every table of the `main` catalog. With `direction: \"out\"`, one call returns every link of every row: the whole graph, for an app that draws it. The start set holds at most 5,000 notes.",
+      steps: [
+        {
+          op: "graph_neighbors",
+          args: { from_nodes: { tables: ["*"] }, direction: "out" },
+          check: (v) => !JSON.stringify(v).includes("film/Charade.md") && "Charade expected",
+        },
+      ],
+    },
+    {
       title: "Walk the links from a note",
       say: "`graph_traverse` follows links breadth-first, in the `direction` you choose: `out`, `in` or `both`. Here it starts from Audrey Hepburn, goes up to two steps in both directions and keeps only films. It finds Charade, the film she’s in, and His Girl Friday, which the Charade note links to. `via` shows the route to each one.",
       steps: [

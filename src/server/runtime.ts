@@ -17,11 +17,11 @@ import { bumpVaultGeneration, invalidateFiles } from "../core/file-cache";
 import { appendLog, pruneLogs } from "../core/file-log";
 import { InverseWatcher } from "../core/inverse";
 import { compactJournal } from "../core/journal";
-import { withLogLock } from "../core/transaction-log";
+import { logLockActivity, setCheckpointRunner, verifyCurrentStates, warmLoggedStates, withLogLock, writeDueCheckpoints } from "../core/transaction-log";
 import { loadMetastore, METASTORE_FILE, metastorePath } from "../core/metastore";
 import { metastoreId } from "../core/database-id";
 import { recordDatabaseMove, type RecordedMove } from "../core/database";
-import { settleVault, setVaultSettler } from "../core/vault-settle";
+import { settleVault, setVaultSettler, type VaultSettler } from "../core/vault-settle";
 import { createPublicApi, type DatanotesPublicApi } from "../core/public-api";
 import { recomputeColumns, syncRelations } from "../core/rows";
 import { SemanticIndex } from "../core/semantic";
@@ -30,18 +30,24 @@ import { DocsError, openDocs, type DocsLibrary } from "../api/docs";
 import type { DatanotesSettings } from "../core/settings";
 import { FileLogger, NOOP_TELEMETRY, setTelemetry, TeeTelemetry, telemetry } from "../core/telemetry";
 import { OtlpSink, resolveOtlp } from "./otlp-sink";
+import { engineResource, installTracing, resolveTraces, TraceSink } from "./tracing";
+import { job } from "../core/tracing";
+import { traceVaultIo } from "../core/vault-io-tracing";
 import type { OtlpOptions } from "../api/otlp";
 import { newToken, HttpApiServer } from "./http-server";
 import { createHandlers, dispatch, type Handler } from "./rest";
+import { checkIndexAfter } from "../core/index-check";
 import { SessionIdentities } from "./identities";
 import { currentActor, type Actor } from "../core/actor";
 import type { ToolCallRecord } from "../api/client";
-import { redactToolCall } from "../api/redact";
+import { cutRecorded, isPlainObject, RECORDED_CHARS, redactToolCall, summarizeRecorded } from "../api/redact";
 import { ChangeFeed } from "../core/change-feed";
 import { externalRename } from "../core/hand-moves";
 import { WebhookDispatcher } from "./webhooks";
 import { engineStatus, type HostStatus } from "./status";
-import { TokenRegistry } from "./tokens";
+import { TokenRegistry, tokenNameOf } from "./tokens";
+import { OperationScheduler } from "./scheduler";
+import { ReadCache } from "./read-cache";
 import { openApiDocument } from "./openapi";
 import { messageOf } from "../core/message";
 import { guide } from "../core/hints";
@@ -51,6 +57,11 @@ const REPORT_HINT = guide(`Send {"session", "model", "harness"} to sessions/iden
 
 /** Quiet time after the last vault change before hand edits are logged. */
 const EXTERNAL_EDIT_DELAY_MS = 3000;
+/** How often the transaction log's current states are checked against the vault, and after how long without a write. */
+const LOG_CHECK_EVERY_MS = 10 * 60_000;
+const LOG_CHECK_IDLE_MS = 60_000;
+/** How often the store's housekeeping runs while the engine runs (and once at start). */
+const MAINTENANCE_EVERY_MS = 24 * 3600_000;
 /** Quiet time after the last note change before the semantic index catches up. */
 const SEMANTIC_DELAY_MS = 10000;
 /** Wait after the metastore went away before looking for the database folder elsewhere. */
@@ -110,6 +121,12 @@ export class EngineRuntime {
   private feedStarting: Promise<void> | null = null;
   private webhooks: WebhookDispatcher | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  /** The idle check of the transaction log's current states (see {@link checkLogStates}). */
+  private logCheckTimer: ReturnType<typeof setInterval> | null = null;
+  /** The store's housekeeping, once a day ({@link maintainStore}). */
+  private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
+  /** Checkpoints of the transaction log waiting to be written (a job runs them after the writes that made them due). */
+  private checkpointsQueued = false;
   /** Background work started without a caller to wait for it: `stop()` waits for it. */
   private tasks = new Set<Promise<void>>();
   private readonly startedAt = new Date();
@@ -118,6 +135,15 @@ export class EngineRuntime {
   private hostStatus: (() => HostStatus) | null = null;
   /** How the host stops the engine when asked over HTTP (`/stop/`); null: it cannot. */
   private hostStop: (() => void) | null = null;
+  /** Write priority of the operations (settings `writePriority`, `writePriorityMaxWaitMs`). */
+  readonly scheduler: OperationScheduler;
+  /** Answers of repeated reads, while the engine follows the vault (setting `readCacheMaxBytes`). */
+  private cache: ReadCache | null = null;
+
+  /** The vault this runtime serves. */
+  get app(): App {
+    return this.o.app;
+  }
 
   constructor(private readonly o: RuntimeOptions) {
     const app = o.app;
@@ -129,6 +155,10 @@ export class EngineRuntime {
     });
     this.api = createPublicApi(app, o.getSettings, o.saveSettings, this.semantic, () => this.feed, () => this.webhooks);
     this.tokens = new TokenRegistry({ app, getSettings: o.getSettings });
+    this.scheduler = new OperationScheduler(() => {
+      const s = o.getSettings();
+      return { enabled: s.writePriority, maxReadWaitMs: s.writePriorityMaxWaitMs };
+    });
     // A recompute or a link mirror due while the database folder is looked for is dropped: the
     // move, when it is one, recomputes every generated column in bulk, and the links are read anew.
     this.recompute = new AutoRecompute(
@@ -179,7 +209,20 @@ export class EngineRuntime {
 
   /** Route handlers over this runtime's vault and index (for the HTTP server or the Local REST API). */
   handlers(): Record<string, Handler> {
-    const base = createHandlers(this.o.app, this.o.getSettings, this.o.saveSettings, this.semantic, this.api);
+    const handled = createHandlers(this.o.app, this.o.getSettings, this.o.saveSettings, this.semantic, this.api, {
+      scheduler: this.scheduler,
+      cache: () => this.cache,
+      scope: () => this.cacheScope(),
+    });
+    // DATANOTES_INDEX_CHECK=1 (index-check.ts): the indexes are checked against the vault after every operation
+    const base: Record<string, Handler> = {};
+    for (const [route, h] of Object.entries(handled)) {
+      base[route] = async (body) => {
+        const res = await h(body);
+        await checkIndexAfter(this.o.app, this.o.getSettings(), route);
+        return res;
+      };
+    }
     const openapi: Handler = async () => ({ status: 200, json: openApiDocument(this.o.version) });
     return {
       ...base,
@@ -215,9 +258,11 @@ export class EngineRuntime {
           ...(typeof body.session === "string" ? { session: body.session } : {}),
           ...(typeof body.result_chars === "number" ? { result_chars: body.result_chars } : {}),
           ...(typeof body.result_tokens === "number" ? { result_tokens: body.result_tokens } : {}),
+          ...(isPlainObject(body.summary) ? { summary: body.summary } : {}),
           ...(actor ? { actor } : {}),
         });
-        return { status: 200, json: { ok: true } };
+        // the reporter may send the value cut, with the result's summary (redact.ts cutToolCall)
+        return { status: 200, json: { ok: true, takes_summary: true } };
       },
       "/openapi/": openapi,
       "/openapi.json/": openapi,
@@ -260,20 +305,22 @@ export class EngineRuntime {
    */
   private recordToolCall(given: ToolCallRecord & { actor?: Actor }): Promise<void> {
     const call = { ...given, ...redactToolCall(given.tool, given.args, given.value) };
-    const cut = (v: unknown, n: number): unknown => {
-      if (typeof v === "string") return v.length > n ? `${v.slice(0, n)}…` : v;
-      if (v === null || typeof v !== "object") return v;
-      const text = JSON.stringify(v);
-      return text.length > n ? `${text.slice(0, n)}…` : v;
-    };
+    // a result object gives its own summary; a value the reporter cut, the summary it sent (its secrets removed too)
+    const summary = !call.ok
+      ? undefined
+      : isPlainObject(call.value)
+        ? summarizeRecorded(call.value)
+        : given.summary
+          ? summarizeRecorded(redactToolCall(given.tool, {}, given.summary).value as Record<string, unknown>)
+          : undefined;
     const recorded = this.feed?.recordToolCall(
       {
         tool: call.tool,
-        args: Object.fromEntries(Object.entries(call.args).map(([k, v]) => [k, cut(v, 300)])),
+        args: Object.fromEntries(Object.entries(call.args).map(([k, v]) => [k, cutRecorded(v, RECORDED_CHARS.arg)])),
         ok: call.ok,
         durationMs: call.duration_ms,
-        value: cut(call.value, 1000),
-        ...(call.ok && call.value && typeof call.value === "object" && !Array.isArray(call.value) ? { summary: summarize(call.value as Record<string, unknown>) } : {}),
+        value: cutRecorded(call.value, RECORDED_CHARS.value),
+        ...(summary ? { summary } : {}),
         servedBy: call.served_by,
         ...(call.session ? { session: call.session } : {}),
         ...(call.result_chars !== undefined ? { resultChars: call.result_chars } : {}),
@@ -295,16 +342,46 @@ export class EngineRuntime {
     return recorded ?? Promise.resolve();
   }
 
-  /** Logs to an OpenTelemetry collector (when configured) and to `logs/` in the engine's store. */
+  /**
+   * Logs to an OpenTelemetry collector (when configured) and to `logs/` in the engine's store;
+   * traces to the same collector (tracing.ts). The tracer is installed only while traces are on:
+   * off, every span helper is a single check.
+   */
   startTelemetry(): void {
     const s = this.o.getSettings;
-    const logger = new OtlpSink(() => resolveOtlp(s(), this.o.env ?? {}, { serviceVersion: this.o.version, resource: { "service.instance.id": this.o.hostName } }), this.o.otlpSend);
+    const base = () => ({ serviceVersion: this.o.version, resource: engineResource(s(), this.o.hostName) });
+    // asked for every record: the resource is built only while logs are exported
+    const logger = new OtlpSink(() => resolveOtlp(s(), this.o.env ?? {}, base), this.o.otlpSend);
     // One file per process: two processes never append to the same file.
     const source = this.o.hostName;
     const fileLog = new FileLogger({ enabled: () => s().fileLogEnabled, write: (day, lines) => appendLog(this.o.app, s(), day, lines, source) });
     const tee = new TeeTelemetry([logger, fileLog]);
     setTelemetry(tee);
-    this.flushTimer = setInterval(() => void tee.flush(), 5000);
+    this.traces = new TraceSink(() => resolveTraces(s(), this.o.env ?? {}, base()), this.o.otlpSend);
+    // vault and store calls are counted on the spans (one check per call while traces are off)
+    traceVaultIo(this.o.app);
+    this.refreshTracing();
+    this.flushTimer = setInterval(() => {
+      this.refreshTracing();
+      void tee.flush();
+      void this.traces?.flush();
+    }, 5000);
+  }
+
+  private traces: TraceSink | null = null;
+  private tracingInstalled = false;
+
+  /** Install the tracer when traces are on, take it away when they are off (settings changed). */
+  private refreshTracing(): void {
+    const want = this.traces?.current() != null;
+    if (want === this.tracingInstalled) return;
+    this.tracingInstalled = want;
+    installTracing(want ? this.traces : null);
+  }
+
+  /** Spans sent to the collector and spans lost (tests, status). */
+  get traceExport(): { sent: number; dropped: number } {
+    return { sent: this.traces?.sent ?? 0, dropped: this.traces?.dropped ?? 0 };
   }
 
   private later(ms: number, fn: () => void): ReturnType<typeof setTimeout> {
@@ -340,8 +417,10 @@ export class EngineRuntime {
     this.semanticTimer = setTimeout(() => {
       const scan = this.semanticFull;
       this.semanticFull = false;
-      this.semantic
-        .sync({ onlyPending: !scan })
+      job("job semantic_index", (span) => this.semantic.sync({ onlyPending: !scan }).then((r) => {
+        span.setAttributes({ "datanotes.embedded": r.embedded, "datanotes.removed": r.removed, "datanotes.failed": r.failed.length });
+        return r;
+      }))
         .then((r) => {
           if (r.embedded || r.removed || r.failed.length) {
             telemetry().log(r.failed.length ? "WARN" : "INFO", "datanotes semantic index updated", { embedded: r.embedded, removed: r.removed, failed: r.failed.length });
@@ -394,6 +473,7 @@ export class EngineRuntime {
       tokens: this.tokens,
       dispatch: guarded,
       ...(this.o.docs ? { docs: this.o.docs } : {}),
+      compression: () => this.o.getSettings().httpCompression,
     });
     try {
       const port = await server.start();
@@ -424,8 +504,9 @@ export class EngineRuntime {
     const app = this.o.app;
     const s = this.o.getSettings();
     try {
-      // under the engine's write lock: no operation appends meanwhile, no store backup commits half of it
-      const compacted = await withLogLock(app, () => compactJournal(app, s));
+      // read and planned without the engine's write lock; applied under it: no operation appends
+      // meanwhile, no store backup commits half of it
+      const compacted = await compactJournal(app, s, new Date(), (fn) => withLogLock(app, fn));
       const logs = await pruneLogs(app, s);
       if (compacted.dropped > 0 || compacted.blobsRemoved > 0 || logs.length > 0) {
         telemetry().log("INFO", "datanotes store compacted", { dropped: compacted.dropped, blobs_removed: compacted.blobsRemoved, logs_removed: logs.length });
@@ -435,18 +516,36 @@ export class EngineRuntime {
     }
   }
 
+  /** The read cache, while the engine follows the vault (null otherwise). */
+  get readCache(): ReadCache | null {
+    return this.cache;
+  }
+
+  /**
+   * Who reads, for the read cache: the owner, or a named token with its permissions (an answer
+   * is never shared between tokens, nor kept across a change of a token's permissions).
+   */
+  private cacheScope(): string {
+    const name = tokenNameOf(currentActor());
+    if (!name) return "owner";
+    const t = this.tokens.get(name);
+    return JSON.stringify([name, t?.write ?? null, t?.ddl ?? null, t?.maintain ?? null, t?.autolink ?? null]);
+  }
+
   /** Follow the vault (call once the vault is indexed: Obsidian's layout-ready, or after opening). */
   async start(opts: { http?: boolean } = {}): Promise<void> {
     if (this.started) return;
     this.started = true;
     const app = this.o.app;
     const s = this.o.getSettings;
+    // the read cache follows the vault's events from here on: it knows when an answer is stale
+    this.cache = new ReadCache(app, s);
     // The metastore cache backs sync readers (listTables, row discovery): keep it current. The
     // change feed starts with the first of these reads that succeeds (see startFeed).
     const refreshMetastore = () =>
       loadMetastore(app, s())
         .then(() => {
-          this.inverse.init(); // remember the rows' inverse links (tables may have changed)
+          this.inverse.init(); // remember the rows' inverse links (again only when their tables changed)
           return this.startFeed();
         })
         .catch((e: unknown) => {
@@ -468,7 +567,7 @@ export class EngineRuntime {
           logSoon();
           return;
         }
-        this.track(logExternalEdits(app, s()), "transaction log of hand edits");
+        this.track(job("job hand_edits_log", () => logExternalEdits(app, s())), "transaction log of hand edits");
       }, EXTERNAL_EDIT_DELAY_MS);
     };
     const watched = (path: string) => schemaFile(path) || path.endsWith(".md");
@@ -481,7 +580,7 @@ export class EngineRuntime {
         if (!file) return;
         this.track(
           // an adopted note, or one refused with a reason, names its table
-          adoptCreatedNote(app, s(), file as TFile).then((r) => {
+          job("job adopt_note", () => adoptCreatedNote(app, s(), file as TFile)).then((r) => {
             if (r.adopted) telemetry().log("INFO", "datanotes adopted new note", { path, table: r.table! });
             else if (r.reason) telemetry().log("WARN", "datanotes could not adopt new note", { path, table: r.table!, reason: r.reason });
           }),
@@ -496,7 +595,7 @@ export class EngineRuntime {
       invalidateFiles(app, [f.path]);
       this.semantic.touch(f.path);
       this.syncSemanticSoon();
-      if (schemaFile(f.path)) this.track(refreshMetastore(), "schema reload");
+      if (schemaFile(f.path)) this.track(job("job schema_reload", () => refreshMetastore()), "schema reload");
       if (watched(f.path)) logSoon();
     }) as never);
     this.listen(v, "delete", ((f: TAbstractFile) => {
@@ -506,7 +605,7 @@ export class EngineRuntime {
       this.syncSemanticSoon();
       if (schemaFile(f.path) && !engineWriting(app)) {
         this.metastoreGone();
-        this.track(refreshMetastore(), "schema reload");
+        this.track(job("job schema_reload", () => refreshMetastore()), "schema reload");
       }
       if (watched(f.path)) logSoon();
     }) as never);
@@ -521,7 +620,7 @@ export class EngineRuntime {
       this.semantic.touch(f.path);
       this.syncSemanticSoon();
       if ("extension" in f && !this.relocation && byHand) this.recompute.onRenamed(f as TFile, old);
-      if (schemaFile(f.path) || schemaFile(old)) this.track(refreshMetastore(), "schema reload");
+      if (schemaFile(f.path) || schemaFile(old)) this.track(job("job schema_reload", () => refreshMetastore()), "schema reload");
       if (watched(f.path) || watched(old)) logSoon();
       // A note moved into a table folder by hand becomes a row of that table, as one created there.
       if (byHand) adoptSoon(f.path);
@@ -530,7 +629,7 @@ export class EngineRuntime {
       invalidateFiles(app, [f.path]);
       this.semantic.touch(f.path);
       this.syncSemanticSoon();
-      if (schemaFile(f.path)) this.track(refreshMetastore(), "schema reload");
+      if (schemaFile(f.path)) this.track(job("job schema_reload", () => refreshMetastore()), "schema reload");
       if (watched(f.path)) logSoon();
       adoptSoon(f.path);
     }) as never);
@@ -546,11 +645,57 @@ export class EngineRuntime {
     await refreshMetastore(); // and the change feed
     if (!this.feed) telemetry().log("WARN", `datanotes change feed not running: it starts the next time ${METASTORE_FILE} changes and can be read`);
     await this.tokens.load();
-    logSoon();
-    this.track(this.maintainStore(), "store maintenance");
+    // The logs are replayed table by table first: the first log of hand edits would otherwise
+    // replay them all while holding the write lock, and every write would wait for it.
+    this.track(
+      job("job transaction_log_warmup", () => warmLoggedStates(app, s(), () => !this.started)).finally(() => {
+        if (this.started) logSoon();
+      }),
+      "transaction log warm-up",
+    );
+    this.track(job("job store_maintenance", () => this.maintainStore()), "store maintenance");
+    this.maintenanceTimer = setInterval(() => this.track(job("job store_maintenance", () => this.maintainStore()), "store maintenance"), MAINTENANCE_EVERY_MS);
+    this.maintenanceTimer.unref?.();
+    // a checkpoint a write makes due is written after it, as work of its own (the write does not wait)
+    setCheckpointRunner(app, () => this.checkpointSoon());
+    // The safety net of the log's current states kept between syncs: compared with every row
+    // now and then, once the engine has been idle for a while.
+    this.logCheckTimer = setInterval(() => this.checkLogStates(logSoon), LOG_CHECK_EVERY_MS);
+    this.logCheckTimer.unref?.();
     // Catch up with notes changed while the engine was not running (unchanged notes are skipped).
     this.syncSemanticSoon(5000, true);
     if (opts.http !== false) await this.applyHttpServer();
+  }
+
+  /** Write the checkpoints writes made due, in the background (one job for every write meanwhile). */
+  private checkpointSoon(): void {
+    if (this.checkpointsQueued || !this.started) return;
+    this.checkpointsQueued = true;
+    this.later(0, () => {
+      this.checkpointsQueued = false;
+      this.track(job("job transaction_log_checkpoint", () => writeDueCheckpoints(this.o.app, () => !this.started)), "transaction log checkpoint");
+    });
+  }
+
+  /**
+   * The transaction log syncs only the notes changed since the last sync (the vault index's
+   * change log). Now and then, when no write ran for {@link LOG_CHECK_IDLE_MS}, the states kept
+   * are compared with every row of the vault: a difference (a change no event reported) is
+   * logged as a warning, the states are read again in full, and the hand edits are logged.
+   * Returns the differences (empty when it did not run).
+   */
+  async checkLogStates(logSoon: () => void = () => {}, now: number = Date.now()): Promise<string[]> {
+    const app = this.o.app;
+    const lock = logLockActivity(app);
+    if (lock.busy || now - lock.lastEnd < LOG_CHECK_IDLE_MS) return [];
+    const check = job("job transaction_log_check", () => withLogLock(app, () => verifyCurrentStates(app, this.o.getSettings(), true)));
+    this.track(check, "transaction log check");
+    const diffs = await check.catch(() => [] as string[]); // a failure is the tracked task's WARN
+    if (diffs.length > 0) {
+      telemetry().log("WARN", "datanotes transaction log missed changes: every row read again", { rows: diffs.length, first: diffs.slice(0, 5).join("; ") });
+      logSoon();
+    }
+    return diffs;
   }
 
   /**
@@ -568,17 +713,17 @@ export class EngineRuntime {
   }
 
   /** The host's way to catch up with the disk (the Node service: its watcher), set by {@link setHostSettler}. */
-  private hostSettle: (() => void | Promise<void>) | null = null;
+  private hostSettle: VaultSettler | null = null;
 
   /**
    * Register the host's catch-up as the vault's settler (vault-settle.ts): every request first
    * applies the changes seen on disk and, when they moved the database folder, waits for the move
    * to be applied as one operation, so no request reads it half repaired.
    */
-  setHostSettler(fn: (() => void | Promise<void>) | null): void {
+  setHostSettler(fn: VaultSettler | null): void {
     this.hostSettle = fn;
-    setVaultSettler(this.o.app, fn ? async () => {
-      await fn();
+    setVaultSettler(this.o.app, fn ? async (since) => {
+      await fn(since);
       await this.relocated();
     } : null);
   }
@@ -677,8 +822,8 @@ export class EngineRuntime {
         const hooks = new WebhookDispatcher(app, s, () => this.feed);
         await hooks.start();
         this.webhooks = hooks;
-        this.track(feed.prune(), "change feed prune");
-        this.pruneTimer = setInterval(() => this.track(feed.prune(), "change feed prune"), 6 * 3600_000);
+        this.track(job("job change_feed_prune", () => feed.prune()), "change feed prune");
+        this.pruneTimer = setInterval(() => this.track(job("job change_feed_prune", () => feed.prune()), "change feed prune"), 6 * 3600_000);
       } catch (e) {
         if (this.feed !== feed) void feed.stop();
         this.feedProblem = `it could not start: ${messageOf(e)}`;
@@ -699,12 +844,22 @@ export class EngineRuntime {
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
     this.relocateWake?.();
+    // not following the vault any more: no answer can be told stale
+    this.cache?.dispose();
+    this.cache = null;
     if (this.semanticTimer) clearTimeout(this.semanticTimer);
     if (this.logTimer) clearTimeout(this.logTimer);
     this.recompute.dispose();
     this.inverse.dispose();
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
+    if (this.logCheckTimer) clearInterval(this.logCheckTimer);
+    this.logCheckTimer = null;
+    if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
+    this.maintenanceTimer = null;
+    // writes from here on write their checkpoints themselves (the jobs end with the others below)
+    setCheckpointRunner(this.o.app, null);
+    this.checkpointsQueued = false;
     // Background work already running (a transaction-log pass, a schema reload, store
     // maintenance) ends before the vault is let go; nothing new starts once `started` is false.
     while (this.tasks.size > 0) await Promise.all([...this.tasks]);
@@ -730,16 +885,8 @@ export class EngineRuntime {
     this.flushTimer = null;
     await telemetry().flush();
     setTelemetry(NOOP_TELEMETRY);
+    if (this.tracingInstalled) installTracing(null);
+    this.tracingInstalled = false;
+    await this.traces?.close();
   }
-}
-
-/** Top-level scalars of a result (strings cut), lists as their length: what a call achieved, without the data. */
-function summarize(v: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, x] of Object.entries(v).slice(0, 30)) {
-    if (Array.isArray(x)) out[k] = x.length;
-    else if (typeof x === "string") out[k] = x.length > 200 ? `${x.slice(0, 200)}…` : x;
-    else if (typeof x === "number" || typeof x === "boolean" || x === null) out[k] = x;
-  }
-  return out;
 }

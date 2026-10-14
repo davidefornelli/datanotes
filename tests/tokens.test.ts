@@ -212,6 +212,38 @@ describe("token estimate", () => {
     expect(estimateTokens("Dinner with Carol and Dave")).toBe(7);
     expect(estimateTokens("2026-10-04")).toBe(6);
   });
+
+  it("counts as the regular expressions did, whatever the characters", async () => {
+    const { ASTRAL_KEPT, estimateTokens } = await import("../src/api/tokens");
+    /** The estimate as it was: one match per word, number or symbol. */
+    const byRegex = (text: string) => {
+      let n = 0;
+      for (const m of text.matchAll(/\p{L}+|\p{N}+|[^\s\p{L}\p{N}]/gu)) {
+        const s = m[0];
+        n += /^\p{L}/u.test(s) ? Math.ceil(s.length / 4) : /^\p{N}/u.test(s) ? Math.ceil(s.length / 3) : 1;
+      }
+      return n;
+    };
+    // letters, digits and spaces of many scripts, accents written apart, emoji, letters and
+    // digits beyond the first plane, lone surrogates
+    const pieces = [
+      "a", "Z", "é", "é", "ß", "Ω", "ж", "漢", "한", "ا", "1", "9", "٣", "１", "½", " ", "\t", "\n", " ",
+      " ", "　", "﻿", "{", '"', ":", "-", "_", "’", "\u{1F600}", "\u{1D49C}", "\u{1D7CE}", "\u{20000}", "\ud800", "\udc00", "\ud83d",
+    ];
+    let seed = 11;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let t = 0; t < 400; t++) {
+      let text = "";
+      const len = Math.floor(next() * 40);
+      for (let i = 0; i < len; i++) text += pieces[Math.floor(next() * pieces.length)]!.repeat(1 + Math.floor(next() * 6));
+      expect(estimateTokens(text), JSON.stringify(text)).toBe(byRegex(text));
+    }
+    expect(estimateTokens(JSON.stringify({ rows: [{ title: "Café \u{1F600}", n: 12345 }] }))).toBe(byRegex(JSON.stringify({ rows: [{ title: "Café \u{1F600}", n: 12345 }] })));
+    // more distinct characters beyond the first plane than are kept: the same counts
+    const many = Array.from({ length: ASTRAL_KEPT + 10 }, (_, i) => String.fromCodePoint(0x20000 + i)).join(" ");
+    expect(estimateTokens(many)).toBe(byRegex(many));
+    expect(estimateTokens(many)).toBe(ASTRAL_KEPT + 10);
+  });
 });
 
 describe("credentials: what named tokens may not do", () => {

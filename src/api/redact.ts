@@ -53,3 +53,43 @@ export function redactToolCall(tool: string, args: Record<string, unknown>, valu
     value: redact(value, resultKeys, s?.result?.length ? textPattern(s.result) : null),
   };
 }
+
+/** How many characters of a recorded call's result, and of each of its arguments, are kept. */
+export const RECORDED_CHARS = { value: 1000, arg: 300 } as const;
+
+/** A value as a recorded call keeps it: a text, or an object's JSON, longer than `n` characters is cut (with "…"). */
+export function cutRecorded(v: unknown, n: number): unknown {
+  if (typeof v === "string") return v.length > n ? `${v.slice(0, n)}…` : v;
+  if (v === null || typeof v !== "object") return v;
+  const text = JSON.stringify(v);
+  return text.length > n ? `${text.slice(0, n)}…` : v;
+}
+
+/** A result object in short: its first 30 fields, lists as their length, texts cut at 200 characters, nothing nested. */
+export function summarizeRecorded(v: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v).slice(0, 30)) {
+    if (Array.isArray(x)) out[k] = x.length;
+    else if (typeof x === "string") out[k] = x.length > 200 ? `${x.slice(0, 200)}…` : x;
+    else if (typeof x === "number" || typeof x === "boolean" || x === null) out[k] = x;
+  }
+  return out;
+}
+
+/** An object that is no list. */
+export function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
+ * A call (secrets already removed) as a reporter sends it to an engine that takes it cut: the
+ * arguments and the value cut as the engine cuts them, and the summary of a result object, which
+ * the cut value may no longer give. The engine records the same event as from the whole call.
+ */
+export function cutToolCall(call: { args: Record<string, unknown>; ok: boolean; value: unknown }): { args: Record<string, unknown>; value: unknown; summary?: Record<string, unknown> } {
+  return {
+    args: Object.fromEntries(Object.entries(call.args).map(([k, v]) => [k, cutRecorded(v, RECORDED_CHARS.arg)])),
+    value: cutRecorded(call.value, RECORDED_CHARS.value),
+    ...(call.ok && isPlainObject(call.value) ? { summary: summarizeRecorded(call.value) } : {}),
+  };
+}

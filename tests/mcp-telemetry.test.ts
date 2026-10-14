@@ -71,6 +71,32 @@ describe("datanotes mcp: OTLP logs", () => {
     expect(toolbox.recorded[4]).not.toHaveProperty("session");
   });
 
+  it("reports the whole call until the engine says it takes it cut, then the value cut with the result's summary", async () => {
+    const big = { rows: Array.from({ length: 500 }, (_, i) => ({ id: `r${i}`, title: "x".repeat(20) })), total: 500 };
+    for (const takes of [true, false]) {
+      const recorded: Record<string, unknown>[] = [];
+      class Engine extends Toolbox {
+        override client(): DatanotesClient {
+          return {
+            call: async () => ({ ok: true, value: big }),
+            recordToolCall: async (call: Record<string, unknown>) => {
+              recorded.push(call);
+              return takes ? { ok: true, takes_summary: true } : { ok: true };
+            },
+          } as unknown as DatanotesClient;
+        }
+      }
+      const toolbox = new Engine("http://engine.test");
+      for (let i = 0; i < 3; i++) {
+        await toolbox.call(TOKEN, "select_rows", { table: "log" }, { harness: "test-agent" });
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      expect(recorded.map((c) => typeof c.value)).toEqual(takes ? ["object", "string", "string"] : ["object", "object", "object"]);
+      expect(recorded[0]!.value).toEqual(big);
+      if (takes) expect(recorded[2]).toMatchObject({ value: `${JSON.stringify(big).slice(0, 1000)}…`, summary: { rows: 500, total: 500 }, result_chars: JSON.stringify(big).length });
+    }
+  });
+
   it("without a logger, logs nothing", async () => {
     const toolbox = new StubToolbox("http://engine.test");
     expect((await toolbox.call(TOKEN, "insert_row", { table: "log", values: {} }, {})).isError).toBeUndefined();

@@ -162,3 +162,31 @@ describe("webhooks: the dispatcher", () => {
     expect(Date.now() - t).toBeLessThan(900); // the 1 s wait was cut short
   });
 });
+
+describe("webhooks: the saved cursors", () => {
+  it("are saved at most once a second while deliveries go on, and at stop (delivery stays at least once)", async () => {
+    const v = createDbVault({});
+    const s = scriptedFeed(0, Array.from({ length: 20 }, (_, i) => ({ events: [event(i + 1)] as never[], last: i + 1 })));
+    const delivered: number[] = [];
+    const hooks = dispatcher(v, s.feed, async (_u, body) => {
+      delivered.push((JSON.parse(body) as { last: number }).last);
+      return { status: 200 };
+    });
+    await hooks.start();
+    const writes: string[] = [];
+    const store = v.app.store!;
+    const write = store.write.bind(store);
+    store.write = async (p: string, d: string) => {
+      if (p === "webhooks.json") writes.push(d);
+      return write(p, d);
+    };
+    const id = (await hooks.create({ url: "http://receiver.test/x", since: 0 })).id;
+    await until(() => delivered.length === 20);
+    const cursorOf = (text: string) => (JSON.parse(text) as { id: string; cursor: number }[]).find((h) => h.id === id)!.cursor;
+    // the creation, then at most one save in the second the 20 deliveries took
+    expect(writes.length).toBeLessThanOrEqual(2);
+    await hooks.stop();
+    expect(cursorOf(writes[writes.length - 1]!)).toBe(20);
+    expect(cursorOf(v.read("store:webhooks.json"))).toBe(20);
+  });
+});

@@ -8,6 +8,7 @@
 import esbuild from "esbuild";
 import fs from "node:fs";
 import { bundledPackages, licenseAllowed, noticesText, swaggerUi } from "./scripts/third-party-notices.mjs";
+import { serviceBuildOptions } from "./scripts/service-build.mjs";
 
 const version = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
 
@@ -17,18 +18,7 @@ const ui = "node_modules/swagger-ui-dist";
 const text = (f) => JSON.stringify(fs.readFileSync(`${ui}/${f}`, "utf8"));
 
 const { metafile } = await esbuild.build({
-  entryPoints: ["src/node/cli.ts"],
-  bundle: true,
-  platform: "node",
-  target: "node22",
-  format: "cjs",
-  outfile: "dist/datanotes.cjs",
-  define: { SERVICE_VERSION: JSON.stringify(version), SWAGGER_UI_CSS: text("swagger-ui.css"), SWAGGER_UI_JS: text("swagger-ui-bundle.js") },
-  // only the unbundled fallback (docs-ui.ts) resolves it, at run time; the bundle never reaches it
-  external: ["swagger-ui-dist/package.json"],
-  // src/api/docs.ts finds dist/docs with __dirname here; import.meta.url is for its ES module build
-  logOverride: { "empty-import-meta": "silent" },
-  banner: { js: "#!/usr/bin/env node" },
+  ...serviceBuildOptions({ outfile: "dist/datanotes.cjs", version, swaggerCss: text("swagger-ui.css"), swaggerJs: text("swagger-ui-bundle.js") }),
   logLevel: "info",
   metafile: true,
 });

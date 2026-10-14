@@ -18,6 +18,7 @@ import { cachedMetastore, resolveCatalogRef } from "./metastore";
 import type { OpResult } from "./engine";
 import type { RecomputeInput } from "./rows";
 import type { DatanotesSettings } from "./settings";
+import { job } from "./tracing";
 import { isUuid } from "./uuid";
 import { isEmptyValue } from "./validate";
 
@@ -188,7 +189,8 @@ export class AutoRecompute {
     }
     if (ready.length === 0) return;
     const where = ready.length === 1 ? ready[0]! : `${ready[0]} and ${ready.length - 1} more`;
-    this.run(this.app, this.settings(), { table, paths: ready }).catch((e: unknown) => this.onError(where, e));
+    // a trace of its own: the timer keeps the context of whatever armed it, a request included (tracing.ts, job)
+    void job("job auto_recompute", () => this.run(this.app, this.settings(), { table, paths: ready }).catch((e: unknown) => this.onError(where, e)), { "db.collection.name": table });
   }
 
   /** Forget a renamed row's pending recompute (the new path schedules its own). */

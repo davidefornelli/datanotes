@@ -16,9 +16,11 @@ import {
   instrumented,
   emptyResult,
   loadRows,
+  loadRowsWhere,
   loadTable,
   memberEntry,
   OperationInputError,
+  rowBody,
   type LoadedRow,
   type LoadedTable,
   type OpConflict,
@@ -54,6 +56,7 @@ import { compileWhere, knownKeys, resolveWithin, type Where } from "./where";
 import { constraintViolations, hierarchyViolations } from "./row-checks";
 import { linkedCheckViolations } from "./changeset-checks";
 import { autolinkFragments, autolinkOn, withLinkReport, type AutolinkReport } from "./autolink";
+import { uniqueValues } from "./unique-index";
 
 // --- insert_row ---
 
@@ -165,13 +168,18 @@ async function insertRowImpl(
   const { path, ordered } = plan;
   const violations: RowViolations[] = [{ path, violations: plan.violations }];
   if (t.def.columns.some((c) => c.unique)) {
-    const existing = await loadRows(app, settings, t);
-    violations.push(
-      ...uniqueViolations(t.def.columns, [
-        ...existing.map((r) => ({ path: r.file.path, ordered: r.ordered })),
-        { path, ordered },
-      ]).filter((u) => u.path === path),
-    );
+    // the rows' unique values from the vault index (unique-index.ts), else every row read
+    const index = await uniqueValues(app, settings, t);
+    if (index && !index.has(path)) violations.push(...index.violationsOfNew(path, ordered));
+    else {
+      const existing = await loadRows(app, settings, t);
+      violations.push(
+        ...uniqueViolations(t.def.columns, [
+          ...existing.map((r) => ({ path: r.file.path, ordered: r.ordered })),
+          { path, ordered },
+        ]).filter((u) => u.path === path),
+      );
+    }
   }
   const cs = emptyChangeSet("insert_row", `insert into ${t.def.name}`, t.def.schemaPath);
   // the text the caller writes links the notes it mentions; a table's row template is left as it is
@@ -510,18 +518,18 @@ async function updateRowsImpl(
     });
     rowViolations.push(...constraintViolations(t, settings, r.file.path, after));
     violations.push({ path: r.file.path, violations: rowViolations });
-    let bodyAfter: string | undefined;
+    let body: { before: string; after: string } | undefined;
     if (bodyFor) {
       // linked as seen from where the note will be (a rename moves it)
       const own = await bodyFor(finalPath, r.file.path);
-      bodyAfter = own.body;
+      body = { before: await rowBody(app, r), after: own.body };
       links = own.report; // update_row writes one row
     }
     cs.edits.push({
       path: r.file.path,
       before: r.ordered,
       after,
-      ...(bodyAfter !== undefined ? { bodyBefore: r.body, bodyAfter } : {}),
+      ...(body ? { bodyBefore: body.before, bodyAfter: body.after } : {}),
     });
   }
   if (t.def.columns.some((c) => c.unique)) {
@@ -604,6 +612,8 @@ async function updateRowImpl(app: App, settings: DatanotesSettings, input: Updat
     }
   }
   const linking = (input.body !== undefined || partial) && autolinkOn(input.autolink, (await readDatabaseConfig(app, settings)).autolink);
+  // the body the parts are written into (the rows are read without their bodies)
+  const current = partial ? await rowBody(app, row) : "";
   /** The new body, its texts linked as seen from the note's final path (a rename moves it). */
   const bodyFor: BodyFor = async (finalPath, oldPath) => {
     const self = { path: finalPath, self: [oldPath] };
@@ -614,7 +624,7 @@ async function updateRowImpl(app: App, settings: DatanotesSettings, input: Updat
       return { body: linked.fragments[0]!, report: linked.report };
     }
     const compose = (sections: Record<string, string>, prepend: string | undefined, append: string | undefined): string => {
-      let b = row.body;
+      let b = current;
       for (const [heading, text] of Object.entries(sections)) b = setSection(b, heading, text);
       if (prepend !== undefined) b = prependBody(b, prepend);
       if (append !== undefined) b = appendBody(b, append);
@@ -664,13 +674,32 @@ export interface DeleteRowsInput {
   onReferenced?: "restrict" | "set_null" | "ignore";
 }
 
-/** Notes (other than `excluded`) whose resolved links point at `target`. */
-function inboundLinks(app: App, target: string, excluded: ReadonlySet<string>): string[] {
-  const resolved = app.metadataCache.resolvedLinks;
-  return Object.entries(resolved)
-    .filter(([src, dests]) => !excluded.has(src) && (dests[target] ?? 0) > 0)
-    .map(([src]) => src)
-    .sort();
+/**
+ * For each of `targets`, the notes (other than the targets) whose resolved links point at it,
+ * sorted: one pass over the vault's links for all of them.
+ */
+function inboundLinks(app: App, targets: ReadonlySet<string>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const backlinks = app.metadataCache.backlinksOf?.bind(app.metadataCache);
+  if (backlinks) {
+    // the host keeps backlinks: only the targets' own are read
+    for (const target of targets) {
+      const sources = Object.entries(backlinks(target)).filter(([src, n]) => n > 0 && !targets.has(src)).map(([src]) => src);
+      if (sources.length > 0) out.set(target, sources.sort());
+    }
+    return out;
+  }
+  for (const [src, dests] of Object.entries(app.metadataCache.resolvedLinks)) {
+    if (targets.has(src)) continue;
+    for (const [dest, n] of Object.entries(dests)) {
+      if (!(n > 0) || !targets.has(dest)) continue;
+      const list = out.get(dest);
+      if (list) list.push(src);
+      else out.set(dest, [src]);
+    }
+  }
+  for (const list of out.values()) list.sort();
+  return out;
 }
 
 function clearLinksTo(
@@ -699,15 +728,16 @@ async function deleteRowsImpl(
 ): Promise<OpResult> {
   const t = await loadTable(app, settings, input.table);
   const pred = compileWhere(await resolveWithin(app, settings, t, input.where), t, settings);
-  const rows = (await loadRows(app, settings, t)).filter(pred);
+  const rows = (await loadRowsWhere(app, settings, t, input.where)).filter(pred);
   const mode = input.mode ?? "archive";
   const policy = input.onReferenced ?? "restrict";
   const doomed = new Set(rows.map((r) => r.file.path));
   const conflicts: OpConflict[] = [];
   const cs = emptyChangeSet("delete_rows", `${mode} ${rows.length} rows of ${t.def.name}`, t.def.schemaPath);
   const referrers = new Set<string>();
+  const inbound = inboundLinks(app, doomed);
   for (const r of rows) {
-    const sources = inboundLinks(app, r.file.path, doomed);
+    const sources = inbound.get(r.file.path) ?? [];
     if (sources.length > 0 && policy === "restrict") {
       conflicts.push({ path: r.file.path, message: `referenced by ${sources.join(", ")}` });
     }
@@ -735,15 +765,17 @@ async function deleteRowsImpl(
     }
   }
   const folder = archiveFolder(t.def);
+  const targets = new Set<string>();
   for (const r of rows) {
     if (mode === "delete") {
       cs.deletes.push(r.file.path);
       continue;
     }
     const to = `${folder}/${r.file.path.split("/").pop()}`;
-    if (app.vault.getAbstractFileByPath(to) != null || cs.moves.some((m) => m.to === to)) {
+    if (app.vault.getAbstractFileByPath(to) != null || targets.has(to)) {
       conflicts.push({ path: r.file.path, message: `archive target exists: ${to}` });
     }
+    targets.add(to);
     cs.moves.push({ from: r.file.path, to });
   }
   // the rows set_null clears are written only because a row they link to goes

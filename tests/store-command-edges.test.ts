@@ -47,7 +47,7 @@ describe("datanotes store: the command line", () => {
     const vault = tmp();
     let out = "";
     expect(await storeCommand(["path", "--vault", vault, "--json"], { env: { DATANOTES_DATA_HOME: tmp() }, write: (t) => (out += t) })).toBe(2);
-    expect(JSON.parse(out)).toEqual({ vault: path.resolve(vault), store: null, database_id: null, database_folder: null });
+    expect(JSON.parse(out)).toEqual({ vault: path.resolve(vault), store: null, database_id: null, database_folder: null, database_path: null });
   });
 
   it("new-id on a database folder (--database) with its own --store: dot-folders left out", async () => {
@@ -113,5 +113,63 @@ describe("datanotes store restore: git failing", () => {
     expect(out).toContain("datanotes store: warning: git remote add: error: could not lock config file\n");
     expect(out).toContain("datanotes store: restored https://example.com/s.git (commit abc1234 2026-10-01T10:00:00Z)");
     expect(fs.existsSync(path.join(home, ID, "settings.json"))).toBe(true);
+  });
+});
+
+describe("datanotes store convert-log", () => {
+  /** A version of a log, as a file of its own holds it. */
+  const version = (v: number) =>
+    `${JSON.stringify({ commitInfo: { version: v, timestamp: `2026-10-01T10:0${v}:00.000Z`, operation: "WRITE", operationMetrics: { numAddedFiles: 0, numRemovedFiles: 0, metadataChanged: v === 0 }, engineInfo: "datanotes" } })}\n${v === 0 ? `${JSON.stringify({ metaData: { entry: { columns: [] } } })}\n` : ""}`;
+
+  it("writes every table's log in the other format and sets transactionLogFormat, then back", async () => {
+    const vault = tmp();
+    const store = tmp();
+    const log = path.join(store, "transaction_log", "main.a.b");
+    write(store, "transaction_log/main.a.b/00000000000000000000.json", version(0));
+    write(store, "transaction_log/main.a.b/00000000000000000001.json", version(1));
+    write(store, "settings.json", JSON.stringify({ httpServerToken: "kept" }));
+    let out = "";
+    const run = (...args: string[]) => storeCommand(["convert-log", "--vault", vault, "--store", store, ...args], { env: { DATANOTES_DATA_HOME: tmp() }, write: (t) => (out += t) });
+    // the command holds the store only while it runs
+    const left = () => ["engine.lock", "setup.lock"].filter((f) => fs.existsSync(path.join(store, f)));
+    expect(await run("--to", "segments")).toBe(0);
+    expect(left()).toEqual([]);
+    expect(out).toBe("datanotes store convert-log: 1 table, 1 file written, 2 removed\nsetting    transactionLogFormat: segments (new versions are written to segments)\n");
+    expect(fs.readdirSync(log)).toEqual(["00000000000000000000-00000000000000000001.segment.jsonl"]);
+    expect(JSON.parse(fs.readFileSync(path.join(store, "settings.json"), "utf8"))).toEqual({ httpServerToken: "kept", transactionLogFormat: "segments" });
+    out = "";
+    expect(await run("--to", "files", "--json")).toBe(0);
+    expect(left()).toEqual([]);
+    expect(JSON.parse(out)).toEqual({ store: path.resolve(store), to: "files", tables: [{ table: "main.a.b", versions: 2, files_written: 2, files_removed: 1 }] });
+    expect(fs.readdirSync(log).map((f) => [f, fs.readFileSync(path.join(log, f), "utf8")])).toEqual([
+      ["00000000000000000000.json", version(0)],
+      ["00000000000000000001.json", version(1)],
+    ]);
+  });
+
+  it("is refused without --to files or segments, without a store, and while an engine runs on it", async () => {
+    const vault = tmp();
+    const store = tmp();
+    const env = { DATANOTES_DATA_HOME: tmp() };
+    await expect(storeCommand(["convert-log", "--vault", vault, "--store", store], { env })).rejects.toThrow("--to is required: files or segments");
+    await expect(storeCommand(["convert-log", "--vault", vault, "--store", store, "--to", "sqlite"], { env })).rejects.toThrow('--to must be files or segments: "sqlite"');
+    await expect(storeCommand(["convert-log", "--vault", vault, "--to", "files"], { env })).rejects.toThrow(`no store yet for ${path.resolve(vault)}: there is no transaction log to convert`);
+    write(store, "engine.lock", JSON.stringify({ kind: "service", pid: 4242, host: "other-host", port: 27150, heartbeat: new Date().toISOString() }));
+    const refused = storeCommand(["convert-log", "--vault", vault, "--store", store, "--to", "segments"], { env });
+    await expect(refused).rejects.toThrow("an engine holds this database (pid 4242 on other-host, port 27150)");
+    await expect(refused).rejects.toMatchObject({ docs: "https://datanotes.dev/start/how-it-works.md#convert-the-log-to-another-format" });
+  });
+
+  it("is refused by a live engine of this machine whose heartbeat stopped (hung, or still reading the vault)", async () => {
+    const vault = tmp();
+    const store = tmp();
+    // long stale, but after the machine started: a lock before it would be left over
+    const beat = Date.now() - Math.min(3_600_000, os.uptime() * 1000 - 5_000);
+    const lock = JSON.stringify({ kind: "service", pid: process.ppid, host: os.hostname(), port: 27150, startedAt: "", heartbeat: new Date(beat).toISOString() });
+    write(store, "engine.lock", lock);
+    const refused = storeCommand(["convert-log", "--vault", vault, "--store", store, "--to", "segments"], { env: { DATANOTES_DATA_HOME: tmp() } });
+    await expect(refused).rejects.toThrow(`an engine holds this database (pid ${process.ppid} on ${os.hostname()}, port 27150)`);
+    await expect(refused).rejects.toMatchObject({ docs: "https://datanotes.dev/start/how-it-works.md#convert-the-log-to-another-format" });
+    expect(fs.readFileSync(path.join(store, "engine.lock"), "utf8")).toBe(lock);
   });
 });

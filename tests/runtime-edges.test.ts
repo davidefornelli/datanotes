@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runWithActor } from "../src/core/actor";
+import { cutToolCall, redactToolCall } from "../src/api/redact";
 import type { Transport } from "../src/core/embeddings";
 import { INDEX_RETRY, whileWriting } from "../src/core/engine";
 import { mergeWithDefaults, type DatanotesSettings } from "../src/core/settings";
@@ -339,7 +340,7 @@ describe("runtime: its own routes", () => {
 
   it("logs a tool call with defaults for what the reporter leaves out, also with no change feed running", async () => {
     const h = engine().runtime.handlers();
-    expect(await h["/tool-calls/record/"]!({ tool: "select_rows", ok: "yes", duration_ms: "12", args: "table=log", served_by: 7 })).toEqual({ status: 200, json: { ok: true } });
+    expect(await h["/tool-calls/record/"]!({ tool: "select_rows", ok: "yes", duration_ms: "12", args: "table=log", served_by: 7 })).toEqual({ status: 200, json: { ok: true, takes_summary: true } });
     expect(logged("datanotes tool call")).toEqual([
       {
         severity: "INFO",
@@ -366,7 +367,7 @@ describe("runtime: its own routes", () => {
       result_tokens: 40,
     };
     const agent = { harness: "claude-code", model: "claude-opus-5-5", session: "sess-agent-0001", auth: "assistant" };
-    expect(await runWithActor(agent, () => h["/tool-calls/record/"]!(body))).toEqual({ status: 200, json: { ok: true } });
+    expect(await runWithActor(agent, () => h["/tool-calls/record/"]!(body))).toEqual({ status: 200, json: { ok: true, takes_summary: true } });
     // a failed call and a list result: no summary; a long text value is cut
     await runWithActor(agent, () => h["/tool-calls/record/"]!({ tool: "insert_row", args: {}, ok: false, duration_ms: 3, value: "e".repeat(1200), served_by: "pantry" }));
     await h["/tool-calls/record/"]!({ tool: "list_tables", args: {}, ok: true, duration_ms: 1, value: ["main.public.log"] });
@@ -401,6 +402,35 @@ describe("runtime: its own routes", () => {
       model: "claude-opus-5-5",
       session: "sess-agent-0001",
     });
+  });
+
+  it("records a call sent cut, with its summary, as the same event as the whole call", async () => {
+    const e = engine();
+    await e.runtime.start({ http: false });
+    const h = e.runtime.handlers();
+    const rows = Array.from({ length: 300 }, (_, i) => ({ kind: "walk", n: i }));
+    const calls = [
+      { tool: "select_rows", args: { table: "log", where: { note: "x".repeat(400) } }, ok: true, value: { rows, total: 300, note: "n".repeat(250), secret: "s3cr3t" } },
+      { tool: "select_rows", args: {}, ok: true, value: { total: 0, rows: [] } },
+      { tool: "insert_row", args: {}, ok: false, value: "e".repeat(1200) },
+      { tool: "list_tables", args: {}, ok: true, value: Array.from({ length: 300 }, (_, i) => `main.public.t${i}`) },
+      { tool: "create_webhook", args: { url: "http://127.0.0.1:9/" }, ok: true, value: { id: "w1", secret: "whsec", note: "w".repeat(1200) } },
+    ];
+    for (const c of calls) {
+      const whole = { ...c, duration_ms: 5, served_by: "engine", ...redactToolCall(c.tool, c.args, c.value) };
+      expect((await h["/tool-calls/record/"]!(whole)).json).toEqual({ ok: true, takes_summary: true });
+      const sent = { ...whole, ...cutToolCall(whole) };
+      expect(JSON.stringify(sent).length).toBeLessThan(2000);
+      await h["/tool-calls/record/"]!(sent);
+    }
+    // a summary sent with a secret in it loses it; a failed call keeps none; a result object's own wins
+    await h["/tool-calls/record/"]!({ tool: "create_webhook", args: {}, ok: true, duration_ms: 5, value: "cut…", summary: { id: "w2", secret: "leak", rows: [1, 2] } });
+    await h["/tool-calls/record/"]!({ tool: "select_rows", args: {}, ok: false, duration_ms: 5, value: "cut…", summary: { total: 1 } });
+    await h["/tool-calls/record/"]!({ tool: "select_rows", args: {}, ok: true, duration_ms: 5, value: { total: 2 }, summary: { total: 99 } });
+    const events = (await e.runtime.changeFeed!.read({ since: 0, ops: ["tool_call"] })).events.map((ev) => ev.call);
+    for (let i = 0; i < calls.length; i++) expect(events[2 * i + 1], calls[i]!.tool).toEqual(events[2 * i]);
+    expect(events[0]).toMatchObject({ summary: { rows: 300, total: 300, note: `${"n".repeat(200)}…`, secret: "[redacted]" } });
+    expect(events.slice(-3).map((c) => c!.summary)).toEqual([{ id: "w2", secret: "[redacted]", rows: 2 }, undefined, { total: 2 }]);
   });
 });
 
@@ -547,4 +577,30 @@ describe("runtime: its own routes and background work at their edges", () => {
     expect(internals(e).logTimer).toBeDefined();
     e.runtime.relocation = null;
   }, 10_000);
+});
+
+describe("runtime: the idle check of the transaction log's states", () => {
+  it("compares the states kept between syncs with every row once idle, and reads them again on a difference", async () => {
+    const e = engine();
+    const { configureDatabase } = await import("../src/core/database");
+    const { insertRow } = await import("../src/core/rows");
+    await configureDatabase(e.host.app, e.settings, { history: true }, async () => {});
+    await e.runtime.start({ http: false });
+    expect((await insertRow(e.host.app, e.settings, { table: "log", values: { kind: "walk", occurred_at: "2026-09-27T08:00" } })).ok).toBe(true);
+    // not idle yet: nothing is compared
+    expect(await e.runtime.checkLogStates(undefined, Date.now())).toEqual([]);
+    expect(await e.runtime.checkLogStates(undefined, Date.now() + 120_000)).toEqual([]);
+    // a note changed on disk that the host's index learns without an event
+    const text = fs.readFileSync(e.abs("Daily/a.md"), "utf8").replace("kind: walk", "kind: mood");
+    e.write("Daily/a.md", text);
+    const meta = (e.host.metadataCache as unknown as { meta: Map<string, { cache: { frontmatter?: Record<string, unknown> } }> }).meta;
+    meta.get("Daily/a.md")!.cache.frontmatter = { ...meta.get("Daily/a.md")!.cache.frontmatter, kind: "mood" };
+    const f = e.host.vault.getAbstractFileByPath("Daily/a.md") as TFile & { stat: { mtime: number; size: number } };
+    f.stat = { ...f.stat, mtime: f.stat.mtime + 1000, size: Buffer.byteLength(text) };
+    let logSoon = 0;
+    expect(await e.runtime.checkLogStates(() => void logSoon++, Date.now() + 120_000)).toEqual(["main.public.log: Daily/a.md"]);
+    expect(logSoon).toBe(1);
+    expect(logged("datanotes transaction log missed changes: every row read again")[0]!.attributes).toMatchObject({ rows: 1 });
+    expect(await e.runtime.checkLogStates(undefined, Date.now() + 120_000)).toEqual([]);
+  });
 });

@@ -28,6 +28,7 @@ import {
 } from "yaml";
 import type { OrderedFrontmatter, OrderedFrontmatterEntry } from "./types";
 import { messageOf } from "./message";
+import { intern } from "./intern";
 
 /**
  * A `---` line, the YAML, a `---` line. The first alternative is the empty block (`---` right after
@@ -75,14 +76,29 @@ export function coerceMisparsedYamlWikilinkToString(value: unknown): unknown {
   return `[[${cur}]]`;
 }
 
+/**
+ * A string that holds its own characters. V8 keeps a piece of 13 characters or more cut from a
+ * text as a view of the whole text: a front matter value, a tag or a link path kept for long would
+ * keep its note's whole text in memory, long after the engine stopped needing the text. And, up to
+ * INTERN.maxLength, the one copy V8 keeps of that text (intern.ts): the same key or value in many
+ * notes is one string.
+ */
+export function detached(s: string): string {
+  return intern(s.length < 13 ? s : (JSON.parse(JSON.stringify(s)) as string));
+}
+
+/** A key of a YAML mapping as a string of its own (see {@link detached}). */
+function keyOf(kn: unknown): string {
+  return detached(isScalar(kn) ? String(kn.value) : String(kn));
+}
+
 function yamlNodeToPlain(node: Node | null, keyPath: string): unknown {
   if (node == null) return null;
-  if (isScalar(node)) return node.value;
+  if (isScalar(node)) return typeof node.value === "string" ? detached(node.value) : node.value;
   if (node instanceof YAMLMap) {
     const out: Record<string, unknown> = {};
     for (const pair of node.items) {
-      const kn = pair.key;
-      const k = isScalar(kn) ? String(kn.value) : String(kn);
+      const k = keyOf(pair.key);
       out[k] = yamlNodeToPlain(pair.value as Node | null, `${keyPath}.${k}`);
     }
     return out;
@@ -120,8 +136,7 @@ export function parseYamlBlockToOrdered(
 
   const entries: OrderedFrontmatterEntry[] = [];
   for (const pair of root.items) {
-    const kn = pair.key;
-    const key = isScalar(kn) ? String(kn.value) : String(kn);
+    const key = keyOf(pair.key);
     let value: unknown = yamlNodeToPlain(pair.value, key);
     if (wikilinkStringKeys.has(key)) {
       value = coerceMisparsedYamlWikilinkToString(value);

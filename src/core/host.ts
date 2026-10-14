@@ -43,6 +43,23 @@ export interface VaultAdapter {
   remove(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   rmdir(path: string, recursive: boolean): Promise<void>;
+  /**
+   * Size and modification time of a file, null when it does not exist (Obsidian's DataAdapter has
+   * it). Optional: without it the engine reads its store files again instead of keeping them.
+   */
+  stat?(path: string): Promise<{ size: number; mtime: number } | null>;
+  /**
+   * A binary file's bytes (Obsidian's DataAdapter has it). Optional: without it, and without
+   * {@link writeBinary}, the engine writes the files it would compress as plain text.
+   */
+  readBinary?(path: string): Promise<ArrayBuffer>;
+  /** Write a binary file (Obsidian's DataAdapter has it). Optional, with {@link readBinary}. */
+  writeBinary?(path: string, data: ArrayBuffer): Promise<void>;
+  /**
+   * Make what was written to these files durable (fsync), once at the end of an operation of
+   * the engine's store. Optional: a host without it leaves that to the operating system.
+   */
+  sync?(paths: readonly string[]): Promise<void>;
 }
 
 export interface Vault {
@@ -77,6 +94,11 @@ export interface MetadataCache {
   getFirstLinkpathDest(linkpath: string, sourcePath: string): TFile | null;
   /** source path → (target path → number of links). */
   resolvedLinks: Record<string, Record<string, number>>;
+  /**
+   * The notes linking to `path` (source path → number of links): `resolvedLinks` read backwards.
+   * Optional: a host that keeps backlinks answers without a pass over every link.
+   */
+  backlinksOf?(path: string): Record<string, number>;
   /** A link to `file` written from `sourcePath`, in the vault's link format. */
   fileToLinktext?(file: TFile, sourcePath: string, omitMdExtension?: boolean): string;
   on(name: "changed", cb: (file: TFile) => unknown): EventRef;

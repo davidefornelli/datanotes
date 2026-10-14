@@ -29,7 +29,7 @@ import { eachLimit, MOVE_WRITES } from "./database-move";
 import { logEngineWrite, logHandEditsFirst, notifyApplied, whileWriting } from "./engine";
 import { invalidateFiles } from "./file-cache";
 import { writeJournal } from "./journal";
-import { storePath, storeRead, storeWrite } from "./store";
+import { storeAppend, storePath, storeRead, storeRemove, storeWrite } from "./store";
 import { withLogLock } from "./transaction-log";
 import { bulkWrite } from "./vault-settle";
 import { telemetry } from "./telemetry";
@@ -312,12 +312,67 @@ export class HandMoveRepairs {
   }
 }
 
-/** Where the row paths are saved by id (moves made while the engine was stopped). */
+/**
+ * Where the row paths are saved by id (moves made while the engine was stopped): every row in
+ * `rows.json` (the snapshot: id → path, and under the key "" the snapshot's own name), the
+ * changes since in `rows.log.jsonl` (`{"s": <snapshot>, "id": …, "path": … or null}`), so a
+ * write of a few rows appends a few lines instead of rewriting every row. A change line of another
+ * snapshot (written over by an engine that knows no change lines) is left out.
+ */
 const ROW_PATHS = storePath("hand-moves", "rows.json");
+const ROW_CHANGES = storePath("hand-moves", "rows.log.jsonl");
 
-/** Save where each row is, by id: a row found elsewhere at the next start was moved by hand meanwhile. */
-export async function saveRowPaths(app: App, rows: ReadonlyMap<string, string>): Promise<void> {
-  await storeWrite(app, ROW_PATHS, JSON.stringify(Object.fromEntries([...rows].sort(([a], [b]) => a.localeCompare(b)))));
+/** When the change lines outgrow the snapshot (this share of its rows, at least {@link ROW_CHANGES_MIN}), a new snapshot. */
+const ROW_CHANGES_SHARE = 0.25;
+export const ROW_CHANGES_MIN = 1000;
+
+/** The row paths as last saved, by app: the snapshot's name and every row then. */
+const SAVED = new WeakMap<object, { snapshot: string; rows: Map<string, string>; changes: number }>();
+
+let snapshots = 0;
+
+/**
+ * Save where each row is, by id: a row found elsewhere at the next start was moved by hand
+ * meanwhile. The first save of a run, and a `full` one (at stop), write the snapshot; the
+ * others append what changed.
+ */
+export async function saveRowPaths(app: App, rows: ReadonlyMap<string, string>, full = false): Promise<void> {
+  const saved = full ? undefined : SAVED.get(app);
+  if (saved) {
+    const lines: string[] = [];
+    for (const [id, path] of rows) if (saved.rows.get(id) !== path) lines.push(JSON.stringify({ s: saved.snapshot, id, path }));
+    for (const id of saved.rows.keys()) if (!rows.has(id)) lines.push(JSON.stringify({ s: saved.snapshot, id, path: null }));
+    if (lines.length === 0) return;
+    if (saved.changes + lines.length <= Math.max(ROW_CHANGES_MIN, saved.rows.size * ROW_CHANGES_SHARE)) {
+      await storeAppend(app, ROW_CHANGES, `${lines.join("\n")}\n`);
+      saved.changes += lines.length;
+      saved.rows = new Map(rows);
+      return;
+    }
+  }
+  const snapshot = `${Date.now().toString(36)}-${(snapshots++).toString(36)}`;
+  await storeWrite(app, ROW_PATHS, JSON.stringify({ "": snapshot, ...Object.fromEntries([...rows].sort(([a], [b]) => a.localeCompare(b))) }));
+  await storeRemove(app, ROW_CHANGES);
+  SAVED.set(app, { snapshot, rows: new Map(rows), changes: 0 });
+}
+
+/** The row paths last saved, by id: the snapshot and its change lines. */
+async function savedRowPaths(app: App): Promise<Record<string, unknown>> {
+  const saved = JSON.parse((await storeRead(app, ROW_PATHS)) ?? "{}") as Record<string, unknown>;
+  const snapshot = saved[""];
+  if (typeof snapshot !== "string") return saved;
+  for (const line of ((await storeRead(app, ROW_CHANGES)) ?? "").split("\n")) {
+    let c: { s?: unknown; id?: unknown; path?: unknown };
+    try {
+      c = JSON.parse(line) as typeof c;
+    } catch {
+      continue; // an empty or torn line
+    }
+    if (c.s !== snapshot || typeof c.id !== "string") continue;
+    if (typeof c.path === "string") saved[c.id] = c.path;
+    else delete saved[c.id];
+  }
+  return saved;
 }
 
 /**
@@ -328,7 +383,7 @@ export async function saveRowPaths(app: App, rows: ReadonlyMap<string, string>):
 export async function rowMovesSince(app: App, rows: ReadonlyMap<string, string>): Promise<HandMove[]> {
   let saved: Record<string, unknown> = {};
   try {
-    saved = JSON.parse((await storeRead(app, ROW_PATHS)) ?? "{}") as Record<string, unknown>;
+    saved = await savedRowPaths(app);
   } catch (e) {
     telemetry().log("WARN", "datanotes could not read the saved row paths", { error: messageOf(e) });
     return [];

@@ -1,12 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { addColumn, alterColumn, INDEX_RETRY, undoOperation } from "../src/core/engine";
 import { readOrderedFromMarkdown } from "../src/core/frontmatter";
 import { InverseWatcher } from "../src/core/inverse";
 import { alignRelations, checkTable, insertRow, syncRelations, updateRow } from "../src/core/rows";
+import { configureTracer, rootOrChild, setContextStore, withSpan, type SpanData } from "../src/core/tracing";
+import { AsyncContextStore } from "../src/server/tracing";
 import { createDbVault, METASTORE } from "./helpers/db-vault";
 import { described } from "./helpers/descriptions";
 
 INDEX_RETRY.delayMs = 1;
+
+/** The tracer on, with the context store of Node: the exported spans land in the returned list. */
+function traces(): SpanData[] {
+  const out: SpanData[] = [];
+  setContextStore(new AsyncContextStore());
+  configureTracer({ export: (s) => out.push(...s), enabled: () => true, sampleRatio: () => 1, maxSpansPerTrace: () => 100 });
+  return out;
+}
+
+afterEach(() => {
+  configureTracer(null);
+  setContextStore(null);
+});
 
 const ID = "{ name: id, type: string, unique: true, identity: uuid, required: true, dense: true }";
 const YAML = `catalogs:
@@ -138,6 +153,25 @@ describe("inverse link columns", () => {
     await watcher.flush("P/Alice.md");
     expect(fm(v, "P/Mark.md").friends).toEqual([]);
     expect(await syncRelations(v.app, v.settings, [])).toBeNull();
+    watcher.dispose();
+  });
+
+  it("links edited by hand while a request ran are mirrored in a trace of their own", async () => {
+    const out = traces();
+    const v = vault();
+    const watcher = new InverseWatcher(v.app, () => v.settings, async (changes) => {
+      await rootOrChild("engine.op sync_relations", () => syncRelations(v.app, v.settings, changes));
+    }, 0);
+    await checkTable(v.app, v.settings, { table: "person" }); // loads the metastore cache
+    watcher.init();
+    v.write("P/Alice.md", person("Alice", 'friends: ["[[Mark]]"]\n'));
+    withSpan("request", { root: true }, () => watcher.onChanged("P/Alice.md"));
+    await vi.waitFor(() => expect(out.map((s) => s.name)).toContain("job inverse_links"), { timeout: 2000, interval: 5 });
+    const by = Object.fromEntries(out.map((s) => [s.name, s]));
+    expect(by["engine.op sync_relations"]!.traceId).not.toBe(by.request!.traceId);
+    expect(by["engine.op sync_relations"]!.parentSpanId).toBe(by["job inverse_links"]!.spanId);
+    expect(by["job inverse_links"]!.attributes["file.path"]).toBe("P/Alice.md");
+    expect(fm(v, "P/Mark.md").friends).toEqual(["[[Alice]]"]);
     watcher.dispose();
   });
 

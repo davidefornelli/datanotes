@@ -172,7 +172,8 @@ describe("undoing a batch: the state the undo leaves is computed first", () => {
 
 describe("undoing a table rename with time travel on", () => {
   it("is refused, nothing moved, when a commit made under the new name would land on a version the old name has again", async () => {
-    const v = createDbVault({});
+    // one file per version: the conflicts name them
+    const v = createDbVault({}, { transactionLogFormat: "files" });
     await configureDatabase(v.app, v.settings, { history: true }, async () => {});
     const columns = [{ name: "occurred_at", type: "datetime", required: true, dense: true }];
     const mood = (hour: string) => ({ table: "mood", values: { occurred_at: `2026-09-26T${hour}:00` } });

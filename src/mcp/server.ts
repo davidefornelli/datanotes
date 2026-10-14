@@ -30,7 +30,8 @@ export function createSession(o: SessionOptions): Server {
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: o.toolbox.list() }));
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const args = (req.params.arguments ?? {}) as Record<string, unknown>;
-    return o.toolbox.call(o.token(extra.authInfo?.token), req.params.name, args, actor(extra.sessionId));
+    // a client that traces sends its trace context in `_meta` (W3C traceparent / tracestate)
+    return o.toolbox.call(o.token(extra.authInfo?.token), req.params.name, args, actor(extra.sessionId), req.params._meta);
   });
   return server;
 }

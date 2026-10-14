@@ -53,6 +53,6 @@ describe("the contract of Datanotes 3", () => {
 
   it("has a line for each kind of part", () => {
     const kinds = new Set(contractLines().map((l) => l.split(" ")[0]));
-    expect([...kinds].sort()).toEqual(["answer", "argument", "command", "environment", "operation", "route", "setting", "violation"]);
+    expect([...kinds].sort()).toEqual(["answer", "argument", "command", "environment", "executable", "operation", "route", "setting", "violation"]);
   });
 });

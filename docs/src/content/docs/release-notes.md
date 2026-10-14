@@ -5,6 +5,110 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.1.0
+
+Datanotes 3.1.0 makes the engine fast at scale and adds OpenTelemetry traces. It only adds to 3.0: no operation, argument or setting goes away. One default changes: the transaction log now writes segments. Read [Before you downgrade to 3.0](#before-you-downgrade-to-30) if you may go back.
+
+### Speed
+
+Measured with `bench/scale/` on a synthetic 50,000-note vault on Windows, median times. "Before" is the engine at the start of this work, with the same benchmark:
+
+| Operation | Before | 3.1.0 |
+|---|---|---|
+| `insert_row` | 662 ms | 37 ms |
+| `update_row` | 124 ms | 47 ms |
+| `select_rows` on a small table | 23 ms | 2.8 ms |
+| `describe_database` | 1,019 ms | 24 ms |
+| `graph_neighbors` right after a write | 1,472 ms | 2.5 ms |
+| Archive 100 rows | 71.6 s | 1.3 s |
+| `move_rows`, 20 rows | 13.9 s | 0.5 s |
+| `select_rows` by 5 paths | 36.5 ms | 0.3 ms |
+
+The gains come from these changes:
+
+- **An index of the vault in memory**: the engine keeps each table's rows, unique values, links and backlinks up to date as notes change. A read no longer walks every note of the vault.
+- **Links resolved one note at a time**: creating, deleting or renaming a note no longer resolves every link of the vault again.
+- **Each note parsed once per version**: the engine keeps the parse until the file changes.
+- **Faster queries**:
+  - `where` filters are compiled once;
+  - sorts read each key once;
+  - pages keep only the rows they need;
+  - time-zone formatting is cached, so sorting 10,000 rows by `file_modified` takes about 50 ms, not 4 s.
+- **Writes before reads**: a write waits for no new read. A write under four concurrent readers takes about 35 ms, not 147 ms. Settings `writePriority` and `writePriorityMaxWaitMs` tune it.
+- **Search through the index on disk**: `search_notes` looks the words up in the index on disk, then reads only the notes that can match. On 50,000 notes, two words found in 1,213 notes take about 14 ms, not 70 to 83 ms. A name takes 7 ms, not 100 ms. A word found in 15,905 notes still takes about 140 ms. A query of one- or two-letter words reads every note. After a start, the engine reads the search's row ids in the background. The first search no longer waits for them.
+- **Repeated reads from memory**: a read the engine answered before, on data that has not changed since, comes from a cache. Setting `readCacheMaxBytes` sizes it, and `0` turns it off.
+- **Faster undo**: `undo_migration` takes tens of milliseconds, not seconds.
+- **Faster history**:
+  - `table_changes` replays each version once;
+  - `describe_history` reads only commit headers;
+  - repeated time-travel reads come from memory.
+- **Less memory**:
+  - note texts stay within a budget;
+  - repeated values, names and paths are kept once;
+  - row bodies are read only when asked for;
+  - the transaction log keeps hashes, not texts.
+- **A faster start**:
+  - the engine walks the vault once, without blocking;
+  - it reads many notes at a time;
+  - the change feed starts after the server listens.
+- **An index on disk**: the engine keeps `<store>/index/vault.sqlite` through Node.js's built-in SQLite. A start then reads only the notes that changed since the last stop: at 50,000 notes a restart takes about 2 s, not 40 s. The index is a cache: the notes stay the source of truth, and the engine rebuilds the index when it is missing or damaged. It holds each note's text, compressed, and takes about twice the vault's size on disk. Setting `vaultIndexEnabled` turns it off. Without `node:sqlite`, the engine reads every note as before.
+- **More reads at once**: the `datanotes` command gives Node.js 16 threads for file reads, unless `UV_THREADPOOL_SIZE` sets another number.
+
+### The whole graph in one call
+
+`graph_neighbors`, `graph_traverse` and `graph_path` take `from_nodes.tables`: table names or patterns, with `"*"` for every table. One call returns the graph of the whole vault.
+
+### Traces
+
+The engine and `datanotes mcp` send OpenTelemetry traces next to the logs, to any OTLP backend:
+
+- one span per request, continuing an incoming `traceparent`;
+- one span per operation, with the database span attributes;
+- spans for the phases: lock wait and hold, query plan and scan, validation, journal and transaction log;
+- one trace per agent call, across the MCP server and the engine.
+
+Log records carry their trace and span ids. New settings: `telemetryTraces`, `telemetryTraceSampleRatio`, `telemetryMaxSpansPerTrace`, `telemetrySlowSpanMs` and `telemetryEnvironment`. The `OTEL_*` variables work as well. `datanotes/client` takes `trace` and `tracer` to continue a trace into the engine. See [Send logs to your observability backend](/develop/telemetry/).
+
+### The store
+
+- **The transaction log in segments, by default**: a table's versions go to append-only segment files instead of one file per version. The store keeps far fewer files, which matters to antivirus scans and to the store backup. Setting `transactionLogFormat` chooses `segments` or `files`. A 3.0 store needs no conversion: new versions go to segments next to the old files.
+- **Smaller checkpoints**: a checkpoint is a manifest and compressed parts, written after the write that made it due.
+- **Durable store writes**: the files an operation wrote are synced at its end. Setting `storeSync` sets the policy. A version cut short by a crash no longer makes a table's history unreadable. `vacuum_table` and `datanotes store convert-log` sync the files they write before they delete the old ones.
+- **A lighter backup**: a backup tick with no change runs no git command.
+- **The store left out of indexing**: on Windows the engine marks the store folder as not content indexed, and on macOS it adds a Spotlight marker.
+- **The vault index out of Time Machine**: on macOS the engine excludes `<store>/index/` from Time Machine. The engine rebuilds the index when it is missing, so a restore loses nothing. Time Machine still backs up the journal and the history.
+- **The vault index checked**: after each start, the engine checks the index file in the background, one table at a time. The engine turns a damaged index off for the run and rebuilds it at the next start.
+
+### Before you downgrade to 3.0
+
+Datanotes 3.0 reads only one file per version. Before you go back to 3.0, convert the logs:
+
+1. Stop the engine. The conversion runs only while no engine serves the database.
+2. Convert the logs of the database:
+
+   ```bash
+   datanotes store convert-log --to files --database <folder>
+   ```
+
+3. Start Datanotes 3.0.
+
+A table vacuumed with more than 32 MB of text keeps a checkpoint 3.0 cannot read, so 3.0 starts its history again from empty. To keep one file per version from the start, set `transactionLogFormat` to `files`.
+
+### Other changes
+
+- **`dnotes`**: the package also installs the command under a short name. `dnotes status` is the same as `datanotes status`, and `datanotes` stays.
+- **`search_notes`**: match contexts now fall on the right text in notes with decomposed accents, Hangul or emoji.
+- **Compressed answers**: setting `httpCompression` sends gzip to remote clients. It is on by default, and clients on the same machine get plain answers.
+- **Semantic search**: vectors take a quarter of the memory, and a repeated query skips the embedding service.
+- **`select_rows` by path**: a filter on `path` reads only the notes it names. A row elsewhere in the table that can't be read no longer fails it.
+- **Index checks**: `DATANOTES_INDEX_CHECK=1` compares the engine's indexes with a full read after every operation.
+- **`/tool-calls/record/`**: takes an optional `summary`, so `datanotes mcp` no longer sends whole tool results back to the engine.
+- **Benchmarks**: `bench/http-latency.mjs` and `bench/scale/` measure any vault.
+- **`datanotes store path --json`**: the answer adds `database_path`, the database folder on disk.
+- **`datanotes store new-id`, `backup` and `restore`**: each holds the store while it runs, as `convert-log` does. An engine you start meanwhile refuses to start. A live engine whose heartbeat stopped now makes them refuse too. `restore` leaves the store in place untouched until the clone is checked. When the clone cannot take its place, `restore` removes the clone. It puts the old store back, or names the folder the old store is in.
+- **Traces of background work**: `job auto_recompute` recomputes columns after a hand edit, and `job inverse_links` mirrors inverse links. Both are traces of their own, never part of the request that saw the edit.
+- **Writes**: a write runs again only when another write overtook it. Before, a write whose values held the text of that conflict ran up to five times.
+
 ## 3.0.0
 
 Datanotes 3.0.0 is the first stable release. Versions 1.x and 2.x, published on 7 and 8 October 2026, were previews. Datanotes runs a folder of Markdown notes as typed database tables. You reach it through an HTTP API, a command line and an MCP server for agents.

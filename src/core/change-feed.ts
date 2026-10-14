@@ -29,7 +29,7 @@ import type { Actor } from "./actor";
 import { engineWriting, loadTable, onApplied, type AppliedOperation, type LoadedRow } from "./engine";
 import { checkChangedTables, checkExternalEdits, compileWhere, rowGetter, type ExternalEdit, type ExternalViolation, type Where } from "./rows";
 import type { App, EventRef, TAbstractFile, TFile } from "./host";
-import { readHashed } from "./file-cache";
+import { cachedVersion, readHashed, versionFrontmatter, type CachedVersion } from "./file-cache";
 import { frontmatterError, unreadableMessage, unreadableRowOf } from "./unreadable";
 import { readRowFrontmatter } from "./inverse";
 import { cachedMetastore, catalogTables, entryToOrdered, loadMetastore, METASTORE_FILE, metastorePath, parseMetastore, rowTableFull, type Metastore } from "./metastore";
@@ -38,10 +38,12 @@ import { externalRename, HandMoveRepairs, rowMovesSince, saveRowPaths, type Hand
 import { catalogLayout, parseTableOptions } from "./table-loader";
 import { TABLE_KEY } from "./types-table";
 import type { DatanotesSettings } from "./settings";
-import { storeAppend, storeList, storePath, storeRead, storeRemove } from "./store";
+import { storeAppend, storeFlush, storeList, storePath, storeRead, storeRemove } from "./store";
+import { vaultIndex } from "./vault-index";
 import { telemetry } from "./telemetry";
 import { messageOf } from "./message";
 import { inDatabase, normalizeDatabaseFolder } from "./db-paths";
+import { job, phase } from "./tracing";
 
 /** `unreadable`: a hand edit left a row's front matter unreadable (its last readable state is kept). */
 export type ChangeOp = "insert" | "update" | "delete" | "move" | "schema" | "tool_call" | "unreadable";
@@ -148,6 +150,75 @@ interface RowState {
   table: string | null;
   id?: string;
   values: Record<string, unknown>;
+}
+
+/**
+ * The rows' last known states by path, in the order a `Map` keeps them, with an index of the
+ * paths by row id: a row seen at a new path finds its old one without a scan of every row.
+ */
+class RowStates {
+  private readonly rows = new Map<string, RowState>();
+  /** Where each path stands in the map's order (a path set again keeps its place, as in a `Map`). */
+  private readonly place = new Map<string, number>();
+  private next = 0;
+  /** Id → the path of its row, or the paths of its rows (one path kept as a string: most ids have one row). */
+  private readonly byId = new Map<string, string | Set<string>>();
+
+  get(path: string): RowState | undefined {
+    return this.rows.get(path);
+  }
+
+  has(path: string): boolean {
+    return this.rows.has(path);
+  }
+
+  set(path: string, st: RowState): this {
+    const old = this.rows.get(path);
+    if (old === undefined) this.place.set(path, this.next++);
+    else if (old.id !== undefined && old.id !== st.id) this.unindex(old.id, path);
+    this.rows.set(path, st);
+    if (st.id !== undefined) {
+      const paths = this.byId.get(st.id);
+      if (paths === undefined) this.byId.set(st.id, path);
+      else if (typeof paths !== "string") paths.add(path);
+      else if (paths !== path) this.byId.set(st.id, new Set([paths, path]));
+    }
+    return this;
+  }
+
+  delete(path: string): boolean {
+    const old = this.rows.get(path);
+    if (old === undefined) return false;
+    if (old.id !== undefined) this.unindex(old.id, path);
+    this.place.delete(path);
+    return this.rows.delete(path);
+  }
+
+  private unindex(id: string, path: string): void {
+    const paths = this.byId.get(id)!; // indexed with its row
+    if (typeof paths === "string") {
+      this.byId.delete(id);
+      return;
+    }
+    paths.delete(path);
+    if (paths.size === 1) this.byId.set(id, paths.values().next().value!);
+  }
+
+  [Symbol.iterator](): IterableIterator<[string, RowState]> {
+    return this.rows[Symbol.iterator]();
+  }
+
+  /** The first path, in the map's order, of a row with this id that `accept` takes. */
+  firstWithId(id: string, accept: (path: string, st: RowState) => boolean): string | undefined {
+    const paths = this.byId.get(id);
+    if (paths === undefined) return undefined;
+    let best: string | undefined;
+    for (const p of typeof paths === "string" ? [paths] : paths) {
+      if (!accept(p, this.rows.get(p)!)) continue;
+      if (best === undefined || this.place.get(p)! < this.place.get(best)!) best = p;
+    }
+    return best;
+  }
 }
 
 type NewEvent = Omit<ChangeEvent, "seq" | "at">;
@@ -260,6 +331,18 @@ export function parseEvents(text: string): ChangeEvent[] {
   return out;
 }
 
+/** The index of the first event after `since` in events sorted by sequence number (their length when none is). */
+export function firstAfter(events: readonly { seq: number }[], since: number): number {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (events[mid]!.seq > since) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
 function matches(ev: ChangeEvent, q: ChangeQuery): boolean {
   // tool calls are their own stream: only for consumers that ask for them
   if (ev.op === "tool_call" && !q.ops?.includes("tool_call")) return false;
@@ -273,11 +356,15 @@ function matches(ev: ChangeEvent, q: ChangeQuery): boolean {
   return true;
 }
 
+/** How many rows' states the start computes before it lets the engine answer a request. */
+const STATE_SLICE = 2000;
+
 export class ChangeFeed {
-  private state = new Map<string, RowState>();
+  private state = new RowStates();
   private buffer: ChangeEvent[] = [];
+  /** The last event recorded before this start: the buffer's events up to it come from the files. */
+  private startSeq = 0;
   private seq = 0;
-  private oldest = 1;
   private waiters = new Set<() => void>();
   /**
    * Vault changes outside the engine since the last batch, in order (a path once between two
@@ -331,11 +418,12 @@ export class ChangeFeed {
     return out;
   }
 
-  private async saveRowPaths(): Promise<void> {
+  /** Save the rows' paths: what changed since the last save, or (`full`: at stop) every row. */
+  private async saveRowPaths(full = false): Promise<void> {
     if (this.savePathsTimer) clearTimeout(this.savePathsTimer);
     this.savePathsTimer = undefined;
     try {
-      await saveRowPaths(this.app, this.rowPaths());
+      await saveRowPaths(this.app, this.rowPaths(), full);
     } catch (e) {
       telemetry().log("WARN", "datanotes could not save the row paths", { error: messageOf(e) });
     }
@@ -345,7 +433,14 @@ export class ChangeFeed {
     return storePath("changes");
   }
 
-  /** Read the last sequence number and the rows' current state, then follow writes and vault events. */
+  /**
+   * Read the last sequence number and the rows' current state, then follow writes and vault
+   * events. Only the newest day files are read (the newest events, kept in memory); the oldest
+   * event's number, which only a read from before the newest file needs, is read then. The rows
+   * are taken as the file cache holds them now (a lookup each, no read): their states are computed
+   * after, while the engine already answers (`states` settles then), and every change is compared
+   * after them. A row the cache does not hold is read now.
+   */
   async start(): Promise<void> {
     const s = this.getSettings();
     this.schemaText = (await loadMetastore(this.app, s))?.text ?? null;
@@ -353,6 +448,8 @@ export class ChangeFeed {
     for (const f of [...files].reverse()) {
       /* v8 ignore next -- a race: a file listed a moment ago was removed (pruned) before this read */
       const text = (await storeRead(this.app, f)) ?? "";
+      // the oldest file read here: the oldest event kept is known (else the first read that needs it reads it)
+      if (f === files[0]) this.oldest = parseEvents(text)[0]?.seq;
       // a stop by force in the middle of an append leaves a torn last line: the next event
       // starts on a line of its own
       if (f === files[files.length - 1] && text !== "" && !text.endsWith("\n")) {
@@ -366,30 +463,26 @@ export class ChangeFeed {
       const last = events[events.length - 1];
       if (last) {
         this.seq = last.seq;
+        this.startSeq = last.seq;
+        // the newest events, from memory: a client following the feed reads no file
+        if (this.buffer.length === 0) this.buffer = events.slice(-BUFFER);
         break;
       }
     }
-    if (files.length > 0) {
-      /* v8 ignore next -- a race: a file listed a moment ago was removed (pruned) before this read */
-      const first = parseEvents((await storeRead(this.app, files[0]!)) ?? "")[0];
-      this.oldest = first ? first.seq : this.seq + 1;
-    } else this.oldest = this.seq + 1;
-    // Rows are read the same way here and when diffing, so values compare equal.
-    for (const f of this.app.vault.getMarkdownFiles()) {
+    // With a vault index, only the notes with a table property are looked at.
+    const idx = vaultIndex(this.app, s);
+    const notes = idx && !idx.hasFailures ? idx.notesInOrder((n) => n.tableValue !== undefined).map((n) => n.file) : this.app.vault.getMarkdownFiles();
+    const keep = new Set([s.tableKey]);
+    const kept: [string, CachedVersion][] = [];
+    for (const f of notes) {
       const fm = this.app.metadataCache.getFileCache(f)?.frontmatter as Record<string, unknown> | undefined;
       if (!fm || fm[s.tableKey] === undefined) continue;
-      try {
-        const st = await this.readState(f.path);
-        if (st && st !== "missing") this.state.set(f.path, st);
-      } catch (e) {
-        // a note that cannot be read (broken frontmatter) is compared again on its next change
-        telemetry().log("WARN", "datanotes change feed could not read a note", { path: f.path, error: messageOf(e) });
-      }
+      const v = cachedVersion(this.app, f);
+      if (v) kept.push([f.path, v]);
+      else await this.stateNow(f.path, () => this.readState(f.path));
     }
-    // rows moved by hand while the engine was stopped (found by id): their links are repaired too
-    await this.repairs.add(await rowMovesSince(this.app, this.rowPaths()), new Set());
-    await this.saveRowPaths();
-    this.unsubscribe = onApplied(this.app, (e) => this.enqueue(() => this.fromEngine(e)));
+    this.states = this.enqueue(() => this.readStates(kept, keep));
+    this.unsubscribe = onApplied(this.app, (e) => this.enqueue(() => phase("engine.change_feed.record", () => this.fromEngine(e), { "datanotes.journal.op": e.op })));
     const v = this.app.vault as unknown as { on?(n: string, cb: (...a: never[]) => unknown): EventRef };
     if (typeof v.on !== "function") return;
     const touch = ((f: TAbstractFile) => this.touch(f.path)) as never;
@@ -401,6 +494,35 @@ export class ChangeFeed {
         else this.repairs.activity();
       }) as never),
     );
+  }
+
+  /** Settles once the rows' current states are read ({@link start}). */
+  states: Promise<void> = Promise.resolve();
+
+  /**
+   * The current state of the rows kept at start (as they were then), a slice at a time so the
+   * engine keeps answering; then the rows moved by hand while the engine was stopped.
+   */
+  private async readStates(kept: readonly [string, CachedVersion][], keep: ReadonlySet<string>): Promise<void> {
+    for (let i = 0; i < kept.length; i++) {
+      const [path, v] = kept[i]!;
+      // Rows are read the same way here and when diffing, so values compare equal.
+      await this.stateNow(path, async () => this.rowState(path, Object.fromEntries(versionFrontmatter(v, keep))));
+      if (i % STATE_SLICE === STATE_SLICE - 1) await new Promise((r) => setTimeout(r, 0));
+    }
+    // rows moved by hand while the engine was stopped (found by id): their links are repaired too
+    await this.repairs.add(await rowMovesSince(this.app, this.rowPaths()), new Set());
+    await this.saveRowPaths();
+  }
+
+  /** Keep a row's state as `read` gives it; a note that cannot be read (broken front matter) is compared again on its next change. */
+  private async stateNow(path: string, read: () => Promise<RowState | null | "missing">): Promise<void> {
+    try {
+      const st = await read();
+      if (st && st !== "missing") this.state.set(path, st);
+    } catch (e) {
+      telemetry().log("WARN", "datanotes change feed could not read a note", { path, error: messageOf(e) });
+    }
   }
 
   /**
@@ -417,7 +539,7 @@ export class ChangeFeed {
       await this.flush();
       await this.repairs.stop();
       await this.queue; // the repair's events
-      await this.saveRowPaths();
+      await this.saveRowPaths(true);
     }
     this.stopped = true;
     for (const w of this.waiters) w();
@@ -535,7 +657,7 @@ export class ChangeFeed {
     this.taken.push(ops);
     void this.enqueue(() => {
       this.taken = this.taken.filter((x) => x !== ops);
-      return this.external(ops);
+      return job("job change_feed_hand_edits", () => this.external(ops), { "datanotes.changes": ops.length });
     });
   }
 
@@ -654,10 +776,9 @@ export class ChangeFeed {
     for (const e of out) await this.emit(e);
   }
 
-  /** Emit an event now, or add it to a batch (`out`) recorded later. */
-  private async record(e: NewEvent, out?: NewEvent[]): Promise<void> {
-    if (out) out.push(e);
-    else await this.emit(e);
+  /** Add an event to the batch (`out`) recorded together once compared (one append to the store). */
+  private async record(e: NewEvent, out: NewEvent[]): Promise<void> {
+    out.push(e);
   }
 
   /** Archive and `exclude` folders of each table: a note there is not a row (as check_table and the transaction log read them). */
@@ -695,7 +816,7 @@ export class ChangeFeed {
   /** The hand moves an engine write follows, with the `seq` of their `move` events (rows). */
   private causeOf(moves: readonly HandMove[]): NonNullable<ChangeEvent["cause"]> {
     return moves.map(({ from, to }) => {
-      const ev = [...this.buffer].reverse().find((x) => x.op === "move" && x.source === "external" && x.path === to && x.oldPath === from);
+      const ev = [...this.buffer].reverse().find((x) => x.seq > this.startSeq && x.op === "move" && x.source === "external" && x.path === to && x.oldPath === from);
       return { path: to, oldPath: from, ...(ev ? { seq: ev.seq } : {}) };
     });
   }
@@ -712,11 +833,18 @@ export class ChangeFeed {
       await this.databaseMovedNow(e.databaseMove.from, e.databaseMove.to, true, { ...meta, source: e.databaseMove.by === "hand" ? "external" : "engine" }, e.databaseMove.entries);
       return;
     }
-    for (const m of e.moves) await this.renamed(m.from, m.to, meta);
-    for (const p of new Set([...e.paths, ...e.deletes])) await this.diff(p, meta);
+    // the operation's events, recorded together: one append to the store for all of them
+    const out: NewEvent[] = [];
+    try {
+      for (const m of e.moves) await this.renamed(m.from, m.to, meta, out);
+      for (const p of new Set([...e.paths, ...e.deletes])) await this.diff(p, meta, out);
+    } finally {
+      // what was compared before a failure is recorded all the same
+      await this.emitAll(out);
+    }
   }
 
-  private async renamed(from: string, to: string, meta: Partial<ChangeEvent> & { source: ChangeEvent["source"] }, out?: NewEvent[]): Promise<void> {
+  private async renamed(from: string, to: string, meta: Partial<ChangeEvent> & { source: ChangeEvent["source"] }, out: NewEvent[]): Promise<void> {
     if (this.batch) this.batchMoves.push({ from, to }); // a hand move, of a row or of a plain note
     const prev = this.state.get(from);
     if (!prev) {
@@ -781,7 +909,7 @@ export class ChangeFeed {
   }
 
   /** Compare a path with its last known state and record what changed. */
-  private async diff(path: string, meta: Partial<ChangeEvent> & { source: ChangeEvent["source"] }, out?: NewEvent[]): Promise<void> {
+  private async diff(path: string, meta: Partial<ChangeEvent> & { source: ChangeEvent["source"] }, out: NewEvent[]): Promise<void> {
     if (path === metastorePath(this.getSettings())) {
       // Loaded before its text is recorded: a metastore that cannot be read (broken YAML, a failed
       // read) is no event, and is compared again on its next change.
@@ -821,7 +949,7 @@ export class ChangeFeed {
     if (!prev && !now) return;
     if (!prev && now?.id) {
       // A rename seen as delete + create (from disk, git, a sync tool): the same row moved.
-      const from = [...this.state].find(([p, st]) => st.id === now.id && st.table === now.table && p !== path && !this.app.vault.getAbstractFileByPath(p))?.[0];
+      const from = this.state.firstWithId(now.id, (p, st) => st.table === now.table && p !== path && !this.app.vault.getAbstractFileByPath(p));
       if (from) {
         prev = this.state.get(from)!;
         if (this.batch) {
@@ -908,11 +1036,20 @@ export class ChangeFeed {
     const byDay = new Map<string, string[]>();
     for (const ev of evs) {
       const day = ev.at.slice(0, 10);
-      byDay.set(day, [...(byDay.get(day) ?? []), JSON.stringify(ev)]);
+      let lines = byDay.get(day);
+      if (!lines) byDay.set(day, (lines = []));
+      lines.push(JSON.stringify(ev));
     }
     for (const [day, lines] of byDay) {
       try {
-        await storeAppend(this.app, storePath("changes", `${day}.jsonl`), `${lines.join("\n")}\n`);
+        const file = storePath("changes", `${day}.jsonl`);
+        await storeAppend(this.app, file, `${lines.join("\n")}\n`);
+        // durable as the setting storeSync says (webhooks deliver from the stored feed after a crash)
+        await storeFlush(this.app).catch(() => undefined);
+        // the file's newest event is the day's last one here (numbers only grow)
+        let newest = 0;
+        for (const ev of evs) if (ev.at.startsWith(day)) newest = ev.seq;
+        this.fileMaxSeq.set(file, newest);
       } catch {
         // the events are still served from memory
       }
@@ -969,34 +1106,78 @@ export class ChangeFeed {
     };
   }
 
+  /**
+   * The highest sequence number in each day file, as far as this engine knows it (from its reads
+   * and its appends; a later append always has a higher number): a read after it skips the file.
+   */
+  private fileMaxSeq = new Map<string, number>();
+
   /** Events after `since` that match the query. */
   async read(q: ChangeQuery = {}): Promise<ChangePage> {
     const since = q.since ?? 0;
     const limit = Math.min(Math.max(q.limit ?? 500, 1), 5000);
     let source: ChangeEvent[];
-    if (this.buffer.length > 0 && since >= this.buffer[0]!.seq - 1) source = this.buffer.filter((e) => e.seq > since);
+    // the buffer is in sequence order: the events after `since` start where a binary search says
+    if (this.buffer.length > 0 && since >= this.buffer[0]!.seq - 1) source = this.buffer.slice(firstAfter(this.buffer, since));
     else {
       source = [];
-      for (const f of (await storeList(this.app, this.dir())).files.filter((x) => x.endsWith(".jsonl")).sort()) {
+      // Without `where`, a page is full once `limit` events match: the later files (later events)
+      // are not read. A read from the start of a feed of many days reads only its first days.
+      const plain = !q.where || Object.keys(q.where).length === 0;
+      let matched = 0;
+      const days = (await storeList(this.app, this.dir())).files.filter((x) => x.endsWith(".jsonl")).sort();
+      for (const f of days) {
+        // a day whose events all come before `since` has nothing to read
+        if ((this.fileMaxSeq.get(f) ?? Infinity) <= since) continue;
         /* v8 ignore next -- a race: a file listed a moment ago was removed (pruned) before this read */
-        for (const ev of parseEvents((await storeRead(this.app, f)) ?? "")) if (ev.seq > since) source.push(ev);
+        const events = parseEvents((await storeRead(this.app, f)) ?? "");
+        // the oldest day read: its first event is the oldest kept (not read again for it)
+        if (f === days[0] && this.oldest === undefined) this.oldest = events.length > 0 ? events[0]!.seq : this.seq + 1;
+        let max = this.fileMaxSeq.get(f) ?? 0;
+        for (const ev of events) {
+          if (ev.seq > max) max = ev.seq;
+          if (ev.seq <= since) continue;
+          source.push(ev);
+          if (plain && matches(ev, q)) matched++;
+        }
+        if (events.length > 0) this.fileMaxSeq.set(f, max);
+        if (plain && matched >= limit) break;
       }
     }
+    // the query's filters, tested once per event
+    const kept = source.map((ev) => matches(ev, q));
     // `where` is compiled only for the tables the other filters keep: a column of `film` is not
     // an error on the `watch` events of the same batch
     const rowMatches = await this.wherePredicates(
       q.where,
-      source.filter((ev) => matches(ev, q)),
+      source.filter((_, i) => kept[i]),
     );
     const events: ChangeEvent[] = [];
     let last = since;
-    for (const ev of source) {
+    for (let i = 0; i < source.length; i++) {
+      const ev = source[i]!;
       last = ev.seq;
-      if (matches(ev, q) && rowMatches(ev)) events.push(ev);
+      if (kept[i] && rowMatches(ev)) events.push(ev);
       if (events.length >= limit) break;
     }
     if (events.length < limit) last = Math.max(last, Math.min(this.seq, source.length ? source[source.length - 1]!.seq : since));
-    return { events, last: Math.max(last, since), head: this.seq, ...(since > 0 && since < this.oldest - 1 ? { gap: true } : {}) };
+    return { events, last: Math.max(last, since), head: this.seq, ...(since > 0 && since < (await this.oldestSeq()) - 1 ? { gap: true } : {}) };
+  }
+
+  /**
+   * The number of the oldest event kept (the first of the oldest day file; the next number when
+   * there is none), read by the first read that asks for events after a number (not at start).
+   */
+  private oldest: number | undefined;
+
+  private async oldestSeq(): Promise<number> {
+    if (this.oldest === undefined) {
+      const files = (await storeList(this.app, this.dir())).files.filter((f) => f.endsWith(".jsonl")).sort();
+      /* v8 ignore next -- a race: a file listed a moment ago was removed (pruned) before this read */
+      const first = files.length > 0 ? parseEvents((await storeRead(this.app, files[0]!)) ?? "")[0] : undefined;
+      this.oldest = first ? first.seq : this.seq + 1;
+    }
+    return this.oldest;
   }
 
   /** `where` compiled per table (as select_rows does); events without row values never match it. */
@@ -1018,7 +1199,7 @@ export class ChangeFeed {
       if (!pred || !ev.row) return false;
       const name = ev.path.split("/").pop()!;
       const file = { path: ev.path, name, basename: name.replace(/\.md$/, ""), extension: "md" } as LoadedRow["file"];
-      return pred({ file, ordered: Object.entries({ [s.tableKey]: ev.table, ...ev.row }), body: "" });
+      return pred({ file, ordered: Object.entries({ [s.tableKey]: ev.table, ...ev.row }) });
     };
   }
 
@@ -1065,6 +1246,7 @@ export class ChangeFeed {
       const day = /(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(f)?.[1];
       if (day && day < cutoff) {
         await storeRemove(this.app, f);
+        this.fileMaxSeq.delete(f);
         n++;
       }
     }

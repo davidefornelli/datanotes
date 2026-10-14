@@ -104,7 +104,7 @@ export const scenarios: Scenario[] = [
       type History = { table: string; history: { version: number; operation: string }[] };
       const on = await t.ok<WriteResult>("alter_table", { table: "task", history: true });
       const renamed = await t.ok<WriteResult>("alter_table", { table: "task", name: "todo" });
-      expect(renamed.planned_moves).toContainEqual({ from: "store:transaction_log/work.planning.task/00000000000000000000.json", to: "store:transaction_log/work.planning.todo/00000000000000000000.json" });
+      expect(renamed.planned_moves).toContainEqual({ from: "store:transaction_log/work.planning.task/00000000000000000000.segment.jsonl", to: "store:transaction_log/work.planning.todo/00000000000000000000.segment.jsonl" });
       await t.ok("undo_migration", { migration_id: renamed.migration_id });
       // the whole log comes back, the commit of the rename included, and the undo is a new version
       const back = await t.ok<History>("describe_history", { table: "task" });

@@ -318,3 +318,33 @@ ${TABLES.split("\n").map((l) => (l === "" ? l : `          ${l}`)).join("\n")}`)
     expect([...specs.keys()]).toEqual(["main.public.person"]);
   });
 });
+
+describe("the watcher's snapshot and the metastore", () => {
+  it("is kept when the metastore changes nothing it follows; taken again when the inverse pairs or the tables change", async () => {
+    const { loadMetastore } = await import("../src/core/metastore");
+    const v = vault();
+    await checkTable(v.app, v.settings, { table: "person" });
+    const watcher = new InverseWatcher(v.app, () => v.settings, async () => {});
+    const cache = v.app.metadataCache as unknown as { getFileCache(f: unknown): unknown };
+    const spy = vi.spyOn(cache, "getFileCache");
+    watcher.init();
+    const first = spy.mock.calls.length;
+    expect(first).toBeGreaterThan(0);
+    // another text (a comment): the same pairs on the same tables
+    v.write(METASTORE, `${v.read(METASTORE)}# written by hand\n`);
+    await loadMetastore(v.app, v.settings);
+    watcher.init();
+    expect(spy.mock.calls.length).toBe(first);
+    // a new table: names may resolve elsewhere, the snapshot is taken again
+    v.write(METASTORE, withTables(`${TABLES}place:\n  columns:\n    - { name: name, type: string }\n`));
+    await loadMetastore(v.app, v.settings);
+    watcher.init();
+    expect(spy.mock.calls.length).toBeGreaterThan(first);
+    // stopped and started again: taken again whatever the metastore
+    const second = spy.mock.calls.length;
+    watcher.dispose();
+    watcher.init();
+    expect(spy.mock.calls.length).toBeGreaterThan(second);
+    spy.mockRestore();
+  });
+});

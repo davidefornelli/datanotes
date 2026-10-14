@@ -1,7 +1,7 @@
 /**
  * The public contract of Datanotes 3 as lines of text (`contract/datanotes-3.txt`, checked by
  * tests/contract.test.ts): the operations with their arguments and answer fields, the HTTP routes,
- * the commands and their options, the environment variables, the settings and the violation codes.
+ * the commands and their options, the executables the package installs, the environment variables, the settings and the violation codes.
  *
  * A change that keeps every program working only adds lines: a new operation, argument, field,
  * enum value or type of an argument. A change that breaks one removes a line, and a line never
@@ -98,6 +98,9 @@ export function contractLines(): string[] {
     ["mcp serve", MCP_SERVE_OPTIONS],
   ];
   for (const [command, spec] of commands) for (const l of optionLines(command, spec)) add(l);
+  // the commands the package installs (package.json "bin")
+  const bin = (JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8")) as { bin: Record<string, string> }).bin;
+  for (const name of Object.keys(bin)) add(`executable ${name}`);
   for (const v of environmentVariables()) add(`environment ${v}`);
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) add(`setting ${k}: ${Array.isArray(v) ? "array" : v === null ? "null" : typeof v}`);
   for (const code of Object.keys(VIOLATION_GUIDANCE)) add(`violation ${code}`);

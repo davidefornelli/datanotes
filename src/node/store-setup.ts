@@ -17,8 +17,9 @@
  *    new-id` gives the copy a new id). A recorded vault that is gone (or no longer holds the id)
  *    was moved: the record follows.
  *
- * Two starts on the same vault take turns (a setup lock, created with `wx`), and the store's
- * `engine.lock` names the start until its service holds it. On Windows a file another program
+ * Two starts on the same vault take turns (a setup lock, created with `wx`), and so does a
+ * command that claims the store (`claimStore`); the store's `engine.lock` names the start until
+ * its service holds it. On Windows a file another program
  * holds for a moment (EPERM, EBUSY, EACCES) is retried with a growing pause.
  */
 
@@ -44,6 +45,7 @@ import {
 } from "../api/local";
 import { newDatabaseId, withMetastoreId } from "../core/database-id";
 import { guide, GuidedError } from "../core/hints";
+import { LOCK_HEARTBEAT_MS } from "../server/engine-lock";
 import { processAlive } from "./stop";
 import { inDatabase } from "../core/db-paths";
 import { makePrivateDir, posixModes, PRIVATE_FILE_MODE, tightenPrivate } from "./private-files";
@@ -374,6 +376,50 @@ function mtimeOf(file: string): number {
 export function setupLockFile(home: string, explicit: string | undefined, vault: string): string {
   if (explicit) return path.join(path.resolve(explicit), SETUP_LOCK_FILE);
   return path.join(home, "setup", `${createHash("sha256").update(vaultKey(vault)).digest("hex").slice(0, 32)}.lock`);
+}
+
+/** How often a claim refreshes its lock's heartbeat (as the engine's, LOCK_HEARTBEAT_MS); tests lower it. */
+export const CLAIM_HEARTBEAT = { ms: LOCK_HEARTBEAT_MS };
+
+/**
+ * Claim a store for a command that changes it with no engine running (`datanotes store
+ * convert-log`). Under the vault's setup lock, as a start: refused when an engine holds the
+ * store (`refuse` makes the error), else `engine.lock` names this process with port 0 (not
+ * serving: a start refuses, datanotes status says it is starting), its heartbeat refreshed
+ * until the release. The release removes the lock while it still names this claim.
+ */
+export function claimStore(
+  o: { vault: string; store: string; explicit?: string; env?: Env; pid?: number; setupWaitMs?: number },
+  refuse: (lock: EngineLock) => Error,
+): () => void {
+  const self = o.pid ?? process.pid;
+  const file = path.join(o.store, LOCK_FILE);
+  const releaseSetup = takeSetupLock(setupLockFile(dataHome(o.env ?? process.env), o.explicit, path.resolve(o.vault)), self, o.setupWaitMs ?? SETUP_WAIT_MS);
+  const at = new Date().toISOString();
+  const mine: EngineLock = { kind: "service", pid: self, host: os.hostname(), port: 0, startedAt: at, heartbeat: at };
+  try {
+    const running = heldLock(o.store, { self });
+    if (running) throw refuse(running);
+    writeJson(file, mine);
+  } finally {
+    releaseSetup();
+  }
+  const ours = () => {
+    const current = readJson(file);
+    return current?.pid === self && current.startedAt === at;
+  };
+  const beat = setInterval(() => {
+    try {
+      if (ours()) writeJson(file, { ...mine, heartbeat: new Date().toISOString() });
+    } catch {
+      // the next beat retries
+    }
+  }, CLAIM_HEARTBEAT.ms);
+  beat.unref();
+  return () => {
+    clearInterval(beat);
+    if (ours()) remove(file);
+  };
 }
 
 function engineHolds(lock: EngineLock, dir: string, what: string, stop: string): StoreSetupError {

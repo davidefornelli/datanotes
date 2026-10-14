@@ -28,7 +28,42 @@ Every client goes through that engine:
 
 ## Writes run one at a time
 
-The engine applies writes one at a time, under the lock of its transaction log. Reads don’t wait for that lock: they run in parallel, with each other and with writes.
+The engine runs writes one at a time, in the order they arrive, under the lock of its transaction log. Reads run in parallel with each other.
+
+A write that still runs after a minute lets the next write start, so one stuck write can’t hold up the rest. The engine logs a warning that names the operation.
+
+## Reads wait for writes
+
+The engine runs on one thread. Under a stream of reads, a write would share that thread with every read that arrives while it runs, and take several times longer. So writes go first:
+
+- **A write runs or waits**: a read that arrives waits until no write is left.
+- **A read already under way**: it finishes normally. The write doesn’t wait for it.
+- **A read waits at most `writePriorityMaxWaitMs`**: 100 ms by default. It also starts once 8 writes started after it came. A burst of writes never starves the reads.
+- **A long poll of the change feed**: `list_changes` with `wait_ms` never waits, and never holds a write.
+
+What each operation does is unchanged: a read sees every write that ended before it started. Set `writePriority` to `false` in the [settings](/reference/settings/) to let reads and writes start in the order they arrive. The span `engine.schedule.wait` shows the wait in [traces](/develop/telemetry/#the-spans-the-engine-sends).
+
+## Repeated reads come from memory
+
+A read you send again with the same arguments, with the same token, often has the same answer. The engine keeps the answers of recent reads in memory, and sends the kept answer while nothing it read has changed:
+
+- **A write**: a read of the tables it changed is computed again. Reads of other tables keep their answers.
+- **Undo, a hand edit on disk, a sync tool**: they count as writes. The engine sees them before it answers.
+- **A schema change**: every answer is computed again.
+- **A view**: it depends on the tables its query reads.
+
+Some reads depend on less than a table, or on more:
+
+- **`read_note`**: it depends on its note. Deleting or renaming a folder also counts.
+- **`list_folder`**: it depends on the notes and folders created, deleted or renamed in its folder. Deleting or renaming any folder also counts.
+- **`list_tables`**: it depends on the schema only. A write to a table keeps its answer.
+- **`describe_database`**: it depends on every table, and on the notes whose properties can't be read.
+- **A filter through a link column**: a key such as `project.status` follows the link column `project`. The read also depends on the tables the link leads to.
+- **Reads that follow links or search the text**: `expand`, `within`, the graph operations and `search_notes` depend on the whole vault.
+
+Reads that compare with the current time (`{now}`) are never kept. A read with `{today}` is kept 15 minutes at most. Reads of history, of the change feed and of `system.information_schema` are never kept either.
+
+`readCacheMaxBytes` sets the memory for the answers: 33554432 bytes (32 MiB) by default. The least recently used answers go first. Set it to `0` to turn the cache off.
 
 The engine checks each write against the database as the writes before it left it. A write is checked first, then applied. If another write is applied while the engine checks yours, the engine checks yours again on the new state. It tries up to 5 times before it gives up.
 

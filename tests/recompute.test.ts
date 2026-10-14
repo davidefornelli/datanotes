@@ -7,6 +7,8 @@ import { readOrderedFromMarkdown } from "../src/core/frontmatter";
 import { listMigrations } from "../src/core/journal";
 import { RECOMPUTE_YIELD } from "../src/core/row-ops";
 import { checkTable, insertRow, recomputeColumns, updateRows } from "../src/core/rows";
+import { configureTracer, rootOrChild, setContextStore, withSpan, type SpanData } from "../src/core/tracing";
+import { AsyncContextStore } from "../src/server/tracing";
 import { createDbVault, type DbVault } from "./helpers/db-vault";
 import { described } from "./helpers/descriptions";
 
@@ -14,6 +16,14 @@ INDEX_RETRY.delayMs = 1;
 
 const fm = (v: DbVault, p: string) => Object.fromEntries(readOrderedFromMarkdown(v.read(p)).ordered);
 const P = "Datanotes/main/public/person";
+
+/** The tracer on, with the context store of Node: the exported spans land in the returned list. */
+function traces(): SpanData[] {
+  const out: SpanData[] = [];
+  setContextStore(new AsyncContextStore());
+  configureTracer({ export: (s) => out.push(...s), enabled: () => true, sampleRatio: () => 1, maxSpansPerTrace: () => 100 });
+  return out;
+}
 
 async function people(): Promise<DbVault> {
   const v = createDbVault({});
@@ -84,7 +94,32 @@ describe("recompute", () => {
 });
 
 describe("AutoRecompute", () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    configureTracer(null);
+    setContextStore(null);
+  });
+
+  it("a row changed while a request ran is recomputed in a trace of its own, not in the request's", async () => {
+    const out = traces();
+    const v = await people();
+    await insertRow(v.app, v.settings, { table: "person", values: { name: "Alice", surname: "Brown" } });
+    const calls: unknown[] = [];
+    // real timers: fake ones run the callback in the test's context, which hides the bug
+    const auto = new AutoRecompute(v.app, () => v.settings, async (_a, _s, input) => {
+      calls.push(input);
+      return rootOrChild("engine.op recompute_columns", () => ({ ok: true }) as never);
+    }, undefined, 10);
+    withSpan("request", { root: true }, () => auto.onChanged(v.file(`${P}/Alice.md`)));
+    await vi.waitFor(() => expect(out.map((s) => s.name)).toContain("job auto_recompute"), { timeout: 2000, interval: 5 });
+    const by = Object.fromEntries(out.map((s) => [s.name, s]));
+    expect(calls).toHaveLength(1);
+    expect(by["engine.op recompute_columns"]!.traceId).not.toBe(by.request!.traceId);
+    expect(by["engine.op recompute_columns"]!.parentSpanId).toBe(by["job auto_recompute"]!.spanId);
+    expect(by["job auto_recompute"]!.parentSpanId).toBeUndefined();
+    expect(by["job auto_recompute"]!.attributes["db.collection.name"]).toBe("main.public.person");
+    auto.dispose();
+  });
 
   it("recomputes a row a few seconds after its last change, never a note that is not a row", async () => {
     const v = await people();
@@ -257,9 +292,12 @@ describe("AutoRecompute after a bulk edit outside the engine", () => {
   it("skips rows whose identity columns hold their values; recomputes the others in one operation", async () => {
     const v = await notes(4);
     const calls: RecomputeCall[] = [];
+    const runs: Promise<unknown>[] = [];
     const auto = new AutoRecompute(v.app, () => v.settings, async (a, s, input) => {
       calls.push(input);
-      return recomputeColumns(a, s, input);
+      const run = recomputeColumns(a, s, input);
+      runs.push(run);
+      return run;
     }, undefined, 20);
     // a find and replace that leaves the ids alone: nothing to recompute, the table is not read
     for (let i = 0; i < 4; i++) {
@@ -275,8 +313,10 @@ describe("AutoRecompute after a bulk edit outside the engine", () => {
       auto.onChanged(v.file(`${N}/Note ${i}.md`));
     }
     await vi.waitFor(() => expect(calls).toHaveLength(1), { timeout: 2000 });
+    // the whole recompute, not its first file: the journal is written after the notes
+    await Promise.all(runs);
     expect(calls[0]).toEqual({ table: "main.public.note", paths: [`${N}/Note 1.md`, `${N}/Note 3.md`] });
-    await vi.waitFor(() => expect(fm(v, `${N}/Note 3.md`).id).toMatch(/^[0-9a-f-]{36}$/), { timeout: 2000 });
+    expect(fm(v, `${N}/Note 3.md`).id).toMatch(/^[0-9a-f-]{36}$/);
     expect(fm(v, `${N}/Note 1.md`).id).toMatch(/^[0-9a-f-]{36}$/);
     expect((await listMigrations(v.app, v.settings, {})).migrations.length).toBe(before + 1);
     auto.dispose();

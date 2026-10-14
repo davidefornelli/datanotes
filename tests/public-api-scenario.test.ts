@@ -21,7 +21,8 @@ const PERSON = "Datanotes/main/public/person";
 
 /** Fresh vault and API (default `saveSettings`, no semantic index, no change feed). */
 function library(files: Record<string, string> = {}): { v: DbVault; api: DatanotesPublicApi } {
-  const v = createDbVault(files);
+  // one file per version: the history scenario names them
+  const v = createDbVault(files, { transactionLogFormat: "files" });
   return { v, api: createPublicApi(v.app, () => v.settings) };
 }
 

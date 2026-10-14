@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { operationRequest, ROUTE_PREFIX } from "../src/api/requests";
 import { ChangeFeed, wireEvent } from "../src/core/change-feed";
 import { INDEX_RETRY } from "../src/core/engine";
+import { invalidateFiles } from "../src/core/file-cache";
 import { docsUrl, violationGuidance } from "../src/core/hints";
 import { NOOP_TELEMETRY, setTelemetry } from "../src/core/telemetry";
 import { frontmatterError, rawFrontmatterValue, unreadableMessage, unreadableRowOf, unreadableRows } from "../src/core/unreadable";
@@ -83,6 +84,7 @@ describe("the unreadable rows of a vault", () => {
   it("are found on a host whose index throws on broken YAML; a note held by another program is skipped", async () => {
     const v = logVault({ "Notes/held.md": "---\ntable: log\nkind: [walk\n---\n" });
     broken(v);
+    invalidateFiles(v.app, ["Notes/held.md"]); // not read before (the headless host keeps the notes it read at start)
     const vault = v.app.vault as unknown as { read(f: { path: string }): Promise<string> };
     const real = vault.read.bind(vault);
     vi.spyOn(vault, "read").mockImplementation(async (f) => {

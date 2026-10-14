@@ -8,15 +8,29 @@
 
 import { OtlpLogExporter, otlpFromEnv, otlpProtocol, parseResourceAttributes, type OtlpOptions } from "../api/otlp";
 import type { AttrValue, Severity, Telemetry, TelemetrySettings } from "../core/telemetry";
+import { activeSpanContext } from "../core/tracing";
 
 type Env = Record<string, string | undefined>;
 
-/** The exporter options for these settings and variables, or null when export is off. */
-export function resolveOtlp(s: TelemetrySettings, env: Env, base: { serviceVersion: string; resource?: Record<string, AttrValue> }): OtlpOptions | null {
-  const fromEnv = otlpFromEnv(env, { serviceName: s.telemetryServiceName, serviceVersion: base.serviceVersion });
+type Base = { serviceVersion: string; resource?: Record<string, AttrValue> };
+
+/**
+ * The exporter options for these settings and variables, or null when export is off. `base` may
+ * be a function: the sink asks for every record, and then builds the resource only when export is on.
+ */
+export function resolveOtlp(s: TelemetrySettings, env: Env, given: Base | (() => Base)): OtlpOptions | null {
   const disabled = (env.OTEL_SDK_DISABLED ?? "").trim().toLowerCase() === "true" || (env.OTEL_LOGS_EXPORTER ?? "").trim().toLowerCase() === "none";
-  if (disabled || (!fromEnv && !s.telemetryEnabled)) return null;
-  const resource = { ...base.resource, ...parseResourceAttributes(env.OTEL_RESOURCE_ATTRIBUTES) };
+  if (disabled) return null;
+  const fromEnv = otlpFromEnv(env, { serviceName: s.telemetryServiceName });
+  if (!fromEnv && !s.telemetryEnabled) return null;
+  const base = typeof given === "function" ? given() : given;
+  const environment = s.telemetryEnvironment?.trim();
+  const resource = {
+    ...base.resource,
+    // both keys: the older semantic-convention key is still the one some backends group by
+    ...(environment ? { "deployment.environment.name": environment, "deployment.environment": environment } : {}),
+    ...parseResourceAttributes(env.OTEL_RESOURCE_ATTRIBUTES),
+  };
   const envProtocol = otlpProtocol(env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL ?? env.OTEL_EXPORTER_OTLP_PROTOCOL);
   return {
     endpoint: fromEnv?.endpoint ?? s.telemetryEndpoint,
@@ -51,7 +65,8 @@ export class OtlpSink implements Telemetry {
   }
 
   log(severity: Severity, body: string, attributes?: Record<string, AttrValue>): void {
-    this.current()?.log(severity, body, attributes);
+    // inside a span, the record names it: the backend links the log to its trace
+    this.current()?.log(severity, body, attributes, activeSpanContext());
   }
 
   async flush(): Promise<void> {

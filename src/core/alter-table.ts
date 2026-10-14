@@ -8,7 +8,7 @@ import { emptyChangeSet, type ChangeSet } from "./changeset";
 import { transactionLogDir, listVersions } from "./transaction-log";
 import { storeList } from "./store";
 import { readersBlocking } from "./link-paths";
-import { cachedMetastore, catalogTablePath, loadMetastore, metastorePath, orderedToEntry, refOf, rowTableFull, setTableEntry, tableTags, withTableTags, type CatalogRef } from "./metastore";
+import { cachedMetastore, catalogTablePath, loadMetastore, metastorePath, orderedToEntry, refOf, rowTableFull, setTableEntries, tableTags, withTableTags, type CatalogRef } from "./metastore";
 import {
   finish,
   serializeOptions,
@@ -116,8 +116,8 @@ async function relocateTable(
     }
     if (rowTemplate === null || (typeof rowTemplate === "string" && rowTemplate.trim() === "")) delete entry.row_template;
     else if (typeof rowTemplate === "string") entry.row_template = rowTemplate;
-    let after = t.catalog.ref.full !== ref.full ? setTableEntry(text, t.catalog.ref, null) : text;
-    after = setTableEntry(after, ref, tags === undefined ? entry : withTableTags(entry, tags));
+    // a move: the old entry removed and the new one set, in one edit of the text
+    const after = setTableEntries(text, [...(t.catalog.ref.full !== ref.full ? [[t.catalog.ref, null] as const] : []), [ref, tags === undefined ? entry : withTableTags(entry, tags)] as const]);
     const from = t.catalog.ref.full;
     cs = emptyChangeSet("alter_table", from === ref.full ? `alter table ${from}` : `move table ${from} to ${ref.full}`, catalogTablePath(settings, ref.full));
     if (after !== text) cs.texts.push({ path: metastorePath(settings), before: text, after });

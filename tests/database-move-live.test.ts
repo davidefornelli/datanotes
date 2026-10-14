@@ -10,13 +10,15 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { NodeVault } from "../src/node/node-app";
 import type { RunningService } from "../src/node/service";
 import { movedVault, post } from "./helpers/moved-vault";
 
 const running: RunningService[] = [];
 afterEach(async () => {
   for (const s of running.splice(0)) await s.stop();
+  vi.restoreAllMocks();
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -115,6 +117,26 @@ describe("a hand move of the database folder while the engine runs", () => {
     expect(old.map((r) => r.path)).toEqual([first]);
     expect((await post(v.port, "operations/undo_migration/", { migration_id: insert.migration_id })).status).toBe(200);
     expect(fs.existsSync(path.join(v.root, first))).toBe(false);
+  }, 120_000);
+
+  it("after one slow comparison (a GC pause, a busy CPU), a request made right after the move still waits for it", async () => {
+    const v = await movedVault(20);
+    // no poll in the test's time: only the comparison before each request can see the move
+    const svc = await v.start({ pollMs: 3_600_000 });
+    running.push(svc);
+    const rescan = NodeVault.prototype.rescan;
+    const scans = vi.spyOn(NodeVault.prototype, "rescan").mockImplementationOnce(function (this: NodeVault) {
+      const end = performance.now() + 80; // over the 50 ms budget, once
+      while (performance.now() < end);
+      return rescan.call(this);
+    });
+    expect((await post(v.port, "operations/list_tables/", {})).status).toBe(200);
+    expect(scans).toHaveBeenCalledTimes(1);
+    await renameFolder(path.join(v.root, "Datanotes"), path.join(v.root, "Archive", "Db"));
+    const check = await post(v.port, "operations/check_table/", { table: "task" });
+    expect(check.status).toBe(200);
+    expect(JSON.stringify(check.json)).not.toContain("broken_link");
+    expect(svc.settings.databaseFolder).toBe("Archive/Db");
   }, 120_000);
 
   it("in case only (Datanotes to datanotes), where the file system ignores case too", async () => {

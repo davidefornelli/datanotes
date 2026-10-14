@@ -10,7 +10,23 @@ export { operationRequest, operationRoute, CALLABLE_OPERATIONS, OperationInputEr
 export { resultOf, describeRefusal, describeBatch, type OperationResult } from "./results.js";
 export { estimateTokens } from "./tokens.js";
 export { argumentsOf, checkArguments, DOCS_BASE, guidanceIn, guidedText, toolDocs, type ArgumentProblem, type Guidance } from "./guidance.js";
-export { OtlpLogExporter, otlpFromEnv, parseOtlpHeaders, type OtlpOptions, type Severity, type AttrValue } from "./otlp.js";
+export { OtlpLogExporter, OtlpTraceExporter, otlpFromEnv, otlpTracesFromEnv, samplerRatioFromEnv, parseOtlpHeaders, type OtlpOptions, type Severity, type AttrValue } from "./otlp.js";
+export {
+  Tracer,
+  TraceSpan,
+  parseTraceparent,
+  formatTraceparent,
+  traceHeaders,
+  newTraceId,
+  newSpanId,
+  TRACEPARENT_HEADER,
+  TRACESTATE_HEADER,
+  type TraceContext,
+  type TracerOptions,
+  type SpanRecord,
+  type SpanKind,
+  type SpanStatusCode,
+} from "./tracing.js";
 export {
   DatanotesClient,
   DatanotesError,
@@ -20,6 +36,8 @@ export {
   type ClientOptions,
   type HttpRequest,
   type HttpResponse,
+  type RecordedToolCall,
   type ToolCallRecord,
+  type TraceParent,
   type Transport,
 } from "./client.js";

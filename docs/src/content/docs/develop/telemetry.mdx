@@ -1,0 +1,290 @@
+---
+title: Send logs and traces to your observability backend
+description: "Send the logs and traces of the engine, the MCP server and the apps to any OpenTelemetry backend, and find slow operations."
+sidebar:
+  label: Logs, Traces and Telemetry
+  order: 7
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+Every part of Datanotes sends logs and traces with OpenTelemetry, the vendor-neutral standard. Any backend with an OpenTelemetry Protocol (OTLP) endpoint can receive them. This page shows you how to:
+
+- Point the engine, the Model Context Protocol (MCP) server and the apps at your backend
+- Read the spans the engine sends, and what each one measures
+- Follow one agent call across the MCP server and the engine
+- Find the operations that are slow, and why
+
+Datanotes has no vendor-specific code.
+
+## What Datanotes sends and where
+
+Datanotes sends two signals over HTTP:
+
+- **Logs** to `your_endpoint/v1/logs`
+- **Traces** to `your_endpoint/v1/traces`
+
+It encodes them as `http/protobuf`, the OpenTelemetry default, or as `http/json`. Any OpenTelemetry Collector receives them, and so do these backends, among others:
+
+- SigNoz
+- Grafana: Alloy, Tempo, Loki or Grafana Cloud
+- Elastic, Datadog, Honeycomb, New Relic and Dynatrace
+
+Datanotes sends no metrics: your backend computes rates and latency percentiles from the spans. For a backend that accepts only gRPC, put an OpenTelemetry Collector in front of it. When the collector doesn't answer, Datanotes counts the records and spans as lost and keeps working.
+
+## Configure the export with environment variables
+
+The engine, the MCP server and the apps all read the standard OpenTelemetry variables:
+
+| Variable | Meaning |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | The collector's base address, for example `http://127.0.0.1:4318` |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | Or the full `…/v1/logs` address |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Or the full `…/v1/traces` address |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `key=value,key2=value2`, with URL-encoded values: the API key or `Authorization` your backend asks for |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` (default) or `http/json` |
+| `OTEL_SERVICE_NAME` | The service name; defaults to `datanotes`, `datanotes-mcp` (for `datanotes mcp`) or the app's name |
+| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes, for example `team=home` |
+| `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` | `traceidratio` with a share from 0 to 1, `always_on` or `always_off`, plain or with the `parentbased_` prefix |
+| `OTEL_SDK_DISABLED=true` | Turns all the export off |
+| `OTEL_LOGS_EXPORTER=none` or `OTEL_TRACES_EXPORTER=none` | Turns off the logs or the traces only |
+
+Datanotes also reads the `…_LOGS_…` and `…_TRACES_…` variants of the headers and protocol variables. Without an endpoint, it sends nothing.
+
+## Configure the engine in its settings file
+
+Instead of the variables, you can configure the engine in its settings file, `settings.json` in its store. `datanotes store path` shows where. A variable you set overrides the matching setting:
+
+```json
+{
+  "telemetryEnabled": true,
+  "telemetryEndpoint": "http://127.0.0.1:4318",
+  "telemetryServiceName": "datanotes",
+  "telemetryEnvironment": "home",
+  "telemetryProtocol": "http/protobuf",
+  "telemetryHeaders": {},
+  "telemetryTraces": true,
+  "telemetryTraceSampleRatio": 1,
+  "telemetryMaxSpansPerTrace": 1000,
+  "telemetrySlowSpanMs": 0
+}
+```
+
+Each setting does one thing:
+
+- **`telemetryEnabled`** turns the export of logs and traces on.
+- **`telemetryEnvironment`** names the environment, such as `dev` or `home`. The engine sends it as `deployment.environment.name` and as the older `deployment.environment`, which some backends group by.
+- **`telemetryHeaders`** holds what your backend asks for, such as an API key. To keep a key out of the file, set `OTEL_EXPORTER_OTLP_HEADERS` instead.
+- **`telemetryTraces`** sends the traces too. It is on by default: turning telemetry on gives you both signals.
+- **`telemetryTraceSampleRatio`** keeps that share of new traces, from 0 to 1. The default, 1, keeps every trace. A trace that a caller started follows the caller's choice.
+- **`telemetryMaxSpansPerTrace`** caps the spans of one trace. The engine drops the rest and counts them in `datanotes.spans_dropped` on the trace's first span.
+- **`telemetrySlowSpanMs`** logs a request, an operation or a background job as a WARN when it lasts at least that many milliseconds. 0 turns it off.
+
+The engine reads the settings again while it runs, so a change applies within a few seconds. With traces off, tracing costs the engine one check per instrumented call.
+
+## What the engine logs
+
+The engine logs these events:
+
+- Every HTTP request and operation, with the route, duration, outcome and actor
+- The tool calls MCP servers report, with the tool, duration, result size and client
+- Refused requests
+- The semantic index and git sync
+- Errors
+
+A record made during a traced request names its trace. The OTLP record carries the trace and span IDs, so your backend links the log to the trace. The log files carry them as `trace_id` and `span_id`. While a request's trace is sent, its INFO records become DEBUG records: the span already says what they say.
+
+Whatever the collector does, the engine also writes its records to files in `logs/`, in its store outside the vault. The `fileLogEnabled` setting turns these files on or off, and `logRetentionDays` sets how long the engine keeps them.
+
+## The spans the engine sends
+
+A trace is a tree of spans. Each span measures one piece of work and names its parent. A request to the engine gives this tree:
+
+```text
+POST /datanotes/operations/insert_row/      SERVER: the HTTP request
+└── engine.op insert_row                    the operation
+    ├── engine.schedule.wait                a read waits for writes (only then)
+    ├── engine.settle                       wait for the vault to settle
+    └── engine.insert_row                   the engine's work
+        ├── engine.autolink                 links found in the text
+        ├── engine.checks                   CHECKs and link rules
+        ├── engine.lock.acquire             wait for the write lock
+        └── engine.lock.hold                work under the lock
+            ├── engine.transaction_log      hand edits logged first
+            ├── engine.apply                files written
+            │   └── engine.journal.append   the undo entry
+            └── engine.transaction_log      the operation's commit
+```
+
+A read gives a similar tree under `engine.query.execute`:
+
+- **`engine.query.view`** runs the stored query of a view.
+- **`engine.query.plan`** resolves dates and `within` and compiles the filter.
+- **`engine.query.scan`** reads every row of the table. Its `datanotes.query.plan` is `full_scan`: Datanotes has no indexes, and a file cache spares the reads of unchanged notes.
+- **`engine.query.filter`**, **`engine.query.join`**, **`engine.query.group`**, **`engine.query.sort`** and **`engine.query.project`** follow, as the query needs them.
+
+Other spans cover the rest of the engine's time:
+
+- **`engine.metastore.parse`** when `metastore.yaml` changed and the engine parses it again
+- **`engine.history.read`** for a read as of a version or a time
+- **`engine.graph.build`** when a graph operation rebuilds the link graph after a change. Calls that need it at the same time wait for that one build and count it in `datanotes.graph.build_waits`.
+- **`engine.change_feed.record`** for the change feed's events of an operation
+- **`POST`** (CLIENT) for each webhook delivery, with `url.full`, `server.address` and `http.response.status_code`
+- **`job <name>`** for background work. The jobs are:
+  - `job hand_edits_log`
+  - `job adopt_note`
+  - `job schema_reload`
+  - `job semantic_index`
+  - `job store_maintenance`
+  - `job change_feed_prune`
+  - `job change_feed_hand_edits`
+  - `job transaction_log_warmup`
+  - `job auto_recompute`
+  - `job inverse_links`
+  - `job datanotes_start`, the engine's start
+
+  Background work is always a trace of its own, even when a request saw the change behind it. After a start, `job transaction_log_warmup` reads each table's transaction log once, one table at a time, so a write waits for one table at most.
+
+### Attributes of the operation span
+
+The `engine.op <operation>` span follows the conventions of database spans. Most backends list these spans as database calls:
+
+| Attribute | Meaning |
+|---|---|
+| `db.system.name`, `db.system` | `datanotes` |
+| `db.operation.name` | The operation, such as `select_rows` |
+| `db.collection.name` | The table or view the call names |
+| `db.namespace` | The catalog and schema, when the call gives a full name |
+| `db.query.summary` | The operation and its table, such as `select_rows task` |
+| `db.response.returned_rows` | The rows the call returned |
+| `datanotes.rows_scanned` | The rows the engine read to answer |
+| `datanotes.notes_changed`, `datanotes.files_created` | What a write changed |
+| `datanotes.migration_id` | The write's journal entry, for `undo_migration` |
+| `datanotes.dry_run` | Whether the call was a dry run |
+| `datanotes.long_poll` | `true` for a `list_changes` call that waits for changes |
+| `datanotes.schedule.class` | `read`, `write` or `free`: how [write priority](/develop/concurrency/#reads-wait-for-writes) treats the call |
+| `datanotes.schedule.wait_ms` | How long the call waited for writes before it started |
+| `datanotes.schedule.released` | Why a waiting read started: `writes_done`, `max_wait` or `max_writes` |
+| `datanotes.read_cache` | For a read: `hit` (answered from memory), `miss` or `not_kept` ([read cache](/develop/concurrency/#repeated-reads-come-from-memory)) |
+| `error.type` | Why the call failed or was refused |
+
+The SERVER span adds `http.request.method`, `http.route`, `http.response.status_code`, `client.address` and `user_agent.original`. It also names the caller: `datanotes.token.name` holds the token's name, never the token. `datanotes.client.harness` and `datanotes.client.model` hold what the agent says of itself.
+
+### Calls to the vault
+
+Reading a table of thousands of notes means thousands of file reads. The engine doesn't make a span of each one. It adds them up on the span that made them and on its operation span:
+
+- `datanotes.io.read_count`, `datanotes.io.read_chars` and `datanotes.io.read_ms`
+- The same for `write`, `create`, `list`, `exists`, `rename` and the other calls
+- `datanotes.cache.hits` and `datanotes.cache.misses` of the file cache
+- `datanotes.cache.text_reads` and `datanotes.cache.text_source`: note texts the file cache read again, or took from the [vault index](/administration/limits/#start-faster-with-the-vault-index)
+- `datanotes.validate.rows` and `datanotes.validate.ms`, `datanotes.checks.rows` and `datanotes.checks.ms` for the checks run once per row
+
+`_chars` counts characters, not bytes: the length of the text as JavaScript counts it, in UTF-16 code units. In English Markdown, characters and bytes are about the same. Accents, other alphabets and emoji take more bytes than characters. For `list`, `_chars` counts the files and folders listed. The calls that move no text count 0.
+
+A single call that takes 20 ms or more gets a span of its own, `vault.<call>`, with its `file.path` and `datanotes.io.chars`.
+
+### Errors and refusals
+
+The engine tells failures and refusals apart:
+
+- **A failure** is a bug, a disk error, a write that failed partway or a 5xx answer. Its span has status ERROR and an `exception` event with the type, message and stack.
+- **A refusal** is a call the caller can fix: bad arguments, an unknown table, a broken CHECK. Its span keeps the status unset and sets `error.type`, such as `violation` or `TableNotFoundError`.
+
+An empty answer to a `list_changes` poll sends no trace and no log line: services poll every few seconds.
+
+## Follow one agent call across services
+
+One agent call is one trace across the MCP server and the engine:
+
+<Steps>
+
+1. The MCP server makes a SERVER span, `tools/call <tool>`. It continues the client's trace when the client sends `traceparent` in the call's `_meta`.
+2. Each request it sends to the engine is a CLIENT span, child of the tool's span. The request carries that span as its `traceparent` header.
+3. The engine's SERVER span continues that trace, and its operation spans follow.
+
+</Steps>
+
+The tool span carries `mcp.method.name`, `gen_ai.operation.name` (`execute_tool`), `gen_ai.tool.name` and `mcp.session.id`. Find the agent call by its tool or session, open the trace, and you see where the time went in both processes.
+
+The engine, the MCP server and the apps also log the same `session` and `tool` for each agent call. `session` is the first 16 characters of the MCP session ID.
+
+## Find the slow operations
+
+Your backend computes the latency of each span name from the traces. To find where the engine spends its time:
+
+<Steps>
+
+1. List the `engine.op <operation>` spans by duration, or open your backend's database calls view. Leave out the spans with `datanotes.long_poll`: they wait on purpose.
+2. Open a slow trace and compare its children. A long `engine.lock.acquire` means the call waited for another write. A long `engine.lock.hold` means the write itself was slow. A long `engine.schedule.wait` means a read waited for writes to end.
+3. In a read, compare `engine.query.scan` with the rest. A slow scan with many `datanotes.cache.misses` reads many notes from disk. A slow scan with few misses works on a large table: narrow it with `where`, or split the table.
+4. Look at the `datanotes.io.*_ms` attributes of the operation span. They show how much of its time went to the disk.
+5. Set `telemetrySlowSpanMs` to log the slow calls as WARN records, and alert on them.
+
+</Steps>
+
+## Configure the MCP server and the apps
+
+The MCP server and the apps read the same variables, and each has its own alternative:
+
+- **`datanotes mcp`**: the `--otlp-endpoint your_endpoint` option, for its logs and traces
+- **Apps**: an `otlp` block in the app's configuration, `{"endpoint": "http://127.0.0.1:4318", "headers": {}, "serviceName": "…"}`
+
+## Continue a trace from your own program
+
+Your program continues its trace in the engine when it sends the W3C `traceparent` header, and `tracestate` when it has one. `datanotes/client` does it for you with two options of `DatanotesClient`:
+
+- **`trace`** is the trace to continue: a `traceparent` value, a context, or a function that returns the current one.
+- **`tracer`** makes a CLIENT span for each request, child of `trace`, and sends that span as the engine's parent.
+
+```ts
+import {
+  DatanotesClient,
+  OtlpTraceExporter,
+  Tracer,
+  otlpTracesFromEnv,
+} from "datanotes/client";
+
+const otlp = otlpTracesFromEnv(process.env, { serviceName: "my-app" });
+const exporter = otlp ? new OtlpTraceExporter(otlp) : null;
+const tracer = new Tracer({ export: (s) => exporter?.export(s) });
+
+const run = tracer.startSpan("import films", { kind: "server" });
+const client = new DatanotesClient({
+  url: "http://127.0.0.1:27150",
+  token: process.env.DATANOTES_TOKEN ?? "",
+  tracer,
+  trace: run.context,
+});
+await client.call("insert_row", {
+  table: "film",
+  values: { title: "Arrival" },
+});
+run.end();
+await exporter?.close();
+```
+
+Without a tracer, pass the incoming header as it is. A call can also name its own trace:
+
+```ts
+await client.call("select_rows", { table: "film" }, undefined, {
+  trace: request.headers.traceparent,
+});
+```
+
+Any HTTP client works too: send `traceparent: 00-<trace id>-<span id>-01` with the request.
+
+## Send logs from your own program
+
+`datanotes/client` exports the log exporter that Datanotes uses, so your own programs can log the same way:
+
+```ts
+import { OtlpLogExporter, otlpFromEnv } from "datanotes/client";
+
+const otlp = otlpFromEnv(process.env, { serviceName: "my-app" });
+const log = otlp ? new OtlpLogExporter(otlp) : null;
+log?.log("INFO", "imported films", { count: 8 });
+await log?.close();
+```
+
+`otlpFromEnv` reads the variables above and returns `null` when you set no endpoint or turn the export off. The program then logs nothing. Pass a span's context as the fourth argument of `log` to link the record to that span. Call `close()` before the program exits to send the remaining records.

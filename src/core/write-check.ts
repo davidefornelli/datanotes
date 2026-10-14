@@ -5,7 +5,8 @@
  * project closes. Each change set applied raises the database's generation. A write run through
  * `runWrite` remembers the generation it started on, and `finish` applies it only if no other
  * write came in between; otherwise it answers STALE_WRITE and `runWrite` runs the operation again,
- * on the database as it is now.
+ * on the database as it is now. Only an attempt `finish` found overtaken is searched for the
+ * conflict: an answer that merely quotes its text (a value written) is never run again.
  *
  * AsyncLocalStorage needs Node; elsewhere writes run unchecked, as before (actor.ts does the same).
  */
@@ -22,6 +23,8 @@ const GENERATION = new WeakMap<App, number>();
 interface WriteContext {
   /** The generation the write started on, moved on by its own applies (a batch's steps). */
   gen: number;
+  /** finish found this attempt overtaken (staleWrite): runWrite then looks for the conflict in its answer. */
+  stale: boolean;
 }
 
 interface Storage {
@@ -45,7 +48,9 @@ const generation = (app: App): number => GENERATION.get(app) ?? 0;
 /** Did another write apply since this write started? Only inside `runWrite`. */
 export function staleWrite(app: App): boolean {
   const ctx = storage?.getStore();
-  return ctx !== undefined && ctx.gen !== generation(app);
+  if (ctx === undefined || ctx.gen === generation(app)) return false;
+  ctx.stale = true; // runWrite looks for the conflict in this attempt's answer
+  return true;
 }
 
 /** A change set was applied: the database moves to a new generation, which this write has seen. */
@@ -58,15 +63,19 @@ export function wrote(app: App): void {
 
 /**
  * Run a write so that `finish` refuses to apply it on a database another write changed meanwhile,
- * and run it again when it was refused that way (`isStale`), at most WRITE_ATTEMPTS times.
+ * and run it again when `finish` found it overtaken and its answer holds the conflict (`isStale`),
+ * at most WRITE_ATTEMPTS times.
  */
 export async function runWrite<T>(app: App, fn: () => Promise<T>, isStale: (result: T) => boolean): Promise<T> {
   /* v8 ignore next -- platform: a runtime without node:async_hooks (Node always has it) */
   if (!storage) return fn();
   const s = storage;
-  const attempt = () => s.run({ gen: generation(app) }, fn);
+  let ctx: WriteContext = { gen: 0, stale: false };
+  // a fresh context per attempt: one overtaken attempt never makes the next look overtaken
+  const attempt = () => s.run((ctx = { gen: generation(app), stale: false }), fn);
   let result = await attempt();
-  for (let n = 1; n < WRITE_ATTEMPTS && isStale(result); n++) result = await attempt();
+  // only an attempt finish found overtaken can hold the conflict: other answers are never searched
+  for (let n = 1; n < WRITE_ATTEMPTS && ctx.stale && isStale(result); n++) result = await attempt();
   return result;
 }
 

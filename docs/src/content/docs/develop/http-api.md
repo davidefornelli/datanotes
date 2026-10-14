@@ -76,6 +76,16 @@ Several clients can write at the same time. [Concurrent writes](/develop/concurr
 
 The engine binds to `127.0.0.1` unless you start it with `--host`. It answers no Cross-Origin Resource Sharing (CORS) preflight, so web pages can’t call it. To reach it from another device, follow the [security model](/guides/security/security-model/).
 
+## Get large answers compressed
+
+A client on another machine gets answers of 16 KB or more compressed with gzip. It asks for that with the `Accept-Encoding: gzip` header, as most HTTP clients do. A client on the engine’s machine gets them as they are: compressing would cost the engine more time than it saves.
+
+The `httpCompression` [setting](/reference/settings/) changes this:
+
+- **`remote`**: clients on other machines only (the default).
+- **`always`**: this machine’s clients too.
+- **`off`**: no compression.
+
 ## Generate a client or explore the routes
 
 The [HTTP API reference](/api/) documents every route, generated from the same OpenAPI description, [openapi.json](/openapi.json). From JavaScript, use the [JavaScript client](/develop/client/). Agents use the [Model Context Protocol (MCP) server](/start/connect-agents/).

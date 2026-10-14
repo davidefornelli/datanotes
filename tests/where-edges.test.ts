@@ -137,7 +137,7 @@ describe("file columns", () => {
 
   it("a row with no file yet (as a change set creates it) has no modification time, and no backlinks without the vault", async () => {
     const t = await loadTable(v.app, v.settings, "area");
-    const fresh: LoadedRow = { file: { path: `${A}/A6.md` } as TFile, ordered: [["table", "main.work.area"], ["code", "A6"]], body: "" };
+    const fresh: LoadedRow = { file: { path: `${A}/A6.md` } as TFile, ordered: [["table", "main.work.area"], ["code", "A6"]] };
     const get = rowGetter(null, t, v.settings, "Europe/Rome");
     expect(["path", "code", "file_name", "file_link", "file_modified", "file_backlink_count"].map((c) => get(fresh, c))).toEqual([
       `${A}/A6.md`,

@@ -10,10 +10,12 @@ import { loadTableAsOf, TableAbsentError, type HistoricalTable } from "./history
 import { informationSchemaTable, informationSchemaTableData, resolveViewSelect } from "./catalog-ops";
 import { resolveThisTokens, type Host } from "./this-tokens";
 import { baseChain, catalogTables, loadMetastore } from "./metastore";
-import { loadRows, loadTable, OperationInputError, type LoadedRow, type LoadedTable } from "./engine";
+import { loadRows, loadRowsWhere, loadTable, OperationInputError, type LoadedRow, type LoadedRowWithBody, type LoadedTable } from "./engine";
+import { readFrontmatter } from "./file-cache";
 import { fmGet, readOrderedFromMarkdown } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
 import { traced } from "./telemetry";
+import { phase } from "./tracing";
 import { resolveDateTokens } from "./datetime";
 import {
   compileExpr,
@@ -117,12 +119,87 @@ function parseOrder(orderBy: string | string[] | undefined): { col: string; desc
   return list.map((o) => (o.startsWith("-") ? { col: o.slice(1), desc: true } : { col: o, desc: false }));
 }
 
-function compareValues(a: unknown, b: unknown): number {
-  const ea = isEmptyValue(a);
-  const eb = isEmptyValue(b);
-  if (ea || eb) return ea === eb ? 0 : ea ? 1 : -1; // empties last
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b));
+/**
+ * A value as the sort compares it, worked out once per row instead of once per comparison: empty
+ * (empties go last), a number, or else its text.
+ */
+interface SortKey {
+  empty: boolean;
+  num: number | null;
+  text: string;
+}
+
+function sortKey(v: unknown): SortKey {
+  if (isEmptyValue(v)) return { empty: true, num: null, text: "" };
+  return { empty: false, num: typeof v === "number" ? v : null, text: String(v) };
+}
+
+/** Empty values last, numbers by value, anything else by its text in the locale's order. */
+function compareKeys(a: SortKey, b: SortKey): number {
+  if (a.empty || b.empty) return a.empty === b.empty ? 0 : a.empty ? 1 : -1;
+  if (a.num !== null && b.num !== null) return a.num - b.num;
+  return a.text.localeCompare(b.text);
+}
+
+/**
+ * The order of `n` items by their keys (one list per `order` entry): the first `need` positions of
+ * a stable sort, so equal items keep their order. Items already in order are not sorted; when only
+ * a page is needed, a heap keeps the best `need` (the index breaks ties, as the stable sort does).
+ */
+function orderedIndexes(n: number, keys: readonly (readonly SortKey[])[], order: readonly { desc: boolean }[], need: number): number[] {
+  const cmp = (i: number, j: number): number => {
+    for (let o = 0; o < order.length; o++) {
+      const c = compareKeys(keys[o]![i]!, keys[o]![j]!);
+      if (c !== 0) return order[o]!.desc ? -c : c;
+    }
+    return 0;
+  };
+  const all = Array.from({ length: n }, (_, i) => i);
+  let sorted = true;
+  for (let i = 1; i < n && sorted; i++) sorted = !(cmp(i - 1, i) > 0);
+  if (sorted) return all;
+  // ties broken by position: a total order, the same as the stable sort's
+  const before = (i: number, j: number): boolean => {
+    const c = cmp(i, j);
+    return c < 0 || (!(c > 0) && i < j);
+  };
+  if (need <= 0) return [];
+  if (need * 4 > n) return all.sort(cmp);
+  // a max-heap of the best `need` so far, the worst at its root
+  const heap: number[] = [];
+  const down = (k: number) => {
+    for (;;) {
+      const l = 2 * k + 1;
+      const r = l + 1;
+      let worst = k;
+      if (l < heap.length && before(heap[worst]!, heap[l]!)) worst = l;
+      if (r < heap.length && before(heap[worst]!, heap[r]!)) worst = r;
+      if (worst === k) return;
+      [heap[k], heap[worst]] = [heap[worst]!, heap[k]!];
+      k = worst;
+    }
+  };
+  for (let i = 0; i < n; i++) {
+    if (heap.length < need) {
+      heap.push(i);
+      for (let k = heap.length - 1; k > 0; ) {
+        const p = (k - 1) >> 1;
+        if (!before(heap[p]!, heap[k]!)) break;
+        [heap[k], heap[p]] = [heap[p]!, heap[k]!];
+        k = p;
+      }
+    } else if (before(i, heap[0]!)) {
+      heap[0] = i;
+      down(0);
+    }
+  }
+  return heap.sort((i, j) => cmp(i, j) || i - j);
+}
+
+/** `rows` in the order `order` gives their values (`valueOf`): the first `need` of them. */
+function orderBy<T>(rows: readonly T[], order: readonly { col: string; desc: boolean }[], valueOf: (row: T, col: string) => unknown, need: number): T[] {
+  const keys = order.map((o) => rows.map((r) => sortKey(valueOf(r, o.col))));
+  return orderedIndexes(rows.length, keys, order, need).map((i) => rows[i]!);
 }
 
 function asQueryRow(r: LoadedRow, get: RowGetter): QueryRow & { src: LoadedRow } {
@@ -276,19 +353,12 @@ async function selectUnion(app: App, settings: DatanotesSettings, input: SelectI
     for (const row of r.rows) rows.push({ ...row, _source: r.view ?? b.table });
   }
   const order = parseOrder(input.orderBy);
-  rows.sort((a, b) => {
-    for (const o of order) {
-      const c = compareValues(a[o.col], b[o.col]);
-      if (c !== 0) return o.desc ? -c : c;
-    }
-    return 0;
-  });
   const limit = Math.min(Math.max(input.limit ?? 100, 0), 1000);
   const offset = Math.max(input.offset ?? 0, 0);
   return {
     table: "union",
     total: rows.length,
-    rows: rows.slice(offset, offset + limit),
+    rows: orderBy(rows, order, (r, col) => r[col], offset + limit).slice(offset, offset + limit),
     ...(input.timestamp !== undefined ? { timestamp: input.timestamp, versions: sortedVersions(read) } : {}),
   };
 }
@@ -301,8 +371,8 @@ const sortedVersions = (read: Map<string, number>) => Object.fromEntries([...rea
  */
 async function selectImpl(app: App, settings: DatanotesSettings, input: SelectInput, depth = 0, read = new Map<string, number>()): Promise<SelectResult> {
   if (input.host && input.where) input = { ...input, where: resolveThisTokens(input.where, input.host) };
-  if (input.union) return selectUnion(app, settings, input, depth, read);
-  if (input.table.startsWith("base:")) return selectBase(app, settings, input, depth, read);
+  if (input.union) return phase("engine.query.union", () => selectUnion(app, settings, input, depth, read), { "datanotes.branches": input.union.length });
+  if (input.table.startsWith("base:")) return phase("engine.query.base", () => selectBase(app, settings, input, depth, read), { "db.collection.name": input.table });
   const info = informationSchemaTable(input.table);
   if (info) {
     if (input.version !== undefined || input.timestamp !== undefined) {
@@ -316,7 +386,8 @@ async function selectImpl(app: App, settings: DatanotesSettings, input: SelectIn
     if (depth >= MAX_VIEW_DEPTH) {
       throw new OperationInputError(`views nested deeper than ${MAX_VIEW_DEPTH} (a cycle?) at ${view.view}`, guide(`A view reads another view that reads it back: make one of them read its table (create_view with replace: true).`, "views"));
     }
-    return { ...(await selectImpl(app, settings, view.input, depth + 1, read)), view: view.view };
+    // a view runs its stored query, narrowed by the caller's
+    return { ...(await phase("engine.query.view", () => selectImpl(app, settings, view.input, depth + 1, read), { "datanotes.view": view.view, "db.collection.name": view.input.table })), view: view.view };
   }
   if (input.version === undefined && input.timestamp === undefined) return selectOn(app, settings, input, null, read);
   if (input.join && input.version !== undefined) throw perTableVersion("a join reads two tables");
@@ -327,6 +398,24 @@ async function selectImpl(app: App, settings: DatanotesSettings, input: SelectIn
   read.set(hist.table.catalog.ref.full, hist.version);
   const r = await selectOn(app, settings, input, hist, read);
   return { ...r, version: hist.version, timestamp: hist.timestamp, ...(input.join ? { versions: sortedVersions(read) } : {}) };
+}
+
+/**
+ * A row of the page with its body (include_body): its properties and body from one version of
+ * its note, read now (a note changed since the scan gives both from its new text). A row of the
+ * past (time travel, information_schema) keeps the body it carries. Null when the note was
+ * deleted since the scan: the page leaves it out.
+ */
+async function pageRowWithBody(app: App, settings: DatanotesSettings, r: LoadedRow): Promise<LoadedRowWithBody | null> {
+  const own = (r as Partial<LoadedRowWithBody>).body;
+  if (typeof own === "string") return { file: r.file, ordered: r.ordered, body: own };
+  try {
+    // the keys as the scan reads them (loadRows): `table` holds a wikilink
+    return { file: r.file, ...(await readFrontmatter(app, r.file, new Set([settings.tableKey]))) };
+  } catch (e) {
+    if (await app.vault.adapter.exists(r.file.path)) throw e;
+    return null;
+  }
 }
 
 async function selectOn(app: App, settings: DatanotesSettings, input: SelectInput, hist: HistoricalTable | null, read: Map<string, number>): Promise<SelectResult> {
@@ -347,26 +436,29 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
   }
   const limit = Math.min(Math.max(input.limit ?? 100, 0), 1000);
   const offset = Math.max(input.offset ?? 0, 0);
-  const pred = compileWhere(await resolveWithin(app, settings, t, resolveDateTokens(input.where, tz, now)), t, settings, get);
-  let rows = (hist?.rows ?? (await loadRows(app, settings, t))).filter(pred);
-  const join = input.join ? await loadJoin(app, settings, t, rows, input.join, { tz, now }, { ...(hist ? { timestamp: input.timestamp! } : {}), read }) : undefined;
+  // planning: dates and `within` resolved (`within` follows links), the filter compiled
+  const pred = await phase("engine.query.plan", async () => compileWhere(await resolveWithin(app, settings, t, resolveDateTokens(input.where, tz, now)), t, settings, get));
+  // a filter on `path` reads only the notes it names
+  const scanned = hist?.rows ?? (await loadRowsWhere(app, settings, t, input.where));
+  let rows = phase("engine.query.filter", (span) => {
+    const kept = scanned.filter(pred);
+    span.setAttributes({ "datanotes.rows_in": scanned.length, "datanotes.rows_out": kept.length });
+    return kept;
+  });
+  const join = input.join
+    ? await phase("engine.query.join", () => loadJoin(app, settings, t, rows, input.join!, { tz, now }, { ...(hist ? { timestamp: input.timestamp! } : {}), read }), { "datanotes.join.table": input.join.table })
+    : undefined;
   if (join) rows = join.kept;
 
   if (input.groupBy !== undefined || input.aggregates !== undefined) {
-    return groupSelect(t, rows, join, input, known, specs, limit, offset, get);
+    return phase("engine.query.group", () => groupSelect(t, rows, join, input, known, specs, limit, offset, get), { "datanotes.rows_in": rows.length });
   }
 
   const order = parseOrder(input.orderBy);
   for (const o of order) if (!known.has(o.col)) throw new OperationInputError(`unknown column in order_by: "${o.col}"`, unknownColumn(o.col, [...known], t.catalog.ref.full, "select"));
-  const valueOf = get;
-  rows.sort((a, b) => {
-    for (const o of order) {
-      const c = compareValues(comparable(specs.get(o.col), valueOf(a, o.col)), comparable(specs.get(o.col), valueOf(b, o.col)));
-      if (c !== 0) return o.desc ? -c : c;
-    }
-    return 0;
-  });
-  const page = rows.slice(offset, offset + limit);
+  // each row's sort values read once (a date parsed, a link named, `file_modified` formatted), and
+  // only the rows up to the page's end put in order
+  const page = phase("engine.query.sort", () => orderBy(rows, order, (r, col) => comparable(specs.get(col), get(r, col)), offset + limit).slice(offset, offset + limit), { "datanotes.rows_in": rows.length });
   const expand = new Set(input.expand ?? []);
   const expandLink = (sourcePath: string, v: unknown): unknown => {
     const linkpath = parseWikilink(v);
@@ -377,26 +469,32 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
     const fm = (app.metadataCache.getFileCache(dest)?.frontmatter ?? {}) as Record<string, unknown>;
     return { path: dest.path, ...fm };
   };
-  return {
+  // the page's rows with their bodies (see pageRowWithBody); `total` counts the rows as scanned
+  const withBodies = input.includeBody ? await Promise.all(page.map((r) => pageRowWithBody(app, settings, r))) : null;
+  // the page's columns, links expanded (each expand reads the linked note's properties)
+  return phase("engine.query.project", () => ({
     table: `${t.def.catalog}.${t.def.schema}.${t.def.name}`,
     total: rows.length,
-    rows: page.map((r) => {
-      const cols = input.columns ?? r.ordered.map(([k]) => k).filter((k) => !hidden.has(k));
-      const out: Record<string, unknown> = { path: r.file.path };
+    rows: page.flatMap((r, i) => {
+      const b = withBodies?.[i];
+      if (b === null) return []; // deleted since the scan
+      const row = b ?? r;
+      const cols = input.columns ?? row.ordered.map(([k]) => k).filter((k) => !hidden.has(k));
+      const out: Record<string, unknown> = { path: row.file.path };
       for (const c of cols) {
         if (c === "path") continue;
-        let v = get(r, c);
-        if (expand.has(c)) v = Array.isArray(v) ? v.map((x) => expandLink(r.file.path, x)) : expandLink(r.file.path, v);
+        let v = get(row, c);
+        if (expand.has(c)) v = Array.isArray(v) ? v.map((x) => expandLink(row.file.path, x)) : expandLink(row.file.path, v);
         out[c] = v === undefined ? null : v;
       }
       if (join) {
-        // every row kept by the join has its matches
+        // every row kept by the join has its matches (keyed by the scanned row)
         out[join.alias] = join.matchesOf.get(r)!.map((m) => projectRow(m, join.columns, hidden));
       }
-      if (input.includeBody) out.body = r.body;
-      return out;
+      if (b) out.body = b.body;
+      return [out];
     }),
-  };
+  }), { "datanotes.rows_out": page.length, "datanotes.expand": expand.size > 0 ? [...expand].join(",") : undefined });
 }
 
 function groupSelect(
@@ -457,7 +555,7 @@ function groupSelect(
     if (dot > 0 && join && column.slice(0, dot) === join.alias) return join.specs.get(column.slice(dot + 1));
     return specs.get(column);
   };
-  let out = [...groups.values()].map((g) => {
+  const out = [...groups.values()].map((g) => {
     const row: Record<string, unknown> = {};
     groupExprs.forEach((e, i) => {
       row[e.text] = g.key[i];
@@ -485,14 +583,7 @@ function groupSelect(
       );
     }
   }
-  out = out.sort((a, b) => {
-    for (const o of order) {
-      const c = compareValues(a[o.col], b[o.col]);
-      if (c !== 0) return o.desc ? -c : c;
-    }
-    return 0;
-  });
-  return { table: `${t.def.catalog}.${t.def.schema}.${t.def.name}`, total: out.length, rows: out.slice(offset, offset + limit) };
+  return { table: `${t.def.catalog}.${t.def.schema}.${t.def.name}`, total: out.length, rows: orderBy(out, order, (r, col) => r[col], offset + limit).slice(offset, offset + limit) };
 }
 
 export function select(app: App, settings: DatanotesSettings, input: SelectInput): Promise<SelectResult> {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { App, TFile } from "../src/core/host";
 import { readOrderedFromMarkdown } from "../src/core/frontmatter";
-import { bumpVaultGeneration, contentHash, invalidateFiles, readHashed, readParsed, vaultGeneration } from "../src/core/file-cache";
+import { bumpVaultGeneration, contentHash, invalidateFiles, primeFiles, readFrontmatter, readFrontmatterValue, readHashed, readParsed, vaultGeneration } from "../src/core/file-cache";
 
 /** An in-memory host that counts its reads. */
 function host(files: Record<string, string>) {
@@ -139,5 +139,44 @@ describe("invalidation and the vault generation", () => {
     expect((await readHashed(two.app, f)).content).toBe("two\n");
     bumpVaultGeneration(one.app);
     expect([vaultGeneration(one.app), vaultGeneration(two.app)]).toEqual([1, 0]);
+  });
+});
+
+describe("readFrontmatter: one parse per version of a note", () => {
+  // a wikilink written without quotes is YAML for a list in a list
+  const MISPARSED = "---\ntable: [[main.public.log]]\nfriend: [[Ada]]\nkind: walk\n---\nBody\n";
+
+  it("gives what readOrderedFromMarkdown gives with each set of wikilink keys, from one parse", async () => {
+    const { app, reads } = host({ "a.md": MISPARSED, "b.md": NOTE });
+    const f = file("a.md", { mtime: 1, size: MISPARSED.length });
+    for (const keep of [new Set<string>(), new Set(["table"]), new Set(["table", "friend"]), new Set(["kind"])]) {
+      expect(await readFrontmatter(app, f, keep)).toEqual(readOrderedFromMarkdown(MISPARSED, keep));
+      expect(await readFrontmatterValue(app, f, keep, (o) => o.map(([k]) => k))).toEqual(["table", "friend", "kind"]);
+    }
+    expect(reads).toEqual(["a.md"]);
+    // a copy of the entry list each time: a caller that changes it changes no one else's
+    const one = await readFrontmatter(app, f, new Set(["table"]));
+    (one.ordered as [string, unknown][]).pop();
+    expect((await readFrontmatter(app, f, new Set(["table"]))).ordered).toHaveLength(3);
+    // a note without a misparsed key shares the parse of the text
+    const b = file("b.md", { mtime: 1, size: NOTE.length });
+    expect(await readFrontmatter(app, b, new Set(["table"]))).toEqual(readOrderedFromMarkdown(NOTE, new Set(["table"])));
+  });
+
+  it("takes the parse and hash a host primed at start: the text is not parsed or hashed again", async () => {
+    const { app, reads } = host({});
+    const f = file("a.md", { mtime: 2, size: NOTE.length });
+    const parsed = readOrderedFromMarkdown(NOTE);
+    primeFiles(app, [{ file: f, content: NOTE, hash: "primed-hash", frontmatter: parsed }]);
+    expect((await readHashed(app, f)).hash).toBe("primed-hash");
+    expect(await readFrontmatterValue(app, f, new Set(), (o) => o)).toBe(parsed.ordered);
+    expect(reads).toEqual([]);
+  });
+
+  it("a front matter that cannot be read throws on every read, as the parser does", async () => {
+    const { app } = host({ "x.md": "---\ntable: [broken\n---\n" });
+    const f = file("x.md", { mtime: 1, size: 20 });
+    await expect(readFrontmatter(app, f, new Set())).rejects.toThrow();
+    await expect(readFrontmatter(app, f, new Set(["table"]))).rejects.toThrow();
   });
 });

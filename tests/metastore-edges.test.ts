@@ -428,3 +428,47 @@ describe("the metastore of a database the engine creates", () => {
     expect(withNewDatabaseConfig("- a list\n")).toBe("- a list\n");
   });
 });
+
+describe("edits of the metastore's text and its cache", () => {
+  it("setTableEntries edits several tables in one parse, as one edit after the other would", async () => {
+    const { refOf, setTableEntries, setTableEntry, parseMetastore: parse } = await import("../src/core/metastore");
+    const { withTables } = await import("./helpers/db-vault");
+    const text = withTables("a:\n  columns:\n    - { name: x, type: string }\n# a comment kept\nb:\n  columns:\n    - { name: y, type: integer }\n");
+    const a = refOf("main", "public", "a");
+    const c = refOf("main", "other", "c");
+    const entry = parse(text).catalogs.main!.schemas.public!.tables.b!;
+    const oneByOne = setTableEntry(setTableEntry(text, a, null), c, entry);
+    expect(setTableEntries(text, [[a, null], [c, entry]])).toBe(oneByOne);
+    expect(setTableEntries(text, [])).toBe(text);
+    expect(oneByOne).toContain("# a comment kept");
+  });
+
+  it("primeWrittenMetastore keeps the text written with the file's stat: the next load reads nothing", async () => {
+    const { loadMetastore, primeWrittenMetastore } = await import("../src/core/metastore");
+    const { createDbVault, METASTORE, withTables } = await import("./helpers/db-vault");
+    const v = createDbVault({ [METASTORE]: withTables("a:\n  columns:\n    - { name: x, type: string }\n") });
+    // a host whose adapter tells a file's size and time, as Obsidian's does
+    const fs = await import("node:fs");
+    (v.app.vault.adapter as { stat?: (p: string) => Promise<{ size: number; mtime: number } | null> }).stat = async (p) => {
+      const s = fs.statSync(v.abs(p), { throwIfNoEntry: false });
+      return s ? { size: s.size, mtime: s.mtimeMs } : null;
+    };
+    // characters of two, three and four bytes in UTF-8: the size on disk is the text's
+    const text = withTables("a:\n  description: Notes 📝 and €\n  columns:\n    - { name: x, type: string }\n    - { name: é, type: string }\n");
+    v.write(METASTORE, text); // as the engine wrote it
+    await primeWrittenMetastore(v.app, v.settings, text);
+    const vault = v.app.vault as unknown as { read(f: unknown): Promise<string> };
+    const read = vault.read.bind(vault);
+    let reads = 0;
+    vault.read = async (f) => {
+      reads++;
+      return read(f);
+    };
+    expect((await loadMetastore(v.app, v.settings))!.text).toBe(text);
+    expect(reads).toBe(0);
+    // a text of another length on disk (an edit by hand right after): primed without the stat, read again
+    await primeWrittenMetastore(v.app, v.settings, `${text}# not what the file holds\n`);
+    expect((await loadMetastore(v.app, v.settings))!.text).toBe(text);
+    expect(reads).toBe(1);
+  });
+});

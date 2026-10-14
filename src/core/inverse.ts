@@ -13,11 +13,13 @@
  */
 
 import type { App, TFile } from "./host";
-import { readParsed } from "./file-cache";
-import { fmGet, fmSet, readOrderedFromMarkdown } from "./frontmatter";
+import { readFrontmatterEntries } from "./file-cache";
+import { fmGet, fmSet } from "./frontmatter";
 import { cachedMetastore, catalogTables, effectiveColumns, loadMetastore, rowTableFull, type Metastore } from "./metastore";
 import type { DatanotesSettings } from "./settings";
+import { job } from "./tracing";
 import type { OrderedFrontmatter } from "./types";
+import { vaultIndex } from "./vault-index";
 
 export interface InverseSpec {
   table: string;
@@ -28,8 +30,17 @@ export interface InverseSpec {
   targetSingle: boolean;
 }
 
-/** Inverse pairs by table, both directions (a pair declared on one side only is mirrored). */
-export function inverseSpecs(model: Metastore): Map<string, InverseSpec[]> {
+/** inverseSpecs by parsed model (a model never changes): the watcher asks for every note. */
+const SPECS = new WeakMap<Metastore, ReadonlyMap<string, InverseSpec[]>>();
+
+/** Inverse pairs by table, both directions (a pair declared on one side only is mirrored). Read-only. */
+export function inverseSpecs(model: Metastore): ReadonlyMap<string, readonly InverseSpec[]> {
+  let specs = SPECS.get(model);
+  if (!specs) SPECS.set(model, (specs = buildInverseSpecs(model)));
+  return specs;
+}
+
+function buildInverseSpecs(model: Metastore): Map<string, InverseSpec[]> {
   const cols = new Map<string, Record<string, unknown>[]>();
   for (const { ref, entry } of catalogTables(model)) {
     try {
@@ -123,16 +134,11 @@ export interface PlanOptions {
   finalPath?: (path: string) => string;
 }
 
-function rowKey(settings: DatanotesSettings): string {
-  return `row|${settings.tableKey}`;
-}
-
 export async function readRowFrontmatter(app: App, settings: DatanotesSettings, path: string): Promise<OrderedFrontmatter | null> {
   const f = app.vault.getAbstractFileByPath(path);
   if (!f || !("extension" in f)) return null;
   const keep = new Set([settings.tableKey]);
-  const { ordered } = await readParsed(app, f as TFile, rowKey(settings), (t) => readOrderedFromMarkdown(t, keep));
-  return ordered;
+  return readFrontmatterEntries(app, f as TFile, keep);
 }
 
 /** Targets of each inverse column of a row (from its frontmatter). */
@@ -295,6 +301,8 @@ export class InverseWatcher {
   private removed = new Map<string, Snapshot & { at: number }>();
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private ready = false;
+  /** What the snapshot was taken for: the inverse pairs, the tables (names resolve against them), the settings. */
+  private takenFor: string | null = null;
 
   constructor(
     private readonly app: App,
@@ -303,7 +311,7 @@ export class InverseWatcher {
     private readonly delayMs = 2000,
   ) {}
 
-  private specsFor(path: string): { table: string; specs: InverseSpec[]; fm: Record<string, unknown> } | null {
+  private specsFor(path: string): { table: string; specs: readonly InverseSpec[]; fm: Record<string, unknown> } | null {
     const s = this.settings();
     const model = cachedMetastore(this.app, s);
     if (!model) return null;
@@ -322,12 +330,24 @@ export class InverseWatcher {
     return { table: t.table, ...(typeof fm.id === "string" ? { id: fm.id } : {}), targets: inverseTargets(this.app, t.specs, fm, path) };
   }
 
-  /** Remember every row's links (call once the metastore is loaded). */
+  /**
+   * Remember every row's links (call once the metastore is loaded). A metastore that changed
+   * neither the inverse pairs nor the tables (an edit of a column elsewhere, a view, a
+   * description) keeps the snapshot: the rows' changes since keep it current.
+   */
   init(): void {
+    const s = this.settings();
+    const model = cachedMetastore(this.app, s);
+    const key = model ? JSON.stringify([s.tableKey, s.databaseFolder, [...inverseSpecs(model)], catalogTables(model).map(({ ref }) => ref.full)]) : null;
+    if (this.ready && key !== null && key === this.takenFor) return;
+    this.takenFor = key;
     this.snapshot.clear();
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      const c = this.current(f.path);
-      if (c) this.snapshot.set(f.path, c);
+    // with a vault index, only the rows of the tables with inverse columns are looked at
+    const idx = model ? vaultIndex(this.app, s) : null;
+    const paths = idx ? [...inverseSpecs(model!).keys()].flatMap((t) => idx.rowsOf(t).map((f) => f.path)) : this.app.vault.getMarkdownFiles().map((f) => f.path);
+    for (const p of paths) {
+      const c = this.current(p);
+      if (c) this.snapshot.set(p, c);
     }
     this.ready = true;
   }
@@ -340,7 +360,8 @@ export class InverseWatcher {
       path,
       setTimeout(() => {
         this.timers.delete(path);
-        void this.flush(path);
+        // a trace of its own: the timer keeps the context of whatever armed it, a request included (tracing.ts, job)
+        void job("job inverse_links", () => this.flush(path), { "file.path": path });
       }, this.delayMs),
     );
   }
@@ -383,5 +404,7 @@ export class InverseWatcher {
   dispose(): void {
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
+    // changes are not followed from here on: the next init takes the snapshot again
+    this.takenFor = null;
   }
 }
