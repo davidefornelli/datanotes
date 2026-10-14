@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { configureDatabase } from "../src/core/database";
-import { CHECKPOINT_POLICY, EXTERNAL_EDIT, HistoryError, listVersions, readCommit, syncTransactionLogs } from "../src/core/transaction-log";
+import { CHECKPOINT_POLICY, EXTERNAL_EDIT, forgetLoggedStates, HistoryError, listVersions, readCommit, syncTransactionLogs } from "../src/core/transaction-log";
+import { forgetLogTocs } from "../src/core/log-files";
 import { createTable, INDEX_RETRY, OperationInputError } from "../src/core/engine";
 import { describeHistory, vacuumTable } from "../src/core/history";
 import type { App } from "../src/core/host";
@@ -20,9 +21,9 @@ const LOG_DIR = `store:transaction_log/${MOOD}`;
 const at = (minute: number) => ({ now: new Date(Date.UTC(2026, 8, 1, 10, minute)) });
 const rowPath = (hour: string) => `Datanotes/main/metrics/mood/2026-09-26T${hour}00.md`;
 
-/** A vault with time travel on and a `mood` table (version 0). */
+/** A vault with time travel on and a `mood` table (version 0), one file per version (the tests name them). */
 async function moodVault(): Promise<DbVault> {
-  const v = createDbVault({});
+  const v = createDbVault({}, { transactionLogFormat: "files" });
   await configureDatabase(v.app, v.settings, { history: true }, async () => {});
   expect((await createTable(v.app, v.settings, described({ schema: "metrics", name: "mood", timeColumn: "occurred_at", columns: COLUMNS }), at(0))).ok).toBe(true);
   return v;
@@ -52,13 +53,55 @@ function tolerantFrontmatter(app: App): void {
   onTestFinished(() => spy.mockRestore());
 }
 
+/** What a restart leaves of the engine's memory of the logs: nothing. */
+function restart(v: DbVault): void {
+  forgetLogTocs(v.app);
+  forgetLoggedStates(v.app);
+}
+
 describe("reading the log", () => {
-  it("a commit file that lost its commitInfo line (a torn sync) is refused", async () => {
+  for (const [what, tear] of [
+    ["empty", () => ""],
+    ["without its commitInfo line", (text: string) => text.split("\n").slice(1).join("\n")],
+    ["with a torn first line", (text: string) => `{"commitInfo": {"vers\n${text}`],
+  ] as const) {
+    it(`a newest version left ${what} by a crash is left out until the next write sets it aside`, async () => {
+      const v = await moodVault();
+      await insertMood(v, "09", 1);
+      const commit = `${LOG_DIR}/00000000000000000001.json`;
+      const torn = tear(v.read(commit));
+      storeFile(v, commit, torn);
+      restart(v);
+      expect(await listVersions(v.app, v.settings, MOOD)).toEqual([0]);
+      expect((await describeHistory(v.app, v.settings, { table: "mood" })).history.map((h) => h.version)).toEqual([0]);
+      await expect(select(v.app, v.settings, { table: "mood", version: 1 })).rejects.toThrow(new OperationInputError("main.metrics.mood has no version 1 (available: 0..0)"));
+      // the row is in the vault (its note was written): the next sync records it again as version 1
+      expect(await syncTransactionLogs(v.app, v.settings, { operation: EXTERNAL_EDIT, now: new Date(Date.UTC(2026, 8, 1, 11)) })).toEqual([{ table: MOOD, version: 1, operation: EXTERNAL_EDIT }]);
+      expect((await readCommit(v.app, v.settings, MOOD, 1)).add.map((a) => a.path)).toEqual([rowPath("09")]);
+      const aside = v.listAll().filter((p) => p.startsWith(`${commit}.torn-`));
+      expect(aside.map((p) => v.read(p))).toEqual([torn]);
+      expect(await listVersions(v.app, v.settings, MOOD)).toEqual([0, 1]);
+    });
+  }
+
+  it("a commit file that lost its commitInfo line (a torn sync) is refused when a later version follows it", async () => {
     const v = await moodVault();
     await insertMood(v, "09", 1);
+    await insertMood(v, "10", 2);
     const commit = `${LOG_DIR}/00000000000000000001.json`;
     storeFile(v, commit, v.read(commit).split("\n").slice(1).join("\n"));
     await expect(describeHistory(v.app, v.settings, { table: "mood" })).rejects.toThrow(new HistoryError("log commit without commitInfo"));
+  });
+
+  it("a commit file whose first line is torn is refused as reading it in full refuses it, when a later version follows it", async () => {
+    const v = await moodVault();
+    await insertMood(v, "09", 1);
+    await insertMood(v, "10", 2);
+    const commit = `${LOG_DIR}/00000000000000000001.json`;
+    storeFile(v, commit, `{"commitInfo": {"vers\n${v.read(commit)}`);
+    const whole = await readCommit(v.app, v.settings, MOOD, 1).catch((e: unknown) => e as Error);
+    expect(whole).toBeInstanceOf(SyntaxError);
+    await expect(describeHistory(v.app, v.settings, { table: "mood" })).rejects.toThrow(whole as Error);
   });
 
   it("a version the log does not hold is named", async () => {
@@ -84,9 +127,12 @@ describe("checkpoints and time travel", () => {
     });
     const v = await moodVault();
     for (const [i, hour] of ["01", "02", "03", "04", "05", "06"].entries()) await insertMood(v, hour, i + 1);
-    expect(v.listAll().filter((p) => p.endsWith(".checkpoint.json"))).toEqual([
-      `${LOG_DIR}/00000000000000000002.checkpoint.json`,
-      `${LOG_DIR}/00000000000000000005.checkpoint.json`,
+    // a manifest and its part (plain text: this store cannot hold binary files)
+    expect(v.listAll().filter((p) => /\.(manifest|part-\d+)\./.test(p))).toEqual([
+      `${LOG_DIR}/00000000000000000002.manifest.jsonl`,
+      `${LOG_DIR}/00000000000000000002.part-0.jsonl`,
+      `${LOG_DIR}/00000000000000000005.manifest.jsonl`,
+      `${LOG_DIR}/00000000000000000005.part-0.jsonl`,
     ]);
     return v;
   }
@@ -107,7 +153,9 @@ describe("checkpoints and time travel", () => {
 
   it("a checkpoint removed after it was listed (a sync on another device) is skipped", async () => {
     const v = await withCheckpoints();
-    const checkpoint = `${LOG_DIR}/00000000000000000005.checkpoint.json`;
+    // replayed from the log's files (not the latest version the engine keeps)
+    forgetLoggedStates(v.app);
+    const checkpoint = `${LOG_DIR}/00000000000000000005.manifest.jsonl`;
     const adapter = v.app.store! as unknown as { exists(p: string): Promise<boolean> };
     const exists = adapter.exists.bind(adapter);
     const spy = vi.spyOn(adapter, "exists").mockImplementation(async (p: string) => {
@@ -188,12 +236,15 @@ describe("syncTransactionLogs", () => {
     v.write(rowPath("09"), v.read(rowPath("09")).replace("value: 3", "value: 4"));
     const target = `${LOG_DIR}/00000000000000000002.json`;
     const theirs = `${JSON.stringify({ commitInfo: { version: 2, timestamp: "2026-09-01T10:59:00.000Z", operation: "WRITE", operationMetrics: { numAddedFiles: 0, numRemovedFiles: 0, metadataChanged: false }, engineInfo: "datanotes" } })}\n`;
-    const adapter = v.app.store! as unknown as { exists(p: string): Promise<boolean> };
+    const adapter = v.app.store! as unknown as { exists(p: string): Promise<boolean>; stat?: unknown };
     const exists = adapter.exists.bind(adapter);
-    let raced = false;
+    // the check right before the commit is written: the second (a host that cannot tell a folder's
+    // time first checks that no version came after the known one), or the only one
+    const last = adapter.stat ? 1 : 2;
+    let checks = 0;
     const spy = vi.spyOn(adapter, "exists").mockImplementation(async (p: string) => {
-      if (`store:${p}` === target && !raced) {
-        raced = true; // the other engine writes its version 2 right before ours
+      // the known version 1 is still the latest; the other engine writes its version 2 right before ours
+      if (`store:${p}` === target && ++checks === last) {
         storeFile(v, target, theirs);
       }
       return exists(p);

@@ -42,12 +42,29 @@ export async function adoptTargetFor(app: App, settings: DatanotesSettings, path
   return null;
 }
 
+/**
+ * Whether a note is a row already, with its id: there is nothing to adopt then, in any folder.
+ * False when the note cannot be read (adoption then decides as without this check).
+ */
+async function rowWithId(app: App, settings: DatanotesSettings, file: TFile): Promise<boolean> {
+  if (!file.path.endsWith(".md")) return false;
+  try {
+    const { ordered } = readOrderedFromMarkdown(await app.vault.read(file), new Set([settings.tableKey]));
+    return ordered.find(([k]) => k === settings.tableKey)?.[1] !== undefined && ordered.some(([k]) => k === "id");
+  } catch {
+    return false;
+  }
+}
+
 /** Make a freshly created note a row when it sits in a table folder and is not a row yet. */
 export async function adoptCreatedNote(
   app: App,
   settings: DatanotesSettings,
   file: TFile,
 ): Promise<{ adopted: boolean; table?: string; reason?: string }> {
+  // Checked first: finding the table of a folder loads every table, and every row the engine
+  // creates comes here too.
+  if (await rowWithId(app, settings, file)) return { adopted: false };
   const target = await adoptTargetFor(app, settings, file.path);
   if (!target) return { adopted: false };
   const text = await app.vault.read(file);

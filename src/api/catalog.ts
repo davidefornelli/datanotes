@@ -15981,7 +15981,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "graph_neighbors",
-    "description": "Direct neighbours of notes: what they link to (`out`) and what links to them (`in`,\nbacklinks), with counts per edge label. `direction`: out, in or both (default).\n\n`from_nodes` selects the notes: `{\"paths\": [...]}` and/or `{\"table\": ..., \"where\": {...}}`.\nEdges are labelled with their link column (`people`, `event`, …) or `link` for other links.",
+    "description": "Direct neighbours of notes: what they link to (`out`) and what links to them (`in`,\nbacklinks), with counts per edge label. `direction`: out, in or both (default).\n\n`from_nodes` selects the notes: `{\"paths\": [...]}`, `{\"table\": ..., \"where\": {...}}` and/or\n`{\"tables\": [...]}`: the rows of several tables, by name or pattern (`[\"*\"]` every table, `[\"personal.*\"]` a\ncatalog's). The whole vault's graph in one call: `{\"tables\": [\"*\"]}` with direction `out` (at most 5000\nstart notes). Edges are labelled with their link column (`people`, `event`, …) or `link` for other links.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -16100,7 +16100,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "graph_traverse",
-    "description": "Breadth-first walk over links from `from_nodes` (`{\"paths\": [...]}` and/or `{\"table\", \"where\"}`).\n\n- `direction`: out (default, follow links), in (follow backlinks) or both.\n- `edges`: edge labels to follow (link columns such as `people`, `event`, or `link`).\n- `tables`: return only notes of these tables; `through`: only walk on through these tables.\n- `min_depth` (default 1) / `max_depth` (default 2, max 10), `limit` (default 500).\n\nEach node comes with `depth` and `via` (one shortest route). Example — moods tied to events\nwith Alice: from `{\"table\": \"person\", \"where\": {\"name\": \"Alice\"}}`, direction `in`, edges\n`[\"people\", \"event\"]`, tables `[\"mood\"]`, max_depth 2. Feed the paths to `select_rows` with\n`where: {\"path\": {\"in\": [...]}}` to aggregate them.",
+    "description": "Breadth-first walk over links from `from_nodes` (`{\"paths\": [...]}`, `{\"table\", \"where\"}` and/or `{\"tables\": [...]}`).\n\n- `direction`: out (default, follow links), in (follow backlinks) or both.\n- `edges`: edge labels to follow (link columns such as `people`, `event`, or `link`).\n- `tables`: return only notes of these tables; `through`: only walk on through these tables.\n- `min_depth` (default 1) / `max_depth` (default 2, max 10), `limit` (default 500).\n\nEach node comes with `depth` and `via` (one shortest route). Example — moods tied to events\nwith Alice: from `{\"table\": \"person\", \"where\": {\"name\": \"Alice\"}}`, direction `in`, edges\n`[\"people\", \"event\"]`, tables `[\"mood\"]`, max_depth 2. Feed the paths to `select_rows` with\n`where: {\"path\": {\"in\": [...]}}` to aggregate them.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -16296,7 +16296,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "graph_path",
-    "description": "Shortest chain of links between two sets of notes (each `{\"paths\": [...]}` and/or\n`{\"table\", \"where\"}`): `found`, `length` and `path`: the steps (`from`, `label`, `direction`, `to`).\n`direction` both by default; `max_depth` default 6 (max 10).",
+    "description": "Shortest chain of links between two sets of notes (each `{\"paths\": [...]}`, `{\"table\", \"where\"}`\nand/or `{\"tables\": [...]}`): `found`, `length` and `path`: the steps (`from`, `label`, `direction`, `to`).\n`direction` both by default; `max_depth` default 6 (max 10).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

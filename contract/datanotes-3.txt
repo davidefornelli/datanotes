@@ -3256,6 +3256,12 @@ command store backup --settings <value>
 command store backup --ssh-command <value>
 command store backup --store <value>
 command store backup --vault <value>
+command store convert-log --database <value>
+command store convert-log --json
+command store convert-log --settings <value>
+command store convert-log --store <value>
+command store convert-log --to <value>
+command store convert-log --vault <value>
 command store new-id --database <value>
 command store new-id --store <value>
 command store new-id --vault <value>
@@ -3282,6 +3288,7 @@ environment DATANOTES_GIT_NETWORK_TIMEOUT_S
 environment DATANOTES_GIT_QUIET_S
 environment DATANOTES_GIT_SYNC
 environment DATANOTES_HOST
+environment DATANOTES_INDEX_CHECK
 environment DATANOTES_MCP_EXCEPT
 environment DATANOTES_MCP_HOST
 environment DATANOTES_MCP_OWNER_TOOLS
@@ -3300,6 +3307,8 @@ environment DATANOTES_TOKEN_FILE
 environment DATANOTES_URL
 environment DATANOTES_VAULT
 environment DATANOTES_WATCH
+executable datanotes
+executable dnotes
 operation add_column
 operation add_constraint
 operation adopt_rows
@@ -3430,10 +3439,12 @@ setting autoRecompute: boolean
 setting databaseFolder: string
 setting databaseId: string
 setting fileLogEnabled: boolean
+setting httpCompression: string
 setting httpServerPort: number
 setting httpServerToken: string
 setting journalRetentionDays: number
 setting logRetentionDays: number
+setting readCacheMaxBytes: number
 setting repairLinksOnHandMove: boolean
 setting semanticBaseUrl: string
 setting semanticBatchSize: number
@@ -3445,12 +3456,22 @@ setting semanticScope: string
 setting storeBackupEnabled: boolean
 setting storeBackupIntervalSeconds: number
 setting storeBackupRemote: string
+setting storeSync: string
 setting tableKey: string
 setting telemetryEnabled: boolean
 setting telemetryEndpoint: string
+setting telemetryEnvironment: string
 setting telemetryHeaders: object
+setting telemetryMaxSpansPerTrace: number
 setting telemetryProtocol: string
 setting telemetryServiceName: string
+setting telemetrySlowSpanMs: number
+setting telemetryTraceSampleRatio: number
+setting telemetryTraces: boolean
+setting transactionLogFormat: string
+setting vaultIndexEnabled: boolean
+setting writePriority: boolean
+setting writePriorityMaxWaitMs: number
 violation broken_link
 violation check
 violation cycle

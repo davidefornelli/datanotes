@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import os from "node:os";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NOOP_TELEMETRY, setTelemetry, telemetry, traced, type TelemetrySettings } from "../src/core/telemetry";
 import { OtlpSink, resolveOtlp } from "../src/server/otlp-sink";
+import { engineResource, hostName } from "../src/server/tracing";
 import { renameColumn, undoOperation } from "../src/core/engine";
 import { DEFAULT_SETTINGS, mergeWithDefaults } from "../src/core/settings";
 import { logVault } from "./helpers/db-vault";
@@ -47,6 +49,28 @@ describe("engine telemetry configuration", () => {
     });
     expect(resolveOtlp(settings, { OTEL_SDK_DISABLED: "true" }, base)).toBeNull();
     expect(resolveOtlp(settings, { OTEL_LOGS_EXPORTER: "none" }, base)).toBeNull();
+  });
+
+  it("builds the resource only while logs are exported (asked for every record), and names the host once per process", () => {
+    let built = 0;
+    const lazy = () => {
+      built++;
+      return base;
+    };
+    expect(resolveOtlp({ ...settings, telemetryEnabled: false }, {}, lazy)).toBeNull();
+    expect(resolveOtlp(settings, { OTEL_SDK_DISABLED: "true" }, lazy)).toBeNull();
+    expect(built).toBe(0);
+    expect(resolveOtlp(settings, {}, lazy)).toEqual(resolveOtlp(settings, {}, base));
+    expect(built).toBe(1);
+    const name = os.hostname();
+    const asked = vi.spyOn(os, "hostname");
+    expect([hostName(), hostName(), engineResource({}, "service")["host.name"]]).toEqual([name, name, name]);
+    // asked of the system at most once (none when an earlier test asked already), then kept
+    const times = asked.mock.calls.length;
+    expect(times).toBeLessThanOrEqual(1);
+    expect(hostName()).toBe(name);
+    expect(asked).toHaveBeenCalledTimes(times);
+    asked.mockRestore();
   });
 
   it("sends to the configured collector with its headers, and follows settings changes", async () => {

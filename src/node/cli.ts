@@ -12,6 +12,8 @@
  * the same process (with --vault it may spawn `datanotes serve` as a child).
  */
 
+// first: the thread pool's size is read when the pool starts (threadpool.ts)
+import "./threadpool";
 import { main as serve } from "./service";
 import { main as status } from "./status";
 import { main as stop } from "./stop";

@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { INDEX_RETRY } from "../src/core/engine";
 import { select } from "../src/core/rows";
-import { holdsStaleWrite, runWrite, STALE_WRITE, WRITE_ATTEMPTS } from "../src/core/write-check";
+import { holdsStaleWrite, runWrite, STALE_WRITE, staleWrite, WRITE_ATTEMPTS, wrote } from "../src/core/write-check";
 import { createHandlers, dispatch, type HandlerResponse } from "../src/server/rest";
 import { createDbVault, METASTORE, withTables, type DbVault } from "./helpers/db-vault";
 
@@ -99,13 +99,31 @@ describe("writes at the same time", () => {
 
   it("runs a write again while it is overtaken, at most WRITE_ATTEMPTS times; a write left alone runs once", async () => {
     const v = vault();
-    let runs = 0;
     const stale = { conflicts: [{ path: "", message: `${STALE_WRITE}: send it again` }] };
-    expect(await runWrite(v.app, async () => (++runs, stale), holdsStaleWrite)).toBe(stale);
+    let runs = 0;
+    // each attempt: another write applies meanwhile (a write of its own context), then finish checks
+    const overtaken = async () => {
+      runs++;
+      await runWrite(v.app, async () => wrote(v.app), () => false);
+      return staleWrite(v.app) ? stale : "done";
+    };
+    expect(await runWrite(v.app, overtaken, holdsStaleWrite)).toBe(stale);
     expect(runs).toBe(WRITE_ATTEMPTS);
     runs = 0;
     expect(await runWrite(v.app, async () => (++runs, "done"), holdsStaleWrite)).toBe("done");
     expect(runs).toBe(1);
+    // an answer that holds the text, from an attempt never found overtaken: run once
+    runs = 0;
+    expect(await runWrite(v.app, async () => (++runs, stale), holdsStaleWrite)).toBe(stale);
+    expect(runs).toBe(1);
     expect(holdsStaleWrite(undefined)).toBe(false);
+  });
+
+  it("a write whose values quote the conflict's text runs once", async () => {
+    const v = vault();
+    const call = client(v);
+    const r = await call("insert_row", { table: "person", values: { name: STALE_WRITE, email: "quote@example.com" } });
+    expect(r.status).toBe(200);
+    expect((await select(v.app, v.settings, { table: "person", where: { email: "quote@example.com" } })).total).toBe(1);
   });
 });

@@ -38,7 +38,8 @@ import { AmbiguousCatalogRefError, MetastoreError } from "../core/metastore";
 import { describeHistory, restoreTable, tableChanges, vacuumTable, wireCommit } from "../core/history";
 import { describeDatabaseHistory, restoreDatabase } from "../core/database-history";
 import { graphNeighbors, graphPath, graphTraverse, type Direction, type GraphNodeSet } from "../core/graph";
-import { telemetry } from "../core/telemetry";
+import { telemetry, type AttrValue } from "../core/telemetry";
+import { activeSpan, discardTrace, phase, withSpan, type Span } from "../core/tracing";
 import { createPublicApi, describeTable, listTablesAndViews, type DatanotesPublicApi } from "../core/public-api";
 import { inferTable } from "../core/infer";
 import { runBatch } from "../core/batch";
@@ -50,10 +51,25 @@ import { messageOf } from "../core/message";
 import { didYouMean, guide, GuidedError, guidanceOf, refusalGuidance, undoGuidance, type Guidance } from "../core/hints";
 import { argumentsOf, checkArguments, toolDocs } from "../api/guidance";
 import { operationRoute } from "../api/requests";
+import { currentActor } from "../core/actor";
+import { READ_OPERATIONS } from "./token-routes";
+import { operationClass, type OperationScheduler } from "./scheduler";
+import type { CachedAnswer, CacheTicket, ReadCache } from "./read-cache";
 
 export interface HandlerResponse {
   status: number;
   json: unknown;
+  /** `json` as JSON text, when it is at hand (a cached read): sent as it is. */
+  body?: string;
+}
+
+/** What the operations share besides the engine: write priority and the read cache (runtime.ts). */
+export interface HandlerOptions {
+  scheduler?: OperationScheduler;
+  /** The read cache now (null: none, e.g. while the engine does not follow the vault). */
+  cache?: () => ReadCache | null;
+  /** The token behind the current call and its permissions: part of the read cache's keys. */
+  scope?: () => string;
 }
 
 export type Body = Record<string, unknown>;
@@ -271,6 +287,7 @@ export function createHandlers(
   saveSettings: () => Promise<void> = async () => {},
   semantic?: SemanticIndex,
   api?: DatanotesPublicApi,
+  options: HandlerOptions = {},
 ): Record<string, Handler> {
   const s = getSettings;
   const pub = api ?? createPublicApi(app, getSettings, saveSettings, semantic);
@@ -840,17 +857,124 @@ export function createHandlers(
   };
 
   const handlers: Record<string, Handler> = {};
+  const { scheduler } = options;
+  const scope = options.scope ?? (() => currentActor()?.auth ?? "");
   for (const [name, h] of Object.entries(ops)) {
+    const writes = !READ_OPERATIONS.has(name);
     // Every request first waits for the host to index the changes made on disk before it (vault-settle.ts):
     // it reads them, and the transaction log records them before its own commit.
-    handlers[operationRoute(name)] = async (body) => {
-      checkArgs(name, body);
-      await settleVault(app);
-      // a write that another write overtook while it was being checked runs again (write-check.ts)
-      return runWrite(app, () => h(body), (res) => holdsStaleWrite(res.json));
-    };
+    handlers[operationRoute(name)] = (body) =>
+      // the operation's span: what it is and what it did, in the conventions of database spans
+      withSpan(`engine.op ${name}`, { operation: true, attributes: operationAttributes(name, body) }, async (span) => {
+        // when it arrived: a comparison of the disk started later (while it waited) covers it too
+        const arrived = performance.now();
+        checkArgs(name, body);
+        const cls = operationClass(name, body);
+        const cache = cls === "read" ? (options.cache?.() ?? null) : null;
+        // write priority (scheduler.ts): a read waits while writes run or wait, a cached answer too
+        const waits = scheduler?.wouldWait(cls) ?? false;
+        const slot = scheduler ? await (waits ? phase("engine.schedule.wait", () => scheduler.acquire(cls, name), { "datanotes.schedule.class": cls }) : scheduler.acquire(cls, name)) : null;
+        try {
+          if (slot) {
+            span.setAttribute("datanotes.schedule.class", cls);
+            if (slot.wait.waitedMs > 0) span.setAttributes({ "datanotes.schedule.wait_ms": Math.round(slot.wait.waitedMs * 100) / 100, "datanotes.schedule.writes_ahead": slot.wait.writesAhead, "datanotes.schedule.released": slot.wait.released });
+          }
+          await phase("engine.settle", () => settleVault(app, arrived));
+          // the read cache (read-cache.ts), once the vault is settled
+          const ticket = cache ? await cache.ticket(name, body, scope()) : null;
+          if (ticket && cache) {
+            const hit = cache.get(ticket);
+            if (hit) return cachedAnswer(span, hit);
+          }
+          if (ticket) span.setAttribute("datanotes.read_cache", "miss");
+          const boundary = writes ? options.cache?.() : null;
+          boundary?.writeBoundary();
+          // a write that another write overtook while it was being checked runs again (write-check.ts);
+          // a read applies nothing, so it is never stale: its answer is not searched for the conflict
+          let attempts = 0;
+          let res: HandlerResponse;
+          try {
+            res = !writes
+              ? await h(body)
+              : await runWrite(app, () => {
+                  if (attempts++ > 0) span.addEvent("stale write: checked and run again", { attempt: attempts });
+                  return h(body);
+                }, (r) => holdsStaleWrite(r.json));
+          } finally {
+            boundary?.writeBoundary();
+          }
+          resultAttributes(span, res);
+          if (ticket && cache && res.status === 200) {
+            const j = (res.json ?? {}) as Record<string, unknown>;
+            const answer: CachedAnswer = {
+              status: res.status,
+              body: JSON.stringify(res.json),
+              ...(Array.isArray(j.rows) ? { returnedRows: j.rows.length } : {}),
+              ...(typeof j.total === "number" ? { total: j.total } : {}),
+            };
+            if (!cache.set(ticket, answer)) span.setAttribute("datanotes.read_cache", "not_kept");
+            res = { ...res, body: answer.body };
+          }
+          return res;
+        } finally {
+          slot?.release();
+        }
+      });
   }
   return handlers;
+}
+
+/** The answer of a read from the read cache: its JSON text as kept, parsed only for a caller in process. */
+function cachedAnswer(span: Span, hit: CachedAnswer): HandlerResponse {
+  span.setAttributes({ "datanotes.read_cache": "hit", "db.response.returned_rows": hit.returnedRows, "datanotes.rows_total": hit.total });
+  let parsed: unknown;
+  let done = false;
+  return {
+    status: hit.status,
+    body: hit.body,
+    get json(): unknown {
+      if (!done) {
+        parsed = JSON.parse(hit.body);
+        done = true;
+      }
+      return parsed;
+    },
+  };
+}
+
+/** What an operation span says before it runs: the operation, its table or view, its options. */
+export function operationAttributes(name: string, body: Body): Record<string, AttrValue> {
+  const collection = typeof body.table === "string" ? body.table : typeof body.view === "string" ? body.view : undefined;
+  const parts = collection && !collection.includes(":") ? collection.split(".") : [];
+  return {
+    "db.system": "datanotes",
+    "db.system.name": "datanotes",
+    "db.operation.name": name,
+    "db.collection.name": collection,
+    "db.namespace": parts.length === 3 ? `${parts[0]}.${parts[1]}` : undefined,
+    "db.query.summary": collection ? `${name} ${collection}` : name,
+    "datanotes.dry_run": typeof body.dry_run === "boolean" ? body.dry_run : undefined,
+    "datanotes.long_poll": name === "list_changes" && typeof body.wait_ms === "number" && body.wait_ms > 0 ? true : undefined,
+  };
+}
+
+/** What an operation span says after it ran: rows, notes, the journal entry, the refusal. */
+export function resultAttributes(span: Span, res: HandlerResponse): void {
+  const j = (res.json !== null && typeof res.json === "object" && !Array.isArray(res.json) ? res.json : {}) as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+  span.setAttributes({
+    "db.response.returned_rows": Array.isArray(j.rows) ? j.rows.length : Array.isArray(j.events) ? j.events.length : undefined,
+    "datanotes.rows_total": num(j.total),
+    "datanotes.notes_changed": num(j.notes_changed),
+    "datanotes.files_created": num(j.files_created),
+    "datanotes.migration_id": typeof j.migration_id === "string" ? j.migration_id : undefined,
+    "datanotes.violating_rows": Array.isArray(j.violations) && j.violations.length > 0 ? j.violations.length : undefined,
+    "datanotes.conflicts": Array.isArray(j.conflicts) && j.conflicts.length > 0 ? j.conflicts.length : undefined,
+  });
+  if (res.status >= 400) span.setAttribute("db.response.status_code", String(res.status));
+  // a refusal is the caller's to fix (status unset); a write that failed is an error
+  if (res.status >= 500) span.setStatus("error", `HTTP ${res.status}`).setAttribute("error.type", typeof j.error === "string" ? "failed" : String(res.status));
+  else if (j.ok === false || res.status >= 400) span.setAttribute("error.type", Array.isArray(j.violations) && j.violations.length > 0 ? "violation" : "refused");
 }
 
 /** Run one handler with error mapping and one telemetry record per request. */
@@ -861,13 +985,20 @@ export async function dispatch(route: string, handler: Handler, body: unknown, n
     if (body !== undefined && body !== null && (typeof body !== "object" || Array.isArray(body))) {
       throw new BadRequest("request body must be a JSON object");
     }
+    // a long poll waits for changes by design: its request is marked, so latency figures can leave it out
+    const waitMs = (body as Body | undefined)?.wait_ms;
+    if (operationOf(route) === "list_changes" && typeof waitMs === "number" && waitMs > 0) activeSpan().setAttribute("datanotes.long_poll", true);
     res = await handler((body ?? {}) as Body);
   } catch (e) {
     res = errorResponse(e, operationOf(route), route);
   }
-  // Services poll the change feed every few seconds: empty answers are not worth a log line.
-  if (operationOf(route) === "list_changes" && res.status === 200 && (res.json as { events?: unknown[] }).events?.length === 0) return res;
-  telemetry().log(res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : "INFO", "datanotes http", {
+  // Services poll the change feed every few seconds: empty answers are not worth a log line, nor a trace.
+  if (operationOf(route) === "list_changes" && res.status === 200 && (res.json as { events?: unknown[] }).events?.length === 0) {
+    discardTrace();
+    return res;
+  }
+  // while the request's span is exported, it says what this record says: the record goes to DEBUG
+  telemetry().log(res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : activeSpan().recording ? "DEBUG" : "INFO", "datanotes http", {
     "http.route": `${ROUTE_PREFIX}${route}`,
     "http.response.status_code": res.status,
     duration_ms: now() - start,

@@ -5,6 +5,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import esbuild from "esbuild";
+import { serviceBuildOptions } from "../scripts/service-build.mjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { localEngine, storeLocation } from "../src/api/local";
 import { docsFixture } from "./helpers/docs-fixture";
@@ -23,17 +24,7 @@ const temp: string[] = [];
 beforeAll(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "dn-mcp-bundle-"));
   bin = path.join(dir, "datanotes.cjs");
-  await esbuild.build({
-    entryPoints: [path.resolve(__dirname, "..", "src", "node", "cli.ts")],
-    bundle: true,
-    platform: "node",
-    target: "node22",
-    format: "cjs",
-    outfile: bin,
-    define: { SERVICE_VERSION: JSON.stringify("0.0.0-test"), SWAGGER_UI_CSS: '""', SWAGGER_UI_JS: '""' },
-    external: ["swagger-ui-dist/package.json"],
-    logLevel: "error",
-  });
+  await esbuild.build({ ...serviceBuildOptions({ outfile: bin, version: "0.0.0-test" }), absWorkingDir: path.resolve(__dirname, ".."), logLevel: "error" });
   vault = await openTestVault("service");
 }, 60_000);
 

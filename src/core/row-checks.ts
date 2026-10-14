@@ -4,7 +4,7 @@
  */
 
 import type { App, TFile } from "./host";
-import { catalogTables, loadMetastore } from "./metastore";
+import { catalogTables, loadMetastore, type Metastore } from "./metastore";
 import { loadRows, loadTable, uniqueViolations, type LoadedRow, type LoadedTable, type RowViolations } from "./engine";
 import { fmGet } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
@@ -20,7 +20,8 @@ import { compileCheck, linkName, type Where } from "./where";
 import { CheckLinks, followsLinks } from "./check-links";
 import { filteredLinkColumns, linkTargetCheck } from "./link-targets";
 import { messageOf } from "./message";
-import { unreadableMessage, unreadableRows } from "./unreadable";
+import { unreadableMessage, unreadableRows, type UnreadableNote } from "./unreadable";
+import { phase, tally, traceNow, tracingOn } from "./tracing";
 
 // --- CHECK constraints ---
 
@@ -29,7 +30,7 @@ import { unreadableMessage, unreadableRows } from "./unreadable";
  * compileCheck). CHECKs that follow links need `links`; without it they are left to
  * {@link linkedCheckViolations}, which checks them on the change set's final state.
  */
-export function constraintViolations(t: LoadedTable, settings: DatanotesSettings, path: string, ordered: OrderedFrontmatter, links?: CheckLinks): Violation[] {
+function constraintViolationsImpl(t: LoadedTable, settings: DatanotesSettings, path: string, ordered: OrderedFrontmatter, links?: CheckLinks): Violation[] {
   const raw = t.catalog.entry.constraints;
   if (!raw || typeof raw !== "object") return [];
   const out: Violation[] = [];
@@ -37,7 +38,7 @@ export function constraintViolations(t: LoadedTable, settings: DatanotesSettings
     if (!where || typeof where !== "object" || Array.isArray(where)) continue;
     if (!links && followsLinks(where)) continue;
     try {
-      if (!compileCheck(where as Where, t, settings, links)({ file: { path } as TFile, ordered, body: "" })) {
+      if (!compileCheck(where as Where, t, settings, links)({ file: { path } as TFile, ordered })) {
         out.push({ constraint: name, code: "check", message: `violates CHECK ${name}: ${JSON.stringify(where)}` });
       }
     } catch (e) {
@@ -53,7 +54,7 @@ export function constraintViolations(t: LoadedTable, settings: DatanotesSettings
  * Rows of `changed` that would become their own ancestor through a `hierarchy` column, given the
  * table's other rows. Rows are named by file name (links compare by note name).
  */
-export async function hierarchyViolations(
+async function hierarchyViolationsImpl(
   app: App,
   settings: DatanotesSettings,
   t: LoadedTable,
@@ -137,9 +138,26 @@ function checkViolation(v: Violation): CheckViolation {
   return v;
 }
 
-export async function checkOne(app: App, settings: DatanotesSettings, table: string): Promise<{ table: string; rows: number; violations: RowViolations[] }> {
+export async function checkOne(
+  app: App,
+  settings: DatanotesSettings,
+  table: string,
+  /** The unreadable rows of every table, read once for a check of all of them (on that metastore). */
+  everyUnreadable?: { model: Metastore; rows: readonly UnreadableNote[] },
+): Promise<{ table: string; rows: number; violations: RowViolations[] }> {
   const t = await loadTable(app, settings, table);
   const violations: RowViolations[] = [];
+  /** The rows already reported, by path: later checks add to them (a find per row was quadratic). */
+  const byPath = new Map<string, RowViolations>();
+  const report = (path: string, v: RowViolations["violations"]) => {
+    const existing = byPath.get(path);
+    if (existing) existing.violations.push(...v);
+    else {
+      const row = { path, violations: v };
+      violations.push(row);
+      byPath.set(path, row);
+    }
+  };
   // the table's rows, read once: CHECKs and link filters that read the table itself share them
   const links = new CheckLinks(app, settings);
   await links.prepare(t, null);
@@ -158,22 +176,16 @@ export async function checkOne(app: App, settings: DatanotesSettings, table: str
       ...targetChecks.flatMap((check) => check(r)),
       ...generatedMismatches(t, settings, r),
     ];
-    if (v.length > 0) violations.push({ path: r.file.path, violations: v });
+    if (v.length > 0) report(r.file.path, v);
   }
   const back = await missingBackLinks(app, settings, t.catalog.model, t.catalog.ref.full, rows.map((r) => ({ path: r.file.path, ordered: r.ordered })));
-  for (const [path, list] of back) {
-    const v = list.map((x) => ({ column: x.column, code: "inverse" as const, message: x.message, value: x.value }));
-    const existing = violations.find((x) => x.path === path);
-    if (existing) existing.violations.push(...v);
-    else violations.push({ path, violations: v });
-  }
-  for (const h of await hierarchyViolations(app, settings, t, rows.map((r) => ({ path: r.file.path, ordered: r.ordered })), rows)) {
-    const existing = violations.find((v) => v.path === h.path);
-    if (existing) existing.violations.push(...h.violations);
-    else violations.push(h);
-  }
+  for (const [path, list] of back) report(path, list.map((x) => ({ column: x.column, code: "inverse" as const, message: x.message, value: x.value })));
+  for (const h of await hierarchyViolations(app, settings, t, rows.map((r) => ({ path: r.file.path, ordered: r.ordered })), rows)) report(h.path, h.violations);
   // rows whose front matter cannot be read: every other read leaves them out
-  const unreadable = await unreadableRows(app, settings, t.catalog.model, t.catalog.ref.full);
+  const unreadable =
+    everyUnreadable && everyUnreadable.model === t.catalog.model
+      ? everyUnreadable.rows.filter((u) => u.table === t.catalog.ref.full)
+      : await unreadableRows(app, settings, t.catalog.model, t.catalog.ref.full);
   for (const u of unreadable) violations.push({ path: u.path, violations: [{ code: "unreadable", message: unreadableMessage(u.error) }] });
   return { table: t.def.name, rows: rows.length + unreadable.length, violations };
 }
@@ -197,10 +209,12 @@ async function checkImpl(app: App, settings: DatanotesSettings, input: CheckInpu
   const errors: { table: string; error: string }[] = [];
   let rows = 0;
   let tables = 0;
+  // the notes whose front matter cannot be read, found in one pass for every table
+  const everyUnreadable = model ? { model, rows: await unreadableRows(app, settings, model) } : undefined;
   for (const full of (model ? catalogTables(model).map(({ ref }) => ref.full) : []).sort()) {
     let r: Awaited<ReturnType<typeof checkOne>>;
     try {
-      r = await checkOne(app, settings, full);
+      r = await checkOne(app, settings, full, everyUnreadable);
     } catch (e) {
       errors.push({ table: full, error: messageOf(e) });
       continue;
@@ -222,4 +236,20 @@ export function checkTable(app: App, settings: DatanotesSettings, input: CheckIn
       attributes: { rows: r.rows_checked, violating_rows: r.total, ...(r.errors ? { failed_tables: r.errors.length } : {}) },
     }),
   );
+}
+
+/** {@link hierarchyViolationsImpl}, traced (cycles and `ref_by` levels). */
+export function hierarchyViolations(...args: Parameters<typeof hierarchyViolationsImpl>): ReturnType<typeof hierarchyViolationsImpl> {
+  return phase("engine.checks", () => hierarchyViolationsImpl(...args), { "datanotes.checks.kind": "hierarchy" });
+}
+
+/** {@link constraintViolationsImpl}; once per row, so timed on the active span (`datanotes.checks.rows`, `datanotes.checks.ms`), not a span each. */
+export function constraintViolations(t: LoadedTable, settings: DatanotesSettings, path: string, ordered: OrderedFrontmatter, links?: CheckLinks): Violation[] {
+  if (!tracingOn()) return constraintViolationsImpl(t, settings, path, ordered, links);
+  const start = traceNow();
+  try {
+    return constraintViolationsImpl(t, settings, path, ordered, links);
+  } finally {
+    tally("datanotes.checks.rows", "datanotes.checks.ms", start);
+  }
 }

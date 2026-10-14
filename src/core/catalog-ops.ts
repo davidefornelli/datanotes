@@ -9,7 +9,7 @@ import type { App, TFile } from "./host";
 import { emptyChangeSet, type ChangeSet } from "./changeset";
 import { readDatabaseConfig } from "./database";
 import { resolveDefault } from "./datetime";
-import { listVersions } from "./transaction-log";
+import { latestVersion } from "./transaction-log";
 import {
   catalogLoadedTable,
   checkColumnRefs,
@@ -23,6 +23,7 @@ import {
   OperationInputError,
   refused,
   type LoadedRow,
+  type LoadedRowWithBody,
   type LoadedTable,
   type OpConflict,
   type OpResult,
@@ -47,6 +48,7 @@ import {
   refOf,
   resolveCatalogRef,
   setCatalogComment,
+  setTableEntries,
   setTableEntry,
   setViewEntry,
   SYSTEM_CATALOG,
@@ -57,7 +59,7 @@ import {
   type ViewEntry,
 } from "./metastore";
 import { hasThisTokens, resolveThisTokens } from "./this-tokens";
-import { catalogRowFiles } from "./row-files";
+import { catalogRowFilesOf } from "./row-files";
 import type { DatanotesSettings } from "./settings";
 import { CheckLinks } from "./check-links";
 import { linkedCheckViolations, metastoreLeftBy } from "./changeset-checks";
@@ -403,13 +405,14 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
       );
     case "tables": {
       const out: Record<string, unknown>[] = [];
+      const defs = tables.map(({ ref }) => ({ full: ref.full, def: catalogLoadedTable(settings, { file: ms!.file, text: ms!.text, model }, ref).def }));
+      const rows = catalogRowFilesOf(app, settings, defs); // every table's rows in one pass over the vault
       for (const { ref, entry } of tables) {
-        const t = catalogLoadedTable(settings, { file: ms!.file, text: ms!.text, model }, ref);
-        const versions = await listVersions(app, settings, ref.full);
+        const latest = await latestVersion(app, settings, ref.full);
         out.push({
           table_catalog: ref.catalog, table_schema: ref.schema, table_name: ref.table, full_name: ref.full, table_type: "TABLE",
-          comment: entry.description ?? null, row_count: catalogRowFiles(app, settings, ref.full, t.def).length,
-          latest_version: versions.length > 0 ? versions[versions.length - 1]! : null, tags: tableTags(entry) ?? null,
+          comment: entry.description ?? null, row_count: rows.get(ref.full)!.length,
+          latest_version: latest, tags: tableTags(entry) ?? null,
         });
       }
       for (const { ref, view } of catalogViews(model)) {
@@ -452,7 +455,7 @@ export async function informationSchemaTableData(app: App, settings: DatanotesSe
   const entry: CatalogTableEntry = { columns: INFO_COLUMNS[name].map(([n, type]) => ({ name: n, type })) };
   const model: Metastore = { config: {}, bases: {}, catalogs: { [ref.catalog]: { schemas: { [ref.schema]: { tables: { [ref.table]: entry }, views: {} } } } } };
   const t = catalogLoadedTable(settings, { file: pseudoFile(metastorePath(settings)), text: "", model }, ref);
-  const rows: LoadedRow[] = (await informationRows(app, settings, name)).map((values, i) => ({
+  const rows: LoadedRowWithBody[] = (await informationRows(app, settings, name)).map((values, i) => ({
     file: pseudoFile(`${SYSTEM_CATALOG}/information_schema/${name}/${String(i + 1).padStart(5, "0")}`),
     ordered: Object.entries(values).filter(([, v]) => v !== null) as OrderedFrontmatter,
     body: "",
@@ -498,7 +501,7 @@ function describedFrom(entry: CatalogTableEntry, now: CatalogTableEntry | undefi
 async function cloneTableImpl(app: App, settings: DatanotesSettings, input: CloneTableInput, opts: RunOptions = {}): Promise<OpResult> {
   const asOf = input.version !== undefined || input.timestamp !== undefined;
   let src: LoadedTable;
-  let rows: LoadedRow[];
+  let rows: LoadedRowWithBody[];
   if (asOf) {
     const hist = await loadTableAsOf(app, settings, input.source, {
       ...(input.version !== undefined ? { version: input.version } : {}),
@@ -508,7 +511,7 @@ async function cloneTableImpl(app: App, settings: DatanotesSettings, input: Clon
     rows = hist.rows;
   } else {
     src = await loadTable(app, settings, input.source);
-    rows = input.shallow ? [] : await loadRows(app, settings, src);
+    rows = input.shallow ? [] : await loadRows(app, settings, src, false, { bodies: true });
   }
   const ref = await newRef(app, settings, { name: input.target }, { catalog: src.def.catalog, schema: src.def.schema });
   const { text, model } = await metastoreOrEmpty(app, settings);
@@ -751,7 +754,7 @@ async function defineBaseImpl(app: App, settings: DatanotesSettings, input: Defi
   try {
     next = parseMetastore(after);
     if (Object.keys(rename).length > 0) {
-      for (const { ref, entry } of rewrittenEntries(model, next, { key: renamed, refBy })) after = setTableEntry(after, ref, entry);
+      after = setTableEntries(after, rewrittenEntries(model, next, { key: renamed, refBy }).map(({ ref, entry }) => [ref, entry] as const));
       next = parseMetastore(after);
     }
   } catch (e) {

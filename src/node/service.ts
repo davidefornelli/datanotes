@@ -36,9 +36,10 @@ import os from "node:os";
 import path from "node:path";
 import { mergeWithDefaults, RUNTIME_KEYS, type DatanotesSettings } from "../core/settings";
 import { telemetry } from "../core/telemetry";
+import { startChild, startSpan, traceNow } from "../core/tracing";
 import { LockHolder } from "../server/engine-lock";
 import { EngineRuntime } from "../server/runtime";
-import { onApplied } from "../core/engine";
+import { engineWriting, onApplied } from "../core/engine";
 import { recordDatabaseMove } from "../core/database";
 import { setBulkWriter } from "../core/vault-settle";
 import { writeJournal } from "../core/journal";
@@ -46,9 +47,13 @@ import { METASTORE_FILE } from "../core/metastore";
 import { GitSync } from "./git-sync";
 import { gitBusy, gitDirOf } from "./git-state";
 import { setRepairGate } from "../core/hand-moves";
-import { MIN_EVERY_S, parseEvery, StoreBackup } from "./store-backup";
+import { followStoreChanges, MIN_EVERY_S, parseEvery, StoreBackup } from "./store-backup";
 import { logLockActivity, withLogLock } from "../core/transaction-log";
-import { nodeStoreAdapter, openNodeVault } from "./node-app";
+import { closeNodeHost, createNodeHost, indexNodeHost, type NodeHost } from "./node-app";
+import { nodeStoreFiles } from "./store-files";
+import { removeVaultIndex } from "./index-db";
+import { keepIndexersOut } from "./store-hygiene";
+import { enableIndexCheck } from "../core/index-check";
 import { PRIVATE_FILE_MODE } from "./private-files";
 import { nodeVersionWarning } from "./node-version";
 import { NodeWatcher } from "./watcher";
@@ -199,7 +204,36 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
       guide(`Create the folder first (an empty folder starts a new database), or fix the path in ${option}; the engine never creates the folder it serves.`, "startEngine"),
     );
   }
-  const host = openNodeVault(o.vault);
+  // the start is traced after the fact (startTrace): its work runs in no span, or what it starts would inherit it
+  const t0 = traceNow();
+  const host = createNodeHost(o.vault);
+  // The vault is walked once; once the notes are read, the watcher follows the OS's reports and
+  // compares the tree with what the walk found without blocking. Windows reports from the moment
+  // the watcher starts; elsewhere a comparison 1 s after start catches what a slow OS stream missed.
+  const watcher = new NodeWatcher(host.vault, {
+    mode: o.watch,
+    intervalMs: o.pollMs,
+    ...(process.platform === "win32" ? { startupRescanMs: 0 } : {}),
+    writing: () => engineWriting(host.app),
+  });
+  // the lock, once the start holds the store: let go if the start fails
+  const held: { lock: LockHolder | null } = { lock: null };
+  try {
+    return await startOn(o, env, locEnv, host, watcher, t0, held);
+  } catch (e) {
+    // a start that failed follows nothing, leaves the index on disk closed, then lets the store go
+    watcher.stop();
+    closeNodeHost(host);
+    await held.lock?.release();
+    throw e;
+  }
+}
+
+/** The rest of {@link startService} (a failure stops the watcher, closes the host and releases `held.lock`). */
+async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record<string, string | undefined>, host: NodeHost, watcher: NodeWatcher, t0: number, held: { lock: LockHolder | null }): Promise<RunningService> {
+  const walkAt = performance.now();
+  const { renameTemps } = await host.vault.scan();
+  const walked = { at: walkAt, ms: performance.now() - walkAt };
   const notes: [level: "INFO" | "WARN", message: string, attrs?: Record<string, unknown>][] = [];
   let opened: OpenedStore;
   try {
@@ -213,13 +247,16 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
       log: (level, message, attrs) => notes.push([level, message, attrs]),
     });
   } catch (e) {
-    host.metadataCache.dispose();
+    closeNodeHost(host);
     throw e;
   }
   // the id written into the metastore before the store existed: the index reads it again
   if (opened.idAdded) host.vault.syncPath(`${opened.database}/${METASTORE_FILE}`);
   const app = host.app;
-  app.store = nodeStoreAdapter(opened.store);
+  // the store's files: binary checkpoint parts, and synced as the setting storeSync says (read once loaded below)
+  app.store = nodeStoreFiles(opened.store, { sync: () => settings.storeSync });
+  // a debug check of the engine's indexes against the vault after every operation
+  if (env.DATANOTES_INDEX_CHECK === "1") enableIndexCheck(app);
   const file = settingsPath(o, opened.store);
 
   let raw: Record<string, unknown> = {};
@@ -232,6 +269,22 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
   const settings = mergeWithDefaults(raw);
   settings.databaseFolder = opened.database;
   settings.databaseId = opened.id;
+  // search indexers skip the store (Windows Search, Spotlight), Time Machine the vault index when
+  // it is on: in the background, best effort
+  keepIndexersOut(opened.store, { index: settings.vaultIndexEnabled });
+  // The store is this start's since openStore (its lock names this process, port 0): the
+  // heartbeat starts now, so the lock stays fresh however long the notes take to read. Port 0
+  // says "starting" (datanotes status, stop, mcp) until the server listens (setPort below).
+  const lock = new LockHolder(app.store, "", { kind: "service", pid: process.pid, host: os.hostname(), port: 0 });
+  const tLock = traceNow();
+  await lock.acquire();
+  const tLocked = traceNow();
+  held.lock = lock;
+  // the notes, read many at a time once the walk found the store; with the vault index on disk,
+  // only those changed since the last start
+  if (!settings.vaultIndexEnabled) removeVaultIndex(opened.store);
+  const indexed = await indexNodeHost(host, settings.vaultIndexEnabled ? { index: { store: opened.store, version: VERSION }, hold: true } : {});
+  const tVault = traceNow();
   let recorded = opened.database;
   const save = async () => {
     // Keep keys this version does not know (another version may have written them).
@@ -253,7 +306,6 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
     }
   };
 
-  const watcher = new NodeWatcher(host.vault, { mode: o.watch, intervalMs: o.pollMs });
   const keyFromFile = () => {
     if (!o.embeddingKeyFile) return undefined;
     try {
@@ -279,16 +331,14 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
     ...(o.port !== undefined ? { httpPort: o.port } : {}),
   });
   runtime.startTelemetry();
+  // how much of the vault the start read (with the vault index, only the notes changed since)
+  telemetry().log("INFO", "datanotes read the vault", { notes: indexed.notes, notes_read: indexed.read, notes_moved: indexed.moved, vault_index: indexed.indexed ? (indexed.rebuilt ? `built: ${indexed.rebuilt}` : "used") : "off" });
   for (const [level, message, attrs] of notes) {
     telemetry().log(level, message, attrs as never);
     console.log(message);
   }
-  // Claim the database before serving: tools find the running engine through the lock (datanotes/local).
-  // Until the server listens, the lock gives the port asked for: 0 (any free port) says "not yet".
-  const lock = new LockHolder(app.store, "", { kind: "service", pid: process.pid, host: os.hostname(), port: o.port ?? settings.httpServerPort });
-  await lock.acquire();
-  // renames in case only that a crash left half done: finished once no other engine can be renaming
-  const renames = host.vault.recoverRenames();
+  // renames in case only that a crash left half done (the walk found them): finished once no other engine can be renaming
+  const renames = host.vault.recoverRenames(renameTemps);
   for (const p of renames.recovered) host.vault.syncPath(p);
   if (renames.recovered.length + renames.left.length > 0) telemetry().log(renames.left.length > 0 ? "WARN" : "INFO", "datanotes finished renames a crash left half done", { recovered: renames.recovered.join(", "), left: renames.left.join(", ") });
   if (opened.idAdded) {
@@ -298,9 +348,10 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
   }
   // The database folder was moved by hand while the engine was stopped: recorded as a move.
   if (opened.moved) await recordDatabaseMove(app, settings, { ...opened.moved, by: "hand" });
-  watcher.start();
+  // the changes made since the walk, found without blocking (requests wait for them)
+  watcher.start({ scanned: walked });
   // every operation first applies the changes the watcher has seen but not applied yet
-  runtime.setHostSettler(() => watcher.flush());
+  runtime.setHostSettler((since) => watcher.flush(since));
   // many writes at once (a move of the database folder): the watcher stops meanwhile, then compares the vault
   setBulkWriter(app, async (work) => {
     watcher.stop();
@@ -310,7 +361,9 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
       watcher.start();
     }
   });
+  const tRuntime = traceNow();
   await runtime.start({ http: false });
+  const tStarted = traceNow();
   if (opened.moved) await runtime.changeFeed?.databaseMoved(opened.moved.from, opened.moved.to, false);
 
   let git: GitSync | null = null;
@@ -320,6 +373,8 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
   let offApplied: (() => void) | null = null;
   let backup: StoreBackup | null = null;
   let offBackup: (() => void) | null = null;
+  /** The store files the engine writes, for the store backup's commits. */
+  let backupChanges: ReturnType<typeof followStoreChanges> | null = null;
   let stopping: Promise<void> | null = null;
   let markStopped!: () => void;
   const stopped = new Promise<void>((r) => (markStopped = r));
@@ -343,9 +398,10 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
       watcher.stop();
       await runtime.dispose();
       setRepairGate(app, null);
-      host.metadataCache.dispose();
+      closeNodeHost(host);
       // after the engine's last writes (change feed, tokens): a last commit and push
       await backup?.stop();
+      backupChanges?.dispose();
       if (git) await lastGitSync(git, o.gitSyncStopMs ?? GIT_SYNC_STOP_MS);
       await lock.release();
     })().finally(markStopped);
@@ -371,14 +427,21 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
     await new Promise((r) => setTimeout(r, 1000));
   }
   if (!runtime.httpServerRunning) {
-    await lock.release();
+    // the lock goes in startService's catch, once the host is closed (the index flushed first)
     await runtime.dispose();
     watcher.stop();
-    host.metadataCache.dispose();
+    closeNodeHost(host);
     // a server not running says why, and what to do
     throw new GuidedError(`HTTP server did not start: ${runtime.httpServerError!}`, guidanceOf(runtime.httpServerFailure) ?? guide("Check --host and --port; datanotes status shows what holds the vault.", "port"));
   }
   // The port bound, not the setting: with 0 the system chose it, and tools read it from the lock.
+  const tHttp = traceNow();
+  // the vault index records what the start found, now that the engine answers
+  host.index?.release();
+  // the strings of the notes taken from the vault index interned in slices, between requests
+  void host.metadataCache.internRecords();
+  // the search's row ids read in slices, then SQLite's check of the index, a table at a time (index-db.ts)
+  host.index?.afterStart();
   const port = runtime.httpPort!;
   await lock.setPort(port);
   if (o.gitSync) {
@@ -391,6 +454,7 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
   // The store backup: every N seconds, a commit between two operations when something changed, then a push; a last one at stop.
   const b = o.storeBackup ?? {};
   if (b.enabled ?? (b.remote ? true : settings.storeBackupEnabled)) {
+    backupChanges = followStoreChanges(app);
     backup = new StoreBackup({
       store: opened.store,
       databaseId: opened.id,
@@ -400,6 +464,7 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
       every: b.every ?? settings.storeBackupIntervalSeconds * 1000,
       // the engine's write lock: a commit is a snapshot between two operations
       engine: { activity: () => logLockActivity(app), exclusive: (fn) => withLogLock(app, fn) },
+      changes: backupChanges,
       ...(b.quietMs !== undefined ? { quietMs: b.quietMs } : {}),
       ...(b.stopTimeoutMs !== undefined ? { stopTimeoutMs: b.stopTimeoutMs } : {}),
       log: (level, msg, attrs) => telemetry().log(level, msg, attrs as never),
@@ -419,6 +484,7 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
     git: git ? { ...git.status } : null,
     storeBackup: backup ? { ...backup.status } : null,
   }));
+  startTrace({ t0, tVault, tLock, tLocked, tRuntime, tStarted, tHttp, end: traceNow() }, { files: host.vault.getFiles().length, port });
   telemetry().log("INFO", "datanotes service started", { vault: o.vault, port, watch: o.watch, settings: file, store: opened.store, database: settings.databaseFolder, database_id: opened.id });
 
   return {
@@ -432,6 +498,20 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
     stop,
     stopped,
   };
+}
+
+/**
+ * The engine's start as one trace (`job datanotes_start`), recorded once it is over: the vault
+ * loaded (its files indexed), the lock taken, the runtime started (metastore, change feed), the
+ * HTTP server listening.
+ */
+export function startTrace(t: { t0: number; tVault: number; tLock: number; tLocked: number; tRuntime: number; tStarted: number; tHttp: number; end: number }, info: { files: number; port: number }): void {
+  const root = startSpan("job datanotes_start", { newTrace: true, startMs: t.t0, attributes: { "datanotes.files": info.files, "server.port": info.port } });
+  startChild(root, "engine.vault.load", { startMs: t.t0, attributes: { "datanotes.files": info.files } }).end(t.tVault);
+  startChild(root, "engine.lock.acquire", { startMs: t.tLock, attributes: { "datanotes.lock.kind": "process" } }).end(t.tLocked);
+  startChild(root, "engine.runtime.start", { startMs: t.tRuntime }).end(t.tStarted);
+  startChild(root, "engine.http.listen", { startMs: t.tStarted }).end(t.tHttp);
+  root.end(t.end);
 }
 
 /** How long a stop waits for git sync's last commit and push (after the store backup's 15 s). */

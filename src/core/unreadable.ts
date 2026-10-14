@@ -19,6 +19,7 @@ import { TABLE_KEY } from "./types-table";
 import type { DatanotesSettings } from "./settings";
 import { messageOf } from "./message";
 import { normalizeDatabaseFolder } from "./db-paths";
+import { vaultIndex } from "./vault-index";
 
 /** A row whose front matter cannot be read. */
 export interface UnreadableNote {
@@ -112,10 +113,13 @@ export async function unreadableRows(
 ): Promise<UnreadableNote[]> {
   const excluded = excludedFolders(model, settings);
   const out: UnreadableNote[] = [];
-  for (const f of app.vault.getMarkdownFiles()) {
+  // with a vault index, only the notes the host has no front matter for (vault-index.ts)
+  const idx = vaultIndex(app, settings);
+  const notes = idx ? [...idx.allNotes()].filter((n) => n.bare).map((n) => n.file) : app.vault.getMarkdownFiles();
+  for (const f of notes) {
     let cached: unknown;
     try {
-      cached = app.metadataCache.getFileCache(f)?.frontmatter;
+      cached = idx ? undefined : app.metadataCache.getFileCache(f)?.frontmatter;
     } catch {
       cached = undefined; // a host whose index throws on broken YAML: read below
     }

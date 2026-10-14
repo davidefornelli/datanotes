@@ -30,7 +30,8 @@ import { findDocsDir, openDocs } from "../api/docs";
 import { localEngine } from "../api/local";
 import { mcpHelp } from "./help";
 import { startHttp } from "./http";
-import { closeExporter, exporterFromEnv, noLog, type Log } from "./log";
+import { closeExporter, exporterFromEnv, noLog, tracerFromEnv, type Log } from "./log";
+import type { Tracer } from "../api/tracing";
 import { envFlag, selectTools, ToolSelectionError } from "./selection";
 import { createSession } from "./server";
 import { Toolbox } from "./tools";
@@ -150,7 +151,7 @@ export async function startEngine(vault: string, command: string[], timeoutMs = 
 
 type Exit = (code: number) => void;
 
-async function stdio(argv: string[], version: string, io: McpIo, log: Log, exit: Exit): Promise<McpRun> {
+async function stdio(argv: string[], version: string, io: McpIo, log: Log, exit: Exit, tracer: Tracer | null = null): Promise<McpRun> {
   const o = readOptions(argv, STDIO_OPTIONS, "datanotes mcp");
   // the tools first: a wrong name is refused before an engine is started
   const tools = toolsOf(o, io.env);
@@ -179,7 +180,7 @@ async function stdio(argv: string[], version: string, io: McpIo, log: Log, exit:
     if (!url || !token) throw new Error("pass --database <folder> (or --vault <folder>), or --url <engine> with --token-file <file> (datanotes mcp --help)");
     engine = { url, token };
   }
-  const toolbox = new Toolbox(engine.url, log, openDocs(findDocsDir(io.env)), tools);
+  const toolbox = new Toolbox(engine.url, log, openDocs(findDocsDir(io.env)), tools, tracer);
   const sessionId = randomUUID();
   const session = createSession({ toolbox, instructions: toolbox.instructions(), token: () => engine.token, version, session: sessionId });
   const transport = new StdioServerTransport(io.stdin, io.stdout);
@@ -199,13 +200,13 @@ async function stdio(argv: string[], version: string, io: McpIo, log: Log, exit:
   return { mode: "stdio", url: engine.url, child, stop };
 }
 
-async function serve(argv: string[], version: string, io: McpIo, log: Log, exit: Exit): Promise<McpRun> {
+async function serve(argv: string[], version: string, io: McpIo, log: Log, exit: Exit, tracer: Tracer | null = null): Promise<McpRun> {
   const o = readOptions(argv, SERVE_OPTIONS, "datanotes mcp serve");
   const engine = o.get("url") ?? io.env.DATANOTES_URL ?? DEFAULT_ENGINE;
   const host = o.get("host") ?? io.env.DATANOTES_MCP_HOST ?? "127.0.0.1";
   const port = Number(o.get("port") ?? io.env.DATANOTES_MCP_PORT ?? DEFAULT_PORT);
   const tools = toolsOf(o, io.env);
-  const srv = await startHttp({ toolbox: new Toolbox(engine, log, openDocs(findDocsDir(io.env)), tools), host, port, version });
+  const srv = await startHttp({ toolbox: new Toolbox(engine, log, openDocs(findDocsDir(io.env)), tools, tracer), host, port, version });
   const listen = `http://${host}:${srv.port}/mcp`;
   io.stdout.write(`datanotes mcp ${version}: ${listen} -> ${engine}\n`);
   log("INFO", `datanotes mcp ${version} started (http) at ${listen} -> ${engine}`, { mode: "http", engine, listen, version });
@@ -238,11 +239,13 @@ export async function mcp(argv: string[], version: string, io: McpIo): Promise<M
   const otlp = argv.find((a, i) => a.startsWith("--otlp-endpoint=") || argv[i - 1] === "--otlp-endpoint");
   const exporter = exporterFromEnv(io.env, version, otlp?.replace(/^--otlp-endpoint=/, ""));
   const log: Log = exporter ? exporter.log.bind(exporter) : noLog;
-  // the exporter's last records are sent before every exit
-  const exit: Exit = (code) => void closeExporter(exporter).then(() => io.exit(code));
+  const traces = tracerFromEnv(io.env, version, otlp?.replace(/^--otlp-endpoint=/, ""));
+  const tracer = traces?.tracer ?? null;
+  // the exporters' last records and spans are sent before every exit
+  const exit: Exit = (code) => void Promise.all([closeExporter(exporter), closeExporter(traces?.exporter ?? null)]).then(() => io.exit(code));
   try {
-    if (command === "serve") return await serve(rest, version, io, log, exit);
-    if (!command || command.startsWith("--")) return await stdio(argv, version, io, log, exit);
+    if (command === "serve") return await serve(rest, version, io, log, exit, tracer);
+    if (!command || command.startsWith("--")) return await stdio(argv, version, io, log, exit, tracer);
     throw new Error(`unknown command "${command}" (datanotes mcp --help)`);
   } catch (e) {
     const message = (e as Error).message;

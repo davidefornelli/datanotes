@@ -28,6 +28,12 @@ describe("mergeWithDefaults", () => {
     expect(mergeWithDefaults({ repairLinksOnHandMove: "no" as never }).repairLinksOnHandMove).toBe(true);
   });
 
+  it("keeps the vault index on disk by default; vaultIndexEnabled false turns it off, a value that is no boolean keeps it", () => {
+    expect(DEFAULT_SETTINGS.vaultIndexEnabled).toBe(true);
+    expect(mergeWithDefaults({ vaultIndexEnabled: false }).vaultIndexEnabled).toBe(false);
+    expect(mergeWithDefaults({ vaultIndexEnabled: "off" as never }).vaultIndexEnabled).toBe(true);
+  });
+
   it("ignores unknown top-level keys (forward compatibility)", () => {
     const merged = mergeWithDefaults({
       futureFeatureFlag: true,

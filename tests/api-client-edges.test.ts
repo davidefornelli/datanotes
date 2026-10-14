@@ -206,9 +206,10 @@ describe("recordToolCall", () => {
   const CALL = { tool: "select_rows", args: { table: "log" }, ok: true, duration_ms: 12, value: { total: 2 }, served_by: "engine", session: "s1", result_chars: 40, result_tokens: 10 };
 
   it("posts the call to the change feed, as the given actor", async () => {
-    const f = fake(() => json(200, { recorded: true }));
+    const f = fake(() => json(200, { ok: true, takes_summary: true }));
     const c = new DatanotesClient({ url: ENGINE, token: TOKEN, actor: { harness: "client" }, transport: f.transport });
-    expect(await c.recordToolCall(CALL, { harness: "claude-code", model: "m" })).toBeUndefined();
+    // the engine's answer: it takes a value sent cut, with its summary
+    expect(await c.recordToolCall(CALL, { harness: "claude-code", model: "m" })).toEqual({ ok: true, takes_summary: true });
     expect(f.sent).toEqual([
       {
         url: `${ENGINE}/datanotes/tool-calls/record/`,

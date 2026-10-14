@@ -31,6 +31,10 @@
  *     uncommitted, once the git locks it left are removed); on stop: a last commit and push,
  *     whatever the backoff, within `stopTimeoutMs` (15 s): past it, git is killed;
  *   - under the lock, no automatic `git gc` (`-c gc.auto=0`); `git gc --auto` runs after the push;
+ *   - the engine says which store files it wrote (`changes`): a tick with none runs no git at all,
+ *     and the `git add` under the lock stages only their folders (the one before it, outside the
+ *     lock, stages the rest); the repository keeps git's untracked cache (`core.untrackedCache`,
+ *     `feature.manyFiles`), so `git status` and `git add` do not read every folder again;
  *   - a file over 95 MB (GitHub refuses files over 100 MB) stops the push, with a hint in the status.
  *
  * Git never prompts and has a time limit (`runGit` in git-sync.ts): a git killed is a failure.
@@ -44,7 +48,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import type { App } from "../core/host";
 import { guide, type Guidance } from "../core/hints";
+import { onStoreChange, storeKey } from "../core/store";
 import { messageOf } from "../core/message";
 import { forgetSshCommand, isNetworkGit, NETWORK_TIMEOUT_MS, runGit, type GitRunner } from "./git-sync";
 
@@ -160,6 +166,9 @@ export async function prepareStoreRepo(store: string, remote: string | null, run
   // Git for Windows refuses paths over 260 characters without it (the store sits under the user's
   // data folder, so a long user name or note name gets there); other systems ignore it
   await git(run, store, "config", "core.longpaths", "true");
+  // thousands of files (one per version of a table's log): git keeps what it knows of the folders
+  await git(run, store, "config", "feature.manyFiles", "true");
+  await git(run, store, "config", "core.untrackedCache", "true");
   if ((await git(run, store, "config", "user.email")).code !== 0) {
     await git(run, store, "config", "user.name", "Datanotes");
     await git(run, store, "config", "user.email", "datanotes@localhost");
@@ -233,8 +242,58 @@ export interface StoreBackupOptions {
   sshCommand?: string;
   /** The time limit of the git commands that stay local (`add`, `commit`…), default 60 s; pushes keep theirs. */
   localTimeoutMs?: number;
+  /** The store files the engine changed (none: `git status` and `git add -A` look at every file). */
+  changes?: StoreChanges;
   run?: GitRunner;
   log?(level: "INFO" | "WARN" | "ERROR", message: string, attributes?: Record<string, unknown>): void;
+}
+
+/** The store files the engine changed since it was last asked: what a commit has to stage. */
+export interface StoreChanges {
+  /** Whether a file changed since the last {@link take}. */
+  pending(): boolean;
+  /** The files changed since the last call (store-relative paths), and forget them; null when too many to list. */
+  take(): string[] | null;
+}
+
+/** How many changed files are listed before {@link StoreChanges.take} says "too many" (null). */
+const CHANGES_LISTED = 2000;
+
+/** The store files the engine of `app` changes from now on (store.ts tells of each one). */
+export function followStoreChanges(app: App): StoreChanges & { dispose(): void } {
+  let files = new Set<string>();
+  let overflow = false;
+  const dispose = onStoreChange(app, (p) => {
+    if (overflow) return;
+    files.add(storeKey(p));
+    if (files.size > CHANGES_LISTED) {
+      overflow = true;
+      files = new Set();
+    }
+  });
+  return {
+    pending: () => overflow || files.size > 0,
+    take: () => {
+      const out = overflow ? null : [...files];
+      files = new Set();
+      overflow = false;
+      return out;
+    },
+    dispose,
+  };
+}
+
+/** The tracked folders (and files) holding `paths`, as `git add` takes them (the others are not backed up). */
+function trackedPathspecs(paths: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const p of paths) {
+    const t = BACKUP_TRACKED.find((x) => (x.endsWith("/") ? p.startsWith(x) : p === x));
+    if (!t) continue; // not backed up (settings, logs, the change of a file it ignores)
+    // the file's folder: a file written and removed again before the commit is no path git knows
+    const folder = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : p;
+    out.add(folder);
+  }
+  return [...out].sort();
 }
 
 export interface StoreBackupStatus {
@@ -447,12 +506,21 @@ export class StoreBackup {
     this.status.pendingOperations = this.ops.length;
   }
 
-  /** Whether the tracked files changed since the last commit (a git that fails says yes: the commit reports it). */
+  /**
+   * Whether the tracked files changed since the last commit (a git that fails says yes: the commit
+   * reports it). With the engine's changes, a tick where it wrote nothing asks git nothing (the
+   * first one asks: what an earlier run left).
+   */
   private async changed(): Promise<boolean> {
+    if (this.o.changes && this.lookedOnce && !this.o.changes.pending() && !this.status.lastError) return false;
+    this.lookedOnce = true;
     // --no-optional-locks: a read that never takes the index lock
     const st = await this.git("--no-optional-locks", "status", "--porcelain");
     return st.code !== 0 || st.stdout.trim() !== "";
   }
+
+  /** Whether `git status` ran, or a commit staged every file, in this run (what a run before left is found by it). */
+  private lookedOnce = false;
 
   /**
    * Resolves true once the engine is idle (no operation running or waiting, none for `quietMs`),
@@ -536,7 +604,9 @@ export class StoreBackup {
     return this.serial(async () => {
       const engine = this.o.engine;
       let ops: Operation[] = [];
-      // outside the lock: what it stages, the add under the lock brings up to date
+      // outside the lock: what it stages, the add under the lock brings up to date (only what the
+      // engine changed from here on, when it says)
+      this.o.changes?.take();
       await this.git(...NO_AUTO_GC, "add", "-A");
       const snapshot = async (): Promise<number> => {
         const started = performance.now();
@@ -545,8 +615,13 @@ export class StoreBackup {
         this.ops = [];
         let succeeded = false;
         try {
-          const add = await this.git(...NO_AUTO_GC, "add", "-A");
-          if (add.code !== 0) throw new Error(`git add: ${add.stderr.trim()}`);
+          // the folders of the files the engine changed since the first add; every file when it cannot say
+          const changed = this.o.changes?.take();
+          const specs = changed === undefined || changed === null ? null : trackedPathspecs(changed);
+          let add = specs === null ? await this.git(...NO_AUTO_GC, "add", "-A") : specs.length === 0 ? null : await this.git(...NO_AUTO_GC, "add", "-A", "--", ...specs);
+          // a folder gone meanwhile (a table's log renamed): every file
+          if (add && add.code !== 0 && specs !== null) add = await this.git(...NO_AUTO_GC, "add", "-A");
+          if (add && add.code !== 0) throw new Error(`git add: ${add.stderr.trim()}`);
           const staged = await this.git("diff", "--cached", "--name-only");
           const n = staged.stdout.split("\n").filter(Boolean).length;
           if (n > 0) {
@@ -554,6 +629,8 @@ export class StoreBackup {
             if (commit.code !== 0) throw new Error(`git commit: ${commit.stderr.trim() || commit.stdout.trim()}`);
           }
           succeeded = true;
+          // every file is staged now: the next ticks ask git only once the engine writes again
+          this.lookedOnce = true;
           return n;
         } finally {
           // a failed add or commit leaves its operations to the next commit

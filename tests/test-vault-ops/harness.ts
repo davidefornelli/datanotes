@@ -54,6 +54,8 @@ export function runScenarios(scenarios: Scenario[]): void {
               expect(missing, `operations the scenario names but did not call: ${missing.join(", ")}`).toEqual([]);
               const check = await t.ok<{ violations: unknown[] }>("check_table", {});
               expect(check.violations, "the scenario left rows that break the schema").toEqual([]);
+              // the engine's indexes still agree with the vault (index-check.ts)
+              expect(await t.indexDiffs(), "the vault index is out of step with the vault").toEqual([]);
             } finally {
               await t.stop();
               await extra?.close();

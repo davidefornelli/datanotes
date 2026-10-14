@@ -213,6 +213,38 @@ describe("datanotes mcp: stdio", () => {
     expect(io.exits).toEqual([0]);
   });
 
+  it("traces: a SERVER span per tool call continuing the client's _meta.traceparent, a CLIENT span per engine request, sent before the exit", async () => {
+    const got: { url?: string; body: string }[] = [];
+    const srv = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (c: Buffer) => (body += c.toString()));
+      req.on("end", () => {
+        got.push({ url: req.url, body });
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    try {
+      const io = fakeIo({ OTEL_EXPORTER_OTLP_PROTOCOL: "http/json", OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${(srv.address() as AddressInfo).port}` });
+      await run(["--vault", vault.root], io);
+      const client = await connect(io, "traced-agent");
+      await client.callTool({ name: "list_tables", arguments: {}, _meta: { traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", tracestate: "k=v" } });
+      io.stdin.end();
+      await until(() => io.exits.length > 0);
+      const spans = got
+        .filter((g) => g.url === "/v1/traces")
+        .flatMap((g) => JSON.parse(g.body).resourceSpans[0].scopeSpans[0].spans as { name: string; traceId: string; spanId: string; parentSpanId?: string; kind: number; traceState?: string }[]);
+      const tool = spans.find((s) => s.name === "tools/call list_tables")!;
+      expect(tool).toMatchObject({ kind: 2, traceId: "0af7651916cd43dd8448eb211c80319c", parentSpanId: "b7ad6b7169203331", traceState: "k=v" });
+      expect(spans.find((s) => s.kind === 3)).toMatchObject({ name: "POST /datanotes/operations/list_tables/", parentSpanId: tool.spanId });
+      // the tool call's log record names its span
+      const logs = got.filter((g) => g.url === "/v1/logs").flatMap((g) => JSON.parse(g.body).resourceLogs[0].scopeLogs[0].logRecords as { body: { stringValue: string }; spanId?: string }[]);
+      expect(logs.find((l) => l.body.stringValue.startsWith("tool list_tables"))!.spanId).toBe(tool.spanId);
+    } finally {
+      await new Promise((r) => srv.close(r));
+    }
+  });
+
   it("DATANOTES_VAULT instead of --vault; a signal stops it", async () => {
     const io = fakeIo({ DATANOTES_VAULT: vault.root });
     await run([], io);

@@ -7,9 +7,9 @@ import { configureDatabase } from "../src/core/database";
 import { createDbVault, type DbVault, METASTORE } from "./helpers/db-vault";
 import { described } from "./helpers/descriptions";
 
-/** A vault with time travel on (it is off by default). */
+/** A vault with time travel on (it is off by default), one file per version (the tests name them). */
 async function historyVault(): Promise<DbVault> {
-  const v = createDbVault({});
+  const v = createDbVault({}, { transactionLogFormat: "files" });
   await configureDatabase(v.app, v.settings, { history: true }, async () => {});
   return v;
 }
@@ -119,14 +119,17 @@ describe("transaction log", () => {
     for (let i = 0; i < 11; i++) {
       await insertRow(v.app, v.settings, { table: "mood", values: { occurred_at: `2026-09-${String(10 + i).padStart(2, "0")}T09:00`, value: 1 } });
     }
-    // 10 commits (v0..v9) since the start: checkpoint at version 9.
-    expect(v.exists("store:transaction_log/main.metrics.mood/00000000000000000009.checkpoint.json")).toBe(true);
+    // 10 commits (v0..v9) since the start: checkpoint at version 9, a manifest and the part of its texts
+    expect(v.exists("store:transaction_log/main.metrics.mood/00000000000000000009.manifest.jsonl")).toBe(true);
+    expect(v.exists("store:transaction_log/main.metrics.mood/00000000000000000009.part-0.jsonl")).toBe(true);
     expect((await select(v.app, v.settings, { table: "mood", version: 10 })).total).toBe(10);
     const dry = await vacuumTable(v.app, v.settings, { table: "mood", retainFrom: 10 }, { dryRun: true });
-    expect(dry.deleted).toHaveLength(11); // commits 0..9 and checkpoint 9
+    expect(dry.deleted).toHaveLength(12); // commits 0..9 and checkpoint 9 (manifest and part)
     expect(await listVersions(v.app, v.settings, "main.metrics.mood")).toHaveLength(12);
     await vacuumTable(v.app, v.settings, { table: "mood", retainFrom: 10 });
     expect(await listVersions(v.app, v.settings, "main.metrics.mood")).toEqual([10, 11]);
+    // the checkpoint a vacuum writes is the single document every Datanotes 3 reads
+    expect(v.exists("store:transaction_log/main.metrics.mood/00000000000000000010.checkpoint.json")).toBe(true);
     expect((await select(v.app, v.settings, { table: "mood", version: 10 })).total).toBe(10);
     await expect(select(v.app, v.settings, { table: "mood", version: 5 })).rejects.toThrow(/no version 5/);
     await insertRow(v.app, v.settings, { table: "mood", values: { occurred_at: "2026-09-30T09:00", value: 1 } });
@@ -195,7 +198,7 @@ describe("transaction log", () => {
       await insertRow(v.app, v.settings, { table: "mood", values: { occurred_at: `2026-09-${String(1 + i).padStart(2, "0")}T09:00`, value: 1 } });
     }
     // 26 small commits stay far below the byte threshold: no checkpoint, history intact.
-    expect(v.listAll().filter((p) => p.endsWith(".checkpoint.json"))).toEqual([]);
+    expect(v.listAll().filter((p) => p.endsWith(".manifest.jsonl"))).toEqual([]);
     expect((await select(v.app, v.settings, { table: "mood", version: 12 })).total).toBe(12);
     const policy = { ...CHECKPOINT_POLICY };
     CHECKPOINT_POLICY.minBytes = 1;
@@ -203,7 +206,7 @@ describe("transaction log", () => {
       Object.assign(CHECKPOINT_POLICY, policy);
     });
     await insertRow(v.app, v.settings, { table: "mood", values: { occurred_at: "2026-09-30T09:00", value: 1 } });
-    expect(v.listAll().filter((p) => p.endsWith(".checkpoint.json"))).toEqual(["store:transaction_log/main.metrics.mood/00000000000000000026.checkpoint.json"]);
+    expect(v.listAll().filter((p) => p.endsWith(".manifest.jsonl"))).toEqual(["store:transaction_log/main.metrics.mood/00000000000000000026.manifest.jsonl"]);
     expect((await select(v.app, v.settings, { table: "mood", version: 26 })).total).toBe(26);
   });
 

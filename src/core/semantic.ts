@@ -16,7 +16,7 @@
 
 import type { App, TFile } from "./host";
 import { chunkNote } from "./chunk";
-import { dot, embed, EmbeddingError, normalize, resolvedBaseUrl, type EmbeddingConfig, type Transport } from "./embeddings";
+import { embed, EmbeddingError, normalize, resolvedBaseUrl, type EmbeddingConfig, type Transport } from "./embeddings";
 import { contentHash, readHashed } from "./file-cache";
 import { cachedMetastore, loadMetastore, rowTableFull } from "./metastore";
 import type { DatanotesSettings } from "./settings";
@@ -27,10 +27,17 @@ import { messageOf } from "./message";
 const SHARDS = 16;
 const FORMAT = 1;
 
+/**
+ * A passage and its vector as the shards keep it: int8 values and their scale (a quarter of the
+ * memory of floats). `norm` is what makes the dequantized vector unit length; search computes each
+ * value as dequantize and normalize did, so scores are what they were with the floats of a load.
+ */
 interface Passage {
   heading: string;
   snippet: string;
-  v: Float32Array;
+  q: Int8Array;
+  k: number;
+  norm: number;
 }
 interface FileEntry {
   hash: string;
@@ -82,26 +89,113 @@ export interface SyncResult {
   failed: { path: string; error: string }[];
 }
 
-/** int8 quantization of a unit vector: base64 bytes + scale. */
-export function quantize(v: Float32Array): { q: string; k: number } {
+/** int8 quantization of a unit vector: the values and their scale. */
+function quantizeValues(v: Float32Array): { q: Int8Array; k: number } {
   let max = 0;
   for (const x of v) max = Math.max(max, Math.abs(x));
   const k = max > 0 ? max / 127 : 1;
-  const bytes = new Uint8Array(v.length);
-  for (let i = 0; i < v.length; i++) bytes[i] = (Math.round(v[i]! / k) + 256) & 255;
+  const q = new Int8Array(v.length);
+  for (let i = 0; i < v.length; i++) q[i] = Math.round(v[i]! / k);
+  return { q, k };
+}
+
+/** int8 values as the shards write them: base64 of their bytes. */
+function base64Of(q: Int8Array): string {
+  const bytes = new Uint8Array(q.buffer, q.byteOffset, q.length);
   let bin = "";
   for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
-  return { q: btoa(bin), k };
+  return btoa(bin);
+}
+
+/** int8 quantization of a unit vector: base64 bytes + scale. */
+export function quantize(v: Float32Array): { q: string; k: number } {
+  const { q, k } = quantizeValues(v);
+  return { q: base64Of(q), k };
+}
+
+function valuesOf(q: string): Int8Array {
+  const bin = atob(q);
+  const out = new Int8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 export function dequantize(q: string, k: number): Float32Array {
-  const bin = atob(q);
-  const out = new Float32Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    const b = bin.charCodeAt(i);
-    out[i] = (b > 127 ? b - 256 : b) * k;
-  }
+  const values = valuesOf(q);
+  const out = new Float32Array(values.length);
+  for (let i = 0; i < values.length; i++) out[i] = values[i]! * k;
   return normalize(out);
+}
+
+/** A passage's vector kept as int8: the factor that makes it unit length, as normalize computes it. */
+function passageOf(heading: string, snippet: string, q: Int8Array, k: number): Passage {
+  let n = 0;
+  for (let i = 0; i < q.length; i++) {
+    const x = Math.fround(q[i]! * k);
+    n += x * x;
+  }
+  return { heading, snippet, q, k, norm: n > 0 ? 1 / Math.sqrt(n) : 0 };
+}
+
+/**
+ * The cosine of a unit query and a passage: each value of the passage dequantized and normalized
+ * as 32-bit floats, as a loaded vector was, so the score is the same to the last bit.
+ */
+function scoreOf(query: Float32Array, p: Passage): number {
+  const { q, k, norm } = p;
+  const n = Math.min(query.length, q.length);
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += query[i]! * Math.fround(Math.fround(q[i]! * k) * norm);
+  return sum;
+}
+
+/**
+ * The int8 dot product times the scale and the norm: within {@link SCORE_SLACK} of {@link scoreOf}
+ * (two roundings to 32 bits per value, at most 1.2e-7 of a sum of unit vectors), and as fast as
+ * floats.
+ */
+function estimateOf(query: Float32Array, p: Passage): number {
+  const { q } = p;
+  const n = Math.min(query.length, q.length);
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += query[i]! * q[i]!;
+  return sum * p.k * p.norm;
+}
+
+/** How far an estimate may be from the score, with a wide margin. */
+export const SCORE_SLACK = 1e-6;
+
+/** Query vectors kept by vector space and text: a query asked again does not call the service. */
+const QUERY_VECTORS_MAX = 64;
+
+/**
+ * The `limit` best hits, best first, in the order a stable sort by score gives (equal scores keep
+ * their order): a heap of the best so far instead of a sort of every note.
+ */
+export function topHits<T extends { score: number }>(hits: readonly T[], limit: number): T[] {
+  // a worse hit: a lower score, or an equal one that came later
+  const worse = (a: number, b: number) => hits[a]!.score < hits[b]!.score || (hits[a]!.score === hits[b]!.score && a > b);
+  const heap: number[] = [];
+  const swap = (i: number, j: number) => ([heap[i], heap[j]] = [heap[j]!, heap[i]!]);
+  for (let i = 0; i < hits.length; i++) {
+    if (heap.length < limit) {
+      heap.push(i);
+      for (let c = heap.length - 1; c > 0 && worse(heap[c]!, heap[(c - 1) >> 1]!); c = (c - 1) >> 1) swap(c, (c - 1) >> 1);
+    } else if (worse(heap[0]!, i)) {
+      heap[0] = i;
+      for (let c = 0; ; ) {
+        const l = 2 * c + 1;
+        const r = l + 1;
+        let w = c;
+        if (l < heap.length && worse(heap[l]!, heap[w]!)) w = l;
+        if (r < heap.length && worse(heap[r]!, heap[w]!)) w = r;
+        if (w === c) break;
+        swap(c, w);
+        c = w;
+      }
+    }
+  }
+  return heap.sort((a, b) => (worse(a, b) ? 1 : -1)).map((i) => hits[i]!);
 }
 
 function shardOf(path: string): number {
@@ -165,7 +259,7 @@ export class SemanticIndex {
           this.files.set(path, {
             hash: f.hash,
             ...(f.table ? { table: f.table } : {}),
-            passages: f.passages.map((p) => ({ heading: p.h, snippet: p.s, v: dequantize(p.q, p.k) })),
+            passages: f.passages.map((p) => passageOf(p.h, p.s, valuesOf(p.q), p.k)),
           });
         }
       } catch {
@@ -188,7 +282,7 @@ export class SemanticIndex {
         files[path] = {
           hash: f.hash,
           ...(f.table ? { table: f.table } : {}),
-          passages: f.passages.map((p) => ({ h: p.heading, s: p.snippet, ...quantize(p.v) })),
+          passages: f.passages.map((p) => ({ h: p.heading, s: p.snippet, q: base64Of(p.q), k: p.k })),
         };
       }
       await storeWrite(this.app, this.shardPath(i), JSON.stringify({ format: FORMAT, key, files } satisfies ShardJson));
@@ -299,6 +393,7 @@ export class SemanticIndex {
     let done = 0;
     let queue: { path: string; i: number; text: string }[] = [];
     const staged = new Map<string, { entry: FileEntry; texts: string[]; vectors: (Float32Array | null)[] }>();
+    const empty = new Int8Array(0);
     const flush = async () => {
       // Passages of a note whose earlier batch failed are dropped: the note is no longer staged.
       const items = queue.filter((x) => staged.has(x.path));
@@ -323,7 +418,7 @@ export class SemanticIndex {
       for (const t of todo) {
         const chunks = chunkNote(t.file.path, t.content, { skipKeys });
         staged.set(t.file.path, {
-          entry: { hash: t.hash, ...(t.table ? { table: t.table } : {}), passages: chunks.map((c) => ({ heading: c.heading, snippet: c.snippet, v: new Float32Array(0) })) },
+          entry: { hash: t.hash, ...(t.table ? { table: t.table } : {}), passages: chunks.map((c) => ({ heading: c.heading, snippet: c.snippet, q: empty, k: 1, norm: 0 })) },
           texts: chunks.map((c) => c.text),
           vectors: chunks.map(() => null),
         });
@@ -355,7 +450,11 @@ export class SemanticIndex {
   private commit(staged: Map<string, { entry: FileEntry; vectors: (Float32Array | null)[] }>, result: SyncResult): void {
     for (const [path, s] of staged) {
       if (s.vectors.some((v) => v === null)) continue;
-      s.entry.passages.forEach((p, i) => (p.v = s.vectors[i]!));
+      // kept as the shard keeps it: the scores are the same now and after a restart
+      s.entry.passages = s.entry.passages.map((p, i) => {
+        const { q, k } = quantizeValues(s.vectors[i]!);
+        return passageOf(p.heading, p.snippet, q, k);
+      });
       this.files.set(path, s.entry);
       this.dirtyShards.add(shardOf(path));
       staged.delete(path);
@@ -367,30 +466,71 @@ export class SemanticIndex {
     this.requireEnabled();
     if (typeof input.query !== "string" || input.query.trim() === "") throw new OperationInputError(`"query" is required`);
     await this.load();
-    const [qv] = await embed(this.transport, this.config(), [input.query.trim()]);
-    const q = normalize(qv!);
+    const q = await this.queryVector(input.query.trim());
     const limit = Math.min(Math.max(1, input.limit ?? 10), 100);
     const folder = input.folder?.replace(/^\/+|\/+$/g, "");
     const wantTable = (t: string | undefined) =>
       !input.tables || input.tables.length === 0 || (t !== undefined && input.tables.some((x) => t === x || t.endsWith(`.${x}`)));
-    const best = new Map<string, SemanticHit>();
+    // Each note's best passage (the first of equal ones), then the `limit` best notes, best first;
+    // equal scores keep the notes' order (a stable sort did). The int8 dot product, without the
+    // float rounding, is within SCORE_SLACK of the score: it rules out the notes and passages that
+    // cannot be among the best, and only the others are scored to the last bit.
+    const min = input.minScore;
+    /** The passages that pass `minScore` (decided exactly where the estimate is too close to say). */
+    const passing = (f: FileEntry): { p: Passage; estimate: number }[] =>
+      f.passages
+        .map((p) => ({ p, estimate: estimateOf(q, p) }))
+        .filter(({ p, estimate }) => min === undefined || estimate >= min + SCORE_SLACK || (estimate >= min - SCORE_SLACK && scoreOf(q, p) >= min));
+    const notes: { path: string; f: FileEntry; estimate: number }[] = [];
     for (const [path, f] of this.files) {
       if (folder && !path.startsWith(`${folder}/`)) continue;
       if (!wantTable(f.table)) continue;
-      for (const p of f.passages) {
-        const score = dot(q, p.v);
-        if (input.minScore !== undefined && score < input.minScore) continue;
-        const prev = best.get(path);
-        if (!prev || score > prev.score) {
-          best.set(path, { path, score, heading: p.heading, snippet: p.snippet, ...(f.table ? { table: f.table } : {}) });
+      let estimate = -Infinity;
+      for (const x of passing(f)) estimate = Math.max(estimate, x.estimate);
+      if (estimate > -Infinity) notes.push({ path, f, estimate });
+    }
+    // the notes that may be among the `limit` best: those within twice the slack of the limit-th estimate
+    const cut = notes.length > limit ? topHits(notes.map((n) => ({ score: n.estimate })), limit)[limit - 1]!.score - 2 * SCORE_SLACK : -Infinity;
+    const hits: { path: string; score: number; p: Passage; table?: string }[] = [];
+    for (const n of notes) {
+      if (n.estimate < cut) continue;
+      let best: Passage | null = null;
+      let top = 0;
+      for (const { p, estimate } of passing(n.f)) {
+        // a passage further below the note's best estimate cannot be its best
+        if (estimate < n.estimate - 2 * SCORE_SLACK) continue;
+        const score = scoreOf(q, p);
+        if (!best || score > top) {
+          best = p;
+          top = score;
         }
       }
+      hits.push({ path: n.path, score: top, p: best!, ...(n.f.table ? { table: n.f.table } : {}) });
     }
-    const results = [...best.values()]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map((h) => ({ ...h, score: Math.round(h.score * 1000) / 1000 }));
+    const results = topHits(hits, limit).map((h) => ({ path: h.path, score: Math.round(h.score * 1000) / 1000, heading: h.p.heading, snippet: h.p.snippet, ...(h.table ? { table: h.table } : {}) }));
     return { query: input.query, results };
+  }
+
+  /** Query vectors already asked for, by vector space and text (the oldest out first). */
+  private readonly queries = new Map<string, Float32Array>();
+
+  /**
+   * The unit vector of a query: asked of the service once per vector space, API key and text. A key
+   * changed (or gone) asks again, so the service and its refusals see it as before.
+   */
+  private async queryVector(text: string): Promise<Float32Array> {
+    const key = `${this.indexKey()}\u0000${contentHash(this.getApiKey() ?? "")}\u0000${text}`;
+    const kept = this.queries.get(key);
+    if (kept) {
+      this.queries.delete(key);
+      this.queries.set(key, kept);
+      return kept;
+    }
+    const [qv] = await embed(this.transport, this.config(), [text]);
+    const v = normalize(qv!);
+    this.queries.set(key, v);
+    if (this.queries.size > QUERY_VECTORS_MAX) this.queries.delete(this.queries.keys().next().value!);
+    return v;
   }
 
   status(): SemanticStatus {

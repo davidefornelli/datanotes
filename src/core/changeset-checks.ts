@@ -17,6 +17,7 @@ import { compileCheck, LOGICAL_KEYS, type Where } from "./where";
 import { CheckLinks, followsLinks, tableIn, type MetastoreState } from "./check-links";
 import { linkTargetViolations } from "./link-targets";
 import { messageOf } from "./message";
+import { phase } from "./tracing";
 
 /** The metastore a change set leaves when it rewrites metastore.yaml (undefined: it does not). */
 export async function metastoreLeftBy(app: App, settings: DatanotesSettings, cs: ChangeSet): Promise<MetastoreState | undefined> {
@@ -108,7 +109,7 @@ function afterChangeTo(names: readonly string[]): string {
  * define_base, set_table_bases): the rules are read from it, and a rule it adds or changes (see
  * renewedRules) holds every row of its table, not only the rows the change breaks.
  */
-export async function linkedCheckViolations(
+async function linkedCheckViolationsImpl(
   app: App,
   settings: DatanotesSettings,
   cs: ChangeSet,
@@ -199,4 +200,13 @@ export async function linkedCheckViolations(
     }
   }
   return [...out].map(([path, violations]) => ({ path, violations }));
+}
+
+/** {@link linkedCheckViolationsImpl}, traced: the CHECKs and link rules a change set must hold. */
+export function linkedCheckViolations(...args: Parameters<typeof linkedCheckViolationsImpl>): Promise<RowViolations[]> {
+  return phase("engine.checks", async (span) => {
+    const v = await linkedCheckViolationsImpl(...args);
+    span.setAttribute("datanotes.violating_rows", v.length);
+    return v;
+  }, { "datanotes.checks.kind": "linked" });
 }

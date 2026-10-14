@@ -22,9 +22,9 @@ export interface DatanotesSettings {
   databaseId: string;
   /** Row property naming the catalog table a note belongs to (`table: personal.metrics.mood`). */
   tableKey: string;
-  /** Send the engine's logs to an OpenTelemetry collector or OTLP backend (OTLP/HTTP). */
+  /** Send the engine's logs and traces to an OpenTelemetry collector or OTLP backend (OTLP/HTTP). */
   telemetryEnabled: boolean;
-  /** OTLP/HTTP base URL; logs are POSTed to `<endpoint>/v1/logs`. */
+  /** OTLP/HTTP base URL; logs are POSTed to `<endpoint>/v1/logs`, traces to `<endpoint>/v1/traces`. */
   telemetryEndpoint: string;
   /** `service.name` resource attribute. */
   telemetryServiceName: string;
@@ -35,6 +35,23 @@ export interface DatanotesSettings {
   telemetryHeaders: Record<string, string>;
   /** OTLP encoding: `http/protobuf` (the OpenTelemetry default) or `http/json`. */
   telemetryProtocol: "http/protobuf" | "http/json";
+  /**
+   * Send traces too while telemetry is on: a span for every HTTP request, operation and phase of
+   * an operation (lock, query, checks, journal, vault calls), with its duration and parent.
+   * `OTEL_TRACES_EXPORTER=none` turns them off.
+   */
+  telemetryTraces: boolean;
+  /**
+   * Share of new traces kept, from 0 to 1 (1: every one). A trace continued from a caller
+   * (`traceparent`) follows the caller's choice. `OTEL_TRACES_SAMPLER` overrides it.
+   */
+  telemetryTraceSampleRatio: number;
+  /** Most spans one trace may hold (1 to 100000); the others are dropped and counted in `datanotes.spans_dropped`. */
+  telemetryMaxSpansPerTrace: number;
+  /** A request, operation or background job lasting at least this many milliseconds is also logged as a WARN (0: never). */
+  telemetrySlowSpanMs: number;
+  /** `deployment.environment.name` of the logs and traces, such as `dev` or `home` (empty: none). */
+  telemetryEnvironment: string;
   /**
    * After a row is edited by hand, recompute its generated / identity columns (a few seconds
    * after the last change, as a journaled `recompute_columns` operation).
@@ -62,12 +79,39 @@ export interface DatanotesSettings {
   /** Passages per embedding request. */
   semanticBatchSize: number;
   /**
+   * Write priority: while a write runs or waits, new reads wait for it (reads under way finish),
+   * so a stream of reads does not slow a write down. Writes start one at a time, in order.
+   */
+  writePriority: boolean;
+  /** The longest a read waits for writes under `writePriority`, in milliseconds (0 to 60000). */
+  writePriorityMaxWaitMs: number;
+  /**
+   * Memory for the answers of repeated reads, in bytes (0: no cache). A read asked again with the
+   * same arguments is answered from it while nothing it depends on has changed.
+   */
+  readCacheMaxBytes: number;
+  /**
+   * Keep an index of the vault's notes in the engine's store (`index/vault.sqlite`), so that a
+   * start reads only the notes changed since the last one, and `search_notes` only the notes that
+   * can match (headless engine, Node 22.13 or later). The index is a cache: deleting it is safe,
+   * the next start builds it again. Off: every start and every search reads every note, and the
+   * index is deleted.
+   */
+  vaultIndexEnabled: boolean;
+  /**
    * Port of the HTTP API (on 127.0.0.1 unless the service is told otherwise): 1024 to 65535, or 0
    * for any free port. Any other value stops the engine from starting.
    */
   httpServerPort: number;
   /** The owner's bearer token (generated at the first start). */
   httpServerToken: string;
+  /**
+   * Which clients of the HTTP API get answers of 16 KB or more compressed with gzip, when their
+   * request says `Accept-Encoding: gzip`: `remote` (default) those on other machines, `always`
+   * this machine's too, `off` none. Compressing costs the engine time that a client on the same
+   * machine does not win back.
+   */
+  httpCompression: "remote" | "always" | "off";
   /**
    * Back up the engine's store to a git repository: commits as `storeBackupIntervalSeconds` says, each pushed
    * to `storeBackupRemote` (headless engine; `datanotes store backup` sets it).
@@ -83,6 +127,22 @@ export interface DatanotesSettings {
    * it commits between two operations (a consistent snapshot), then pushes.
    */
   storeBackupIntervalSeconds: number;
+  /**
+   * How the engine makes its store files durable: `operation` syncs (fsync) every store file an
+   * operation wrote once, when the operation ends (the journal line, the transaction log, the
+   * blobs; the change feed after each of its appends); `off` leaves it to the operating system,
+   * which is faster but lets a power loss take the last operations' undo data and history. Notes
+   * are never synced (they are written atomically, as Obsidian writes them). Headless engine.
+   */
+  storeSync: "operation" | "off";
+  /**
+   * How the transaction log writes new versions: `segments` (default since 3.1) appends them to a
+   * few large files (far fewer files for the antivirus, git and the store backup), which
+   * Datanotes 3.0 cannot read: run `datanotes store convert-log --to files` before you go back
+   * to it; `files` writes one file per version, which every Datanotes 3 reads. The engine reads
+   * both, also mixed in one folder: a log of 3.0 keeps its files and grows in segments.
+   */
+  transactionLogFormat: "files" | "segments";
 }
 
 export const DEFAULT_SETTINGS: DatanotesSettings = {
@@ -97,6 +157,11 @@ export const DEFAULT_SETTINGS: DatanotesSettings = {
   telemetryServiceName: "datanotes",
   telemetryHeaders: {},
   telemetryProtocol: "http/protobuf",
+  telemetryTraces: true,
+  telemetryTraceSampleRatio: 1,
+  telemetryMaxSpansPerTrace: 1000,
+  telemetrySlowSpanMs: 0,
+  telemetryEnvironment: "",
   autoRecompute: true,
   repairLinksOnHandMove: true,
   semanticEnabled: false,
@@ -106,11 +171,18 @@ export const DEFAULT_SETTINGS: DatanotesSettings = {
   semanticScope: "vault",
   semanticExclude: [],
   semanticBatchSize: 32,
+  writePriority: true,
+  writePriorityMaxWaitMs: 100,
+  readCacheMaxBytes: 33554432,
+  vaultIndexEnabled: true,
   httpServerPort: 27150,
   httpServerToken: "",
+  httpCompression: "remote",
   storeBackupEnabled: false,
   storeBackupRemote: "",
   storeBackupIntervalSeconds: 60,
+  storeSync: "operation",
+  transactionLogFormat: "segments",
 };
 
 /** Keys only the host sets at start: never read from nor written to the settings file. */
@@ -129,6 +201,11 @@ const KEYS: (keyof DatanotesSettings)[] = [
   "telemetryServiceName",
   "telemetryHeaders",
   "telemetryProtocol",
+  "telemetryTraces",
+  "telemetryTraceSampleRatio",
+  "telemetryMaxSpansPerTrace",
+  "telemetrySlowSpanMs",
+  "telemetryEnvironment",
   "autoRecompute",
   "repairLinksOnHandMove",
   "semanticEnabled",
@@ -138,11 +215,18 @@ const KEYS: (keyof DatanotesSettings)[] = [
   "semanticScope",
   "semanticExclude",
   "semanticBatchSize",
+  "writePriority",
+  "writePriorityMaxWaitMs",
+  "readCacheMaxBytes",
+  "vaultIndexEnabled",
   "httpServerPort",
   "httpServerToken",
+  "httpCompression",
   "storeBackupEnabled",
   "storeBackupRemote",
   "storeBackupIntervalSeconds",
+  "storeSync",
+  "transactionLogFormat",
 ];
 
 /**
@@ -187,6 +271,22 @@ export function mergeWithDefaults(
         }
         break;
       }
+      case "telemetryTraceSampleRatio": {
+        if (typeof raw === "number" && raw >= 0 && raw <= 1) out.telemetryTraceSampleRatio = raw;
+        break;
+      }
+      case "telemetryMaxSpansPerTrace": {
+        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 100000) out.telemetryMaxSpansPerTrace = raw;
+        break;
+      }
+      case "telemetrySlowSpanMs": {
+        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) out.telemetrySlowSpanMs = raw;
+        break;
+      }
+      case "telemetryEnvironment": {
+        if (typeof raw === "string") out.telemetryEnvironment = raw.trim();
+        break;
+      }
       case "tableKey": {
         if (typeof raw === "string" && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(raw.trim())) out.tableKey = raw.trim();
         break;
@@ -229,6 +329,14 @@ export function mergeWithDefaults(
         if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 512) out.semanticBatchSize = raw;
         break;
       }
+      case "writePriorityMaxWaitMs": {
+        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= 60000) out.writePriorityMaxWaitMs = raw;
+        break;
+      }
+      case "readCacheMaxBytes": {
+        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) out.readCacheMaxBytes = raw;
+        break;
+      }
       case "httpServerPort": {
         // Refused, not replaced by the default: the default is the port of the usual engine, which
         // another engine must never take by mistake. 0 is any free port.
@@ -236,6 +344,10 @@ export function mergeWithDefaults(
           throw new Error(`invalid setting httpServerPort: ${JSON.stringify(raw)} (an integer from 1024 to 65535, or 0 for any free port)`);
         }
         out.httpServerPort = raw;
+        break;
+      }
+      case "httpCompression": {
+        if (raw === "remote" || raw === "always" || raw === "off") out.httpCompression = raw;
         break;
       }
       case "httpServerToken": {
@@ -250,11 +362,22 @@ export function mergeWithDefaults(
         if (typeof raw === "number" && Number.isInteger(raw) && raw >= 10) out.storeBackupIntervalSeconds = raw;
         break;
       }
+      case "storeSync": {
+        if (raw === "operation" || raw === "off") out.storeSync = raw;
+        break;
+      }
+      case "transactionLogFormat": {
+        if (raw === "files" || raw === "segments") out.transactionLogFormat = raw;
+        break;
+      }
       case "storeBackupEnabled":
       case "telemetryEnabled":
+      case "telemetryTraces":
       case "fileLogEnabled":
       case "semanticEnabled":
       case "autoRecompute":
+      case "writePriority":
+      case "vaultIndexEnabled":
       case "repairLinksOnHandMove": {
         if (typeof raw === "boolean") {
           out[key] = raw;

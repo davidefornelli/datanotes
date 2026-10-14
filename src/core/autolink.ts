@@ -48,6 +48,8 @@ import { linkTo } from "./inverse";
 import { cachedMetastore, catalogTables, loadMetastore, rowTableFull, type CatalogTableEntry, type Metastore } from "./metastore";
 import type { DatanotesSettings } from "./settings";
 import type { TableDefinition } from "./types-table";
+import { phase } from "./tracing";
+import { vaultIndex } from "./vault-index";
 
 /** Why a mention was not linked. */
 export type AmbiguityReason = "same_name" | "adjacent" | "overlap" | "part_of_name" | "sentence_start";
@@ -153,6 +155,8 @@ interface NameIndex {
   byKey: Map<string, Map<string, string>>;
   /** Prefixes of the keys, counted: a mention stops growing when no key starts like it. */
   prefixes: Map<string, number>;
+  /** Where the vault index's change log was at the last look (vault-index.ts), when the host has one. */
+  vault?: { epoch: number; cursor: number };
 }
 
 /** Which notes may be link targets: not those in the tables' archive folders, nor the rows of the tables that are no targets. */
@@ -253,20 +257,59 @@ async function linkScope(app: App, settings: DatanotesSettings): Promise<LinkSco
 
 /** The index of note names, brought up to date with the vault. */
 async function nameIndex(app: App, settings: DatanotesSettings): Promise<NameIndex> {
-  const scope = await linkScope(app, settings);
+  return namesUpToDate(app, settings, await linkScope(app, settings));
+}
+
+/** The index of note names under `scope`, brought up to date with the vault. */
+function namesUpToDate(app: App, settings: DatanotesSettings, scope: LinkScope): NameIndex {
   const generation = vaultGeneration(app);
   let ix = INDEXES.get(app);
-  if (ix && ix.generation === generation && ix.scope === scope) return ix;
-  // a new scope (a table's option, an archive folder): every note is read again
-  if (!ix || ix.scope !== scope) INDEXES.set(app, (ix = { generation: -1, scope, files: new Map(), byKey: new Map(), prefixes: new Map() }));
+  const vi = vaultIndex(app, settings);
+  // the vault read again (another table key): every note is read again
+  const reread = vi !== null && ix?.vault !== undefined && ix.vault.epoch !== vi.epoch;
+  // up to date: nothing in the vault index's change log since the last look (else no invalidation since)
+  const current = vi ? ix?.vault !== undefined && !reread && ix.vault.cursor === vi.cursor : ix?.generation === generation;
+  if (ix && current && ix.scope === scope) return ix;
+  // a new scope (a table's option, an archive folder): every note is read again too
+  if (!ix || ix.scope !== scope || reread) INDEXES.set(app, (ix = { generation: -1, scope, files: new Map(), byKey: new Map(), prefixes: new Map() }));
   const archived = (p: string) => scope.archives.some((a) => p.startsWith(`${a}/`));
+  // with a vault index, only the notes changed since the last look are read again
+  const changed = vi && ix.vault?.epoch === vi.epoch ? vi.changedSince(ix.vault.cursor, vi.epoch) : null;
+  if (vi && changed) {
+    const notes: TFile[] = [];
+    for (const p of changed) {
+      const n = vi.note(p);
+      if (n) notes.push(n.file);
+      else forgetNames(ix, p); // gone
+    }
+    // in the vault's order, as a full pass adds them
+    notes.sort((a, b) => vi.note(a.path)!.order - vi.note(b.path)!.order);
+    for (const f of notes) {
+      if (archived(f.path)) {
+        forgetNames(ix, f.path);
+        continue;
+      }
+      const cur = ix.files.get(f.path);
+      const names = namesOf(app, settings, scope, f);
+      if (cur) removeNames(ix, f.path, cur.names);
+      addNames(ix, f.path, names);
+      ix.files.set(f.path, { stamp: stampOf(f), names });
+    }
+    ix.vault = { epoch: vi.epoch, cursor: vi.cursor };
+    ix.generation = generation;
+    return ix;
+  }
   const seen = new Set<string>();
   for (const f of app.vault.getMarkdownFiles()) {
-    if (archived(f.path)) continue;
-    seen.add(f.path);
     const stamp = stampOf(f);
     const cur = ix.files.get(f.path);
-    if (cur && stamp !== null && cur.stamp === stamp) continue;
+    // a note indexed under this scope is outside the archives: only new and changed notes are checked
+    if (cur && stamp !== null && cur.stamp === stamp) {
+      seen.add(f.path);
+      continue;
+    }
+    if (archived(f.path)) continue;
+    seen.add(f.path);
     const names = namesOf(app, settings, scope, f);
     if (cur) removeNames(ix, f.path, cur.names);
     addNames(ix, f.path, names);
@@ -277,8 +320,37 @@ async function nameIndex(app: App, settings: DatanotesSettings): Promise<NameInd
     removeNames(ix, p, cur.names);
     ix.files.delete(p);
   }
+  if (vi) ix.vault = { epoch: vi.epoch, cursor: vi.cursor };
   ix.generation = generation;
   return ix;
+}
+
+/**
+ * How the name index kept up to date note by note differs from one built from every note now
+ * (index-check.ts); empty when they agree, or when there is none yet.
+ */
+export function verifyNameIndex(app: App, settings: DatanotesSettings): string[] {
+  // the scope the next use would take: with another metastore, it is built again then
+  const scope = SCOPES.get(app);
+  if (!INDEXES.has(app) || !scope || scope.model !== cachedMetastore(app, settings)) return [];
+  const ix = namesUpToDate(app, settings, scope);
+  const fresh: NameIndex = { generation: 0, scope: ix.scope, files: new Map(), byKey: new Map(), prefixes: new Map() };
+  for (const f of app.vault.getMarkdownFiles()) {
+    if (ix.scope.archives.some((a) => f.path.startsWith(`${a}/`))) continue;
+    const names = namesOf(app, settings, ix.scope, f);
+    addNames(fresh, f.path, names);
+    fresh.files.set(f.path, { stamp: stampOf(f), names });
+  }
+  const show = (x: NameIndex) => JSON.stringify([[...x.files].map(([p, f]) => [p, f.names]), [...x.byKey].map(([k, m]) => [k, [...m]]).sort(), [...x.prefixes].sort()]);
+  return show(ix) === show(fresh) ? [] : ["autolink names differ from the notes' names"];
+}
+
+/** A note no longer named in the index (gone, or archived). */
+function forgetNames(ix: NameIndex, path: string): void {
+  const cur = ix.files.get(path);
+  if (!cur) return;
+  removeNames(ix, path, cur.names);
+  ix.files.delete(path);
 }
 
 // --- the text --------------------------------------------------------------------------------------
@@ -559,7 +631,7 @@ export interface AutolinkInput {
  * Link the notes the fragments mention. Returns the fragments with their links, the links added
  * and the mentions left as text with their candidates.
  */
-export async function autolinkFragments(
+async function autolinkFragmentsImpl(
   app: App,
   settings: DatanotesSettings,
   input: AutolinkInput,
@@ -619,4 +691,9 @@ export function withLinkReport<R extends { ok: boolean }>(result: R, report: Aut
     ...(report.added.length > 0 ? { links_added: report.added } : {}),
     ...(report.ambiguous.length > 0 ? { ambiguous_mentions: report.ambiguous } : {}),
   };
+}
+
+/** {@link autolinkFragmentsImpl}, traced: link resolution of a note's text. */
+export function autolinkFragments(...args: Parameters<typeof autolinkFragmentsImpl>): ReturnType<typeof autolinkFragmentsImpl> {
+  return phase("engine.autolink", () => autolinkFragmentsImpl(...args));
 }

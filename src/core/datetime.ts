@@ -20,10 +20,31 @@ export function isValidTimeZone(tz: string): boolean {
   }
 }
 
+/** At most this many formatters per shape are kept (a database has one time zone). */
+const FORMATTERS_MAX = 32;
+
+/**
+ * A formatter per time zone, built once: building one costs about 20 times formatting with it,
+ * and a sort on `file_modified` formats every row. A time zone the runtime does not know throws,
+ * as building it did, and is not kept.
+ */
+function cachedFormatter(cache: Map<string, Intl.DateTimeFormat>, tz: string, make: () => Intl.DateTimeFormat): Intl.DateTimeFormat {
+  let f = cache.get(tz);
+  if (f === undefined) {
+    f = make();
+    if (cache.size >= FORMATTERS_MAX) cache.clear();
+    cache.set(tz, f);
+  }
+  return f;
+}
+
+const OFFSET_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+const WALL_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+
 /** Offset of `tz` at instant `ms`, in minutes east of UTC. */
 function offsetMinutesAt(ms: number, tz: string): number {
   // `timeZoneName` is always among the parts: "GMT" (UTC) or "GMT+05:30", minutes always written
-  const name = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" })
+  const name = cachedFormatter(OFFSET_FORMATTERS, tz, () => new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }))
     .formatToParts(new Date(ms))
     .find((p) => p.type === "timeZoneName")!.value;
   const m = name.match(/GMT([+-])(\d{2}):(\d{2})/);
@@ -93,16 +114,19 @@ export function resolveDateTokens<T>(where: T, tz: string, now: Date): T {
 
 /** Wall-clock `YYYY-MM-DDTHH:mm:ss` of `now` in `tz` (UTC when empty). */
 export function wallClock(now: Date, tz: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz || "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
+  const zone = tz || "UTC";
+  const parts = cachedFormatter(WALL_FORMATTERS, zone, () =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }),
+  ).formatToParts(now);
   const g = (type: string) => parts.find((p) => p.type === type)!.value; // every part asked for is formatted
   return `${g("year")}-${g("month")}-${g("day")}T${g("hour")}:${g("minute")}:${g("second")}`;
 }

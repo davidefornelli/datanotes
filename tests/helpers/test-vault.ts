@@ -29,6 +29,7 @@ import { startService, type RunningService } from "../../src/node/service";
 import { HttpApiServer } from "../../src/server/http-server";
 import { createHandlers } from "../../src/server/rest";
 import { WebhookDispatcher } from "../../src/server/webhooks";
+import { verifyIndex } from "../../src/core/index-check";
 import { createDbVault } from "./db-vault";
 import { opProblem } from "./op-names";
 import { seedStoreSettings } from "./store-settings";
@@ -107,6 +108,8 @@ export interface TestVault {
   handEdit(rel: string, text: string): void;
   /** Rename or move a note as a file manager would, outside the engine (links to it are not rewritten). */
   handMove(from: string, to: string): Promise<void>;
+  /** How the engine's indexes differ from a walk over the vault now (index-check.ts): empty when they agree. */
+  indexDiffs(): Promise<string[]>;
   /** Stop the engine, then delete the copy. */
   stop(): Promise<void>;
 }
@@ -134,6 +137,7 @@ function recording(
   handEdit: (rel: string, text: string) => void,
   handMove: (from: string, to: string) => Promise<void>,
   stop: () => Promise<void>,
+  indexDiffs: () => Promise<string[]>,
 ): TestVault {
   const client = new DatanotesClient({ url, token: TOKEN, actor: ACTOR });
   const used = new Set<string>();
@@ -179,6 +183,7 @@ function recording(
     files: () => vaultFiles(root),
     handEdit,
     handMove,
+    indexDiffs,
     async stop() {
       if (stopped) return;
       stopped = true;
@@ -222,6 +227,7 @@ async function openService(o: OpenOptions): Promise<TestVault> {
         fs.renameSync(abs(from), abs(to));
       },
       () => running.stop(),
+      () => verifyIndex(running.runtime.app, running.settings),
     );
   } catch (e) {
     await svc?.stop();
@@ -261,6 +267,7 @@ async function openInProcess(o: OpenOptions): Promise<TestVault> {
       await hooks.stop();
       await feed.stop();
     },
+    () => verifyIndex(v.app, v.settings),
   );
 }
 

@@ -25,7 +25,7 @@ Datanotes keeps every row as a file, so it isn't a replacement for SQLite or Pos
 - High write throughput
 - Many concurrent writers on one folder
 
-Datanotes is comfortable at 10,000 notes. At 50,000 notes, the engine takes 22 to 115 seconds to start.
+Datanotes is comfortable at 10,000 notes. At 50,000 notes, the engine takes about 15 seconds for its first start, and 2 to 3 seconds to restart.
 
 ## Quick start
 

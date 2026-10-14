@@ -184,3 +184,36 @@ describe("a runtime that prints a zero offset as bare \"GMT\"", () => {
     expect(normalizeDatetime("2026-01-15T09:00", "Asia/Kolkata")).toBe("2026-01-15T09:00:00+05:30");
   });
 });
+
+describe("formatters built once per time zone", () => {
+  /** The offset as a formatter built for this one call gives it (what every call did before). */
+  const fresh = (ms: number, tz: string) => new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(new Date(ms)).find((p) => p.type === "timeZoneName")!.value;
+
+  it("many zones in turn, more than are kept, each answer as with a new formatter", () => {
+    const zones = [
+      "UTC", "Europe/Rome", "Europe/London", "Europe/Lisbon", "Europe/Paris", "Europe/Berlin", "Europe/Athens", "Europe/Helsinki",
+      "Europe/Moscow", "Europe/Istanbul", "Africa/Abidjan", "Africa/Cairo", "Africa/Johannesburg", "Africa/Lagos", "Africa/Nairobi",
+      "Asia/Kolkata", "Asia/Kathmandu", "Asia/Tokyo", "Asia/Shanghai", "Asia/Singapore", "Asia/Dubai", "Asia/Tehran", "Asia/Karachi",
+      "Asia/Dhaka", "Asia/Yangon", "Asia/Bangkok", "Asia/Seoul", "Australia/Sydney", "Australia/Adelaide", "Australia/Eucla",
+      "Pacific/Auckland", "Pacific/Chatham", "Pacific/Honolulu", "Pacific/Kiritimati", "America/New_York", "America/Chicago",
+      "America/Denver", "America/Los_Angeles", "America/Anchorage", "America/Sao_Paulo", "America/St_Johns", "America/Caracas",
+    ];
+    const at = Date.UTC(2026, 6, 1, 12, 0, 0);
+    for (const round of [0, 1]) {
+      for (const tz of zones) {
+        const offset = fresh(at, tz).replace("GMT", "") || "+00:00";
+        const iso = isoAt(at, tz);
+        expect(iso.endsWith(offset) || (tz === "UTC" && iso.endsWith("Z")), `${tz} (round ${round}): ${iso}`).toBe(true);
+        expect(wallClock(new Date(at), tz)).toBe(isoAt(at, tz).slice(0, 19));
+      }
+    }
+  });
+
+  it("a zone the runtime does not know is refused on every call, and never kept", () => {
+    for (let i = 0; i < 2; i++) {
+      expect(() => isoAt(0, "Not/AZone")).toThrow(RangeError);
+      expect(() => wallClock(new Date(0), "Not/AZone")).toThrow(RangeError);
+    }
+    expect(isoAt(0, "Europe/Rome")).toBe("1970-01-01T01:00:00+01:00");
+  });
+});

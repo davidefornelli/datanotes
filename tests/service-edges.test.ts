@@ -11,9 +11,12 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { storeLocation } from "../src/api/local";
 import { HAND_MOVE_TIMING } from "../src/core/hand-moves";
+import { IndexDb } from "../src/node/index-db";
 import { main, startService, type RunningService } from "../src/node/service";
+import { LockHolder } from "../src/server/engine-lock";
 import { LOG_YAML, METASTORE } from "./helpers/db-vault";
 
 const warning = vi.hoisted(() => ({ text: null as string | null }));
@@ -124,12 +127,103 @@ describe("datanotes serve: starting", () => {
     const err = (await start(s, { port: 70_000 }).catch((e: unknown) => e)) as Error & { hint?: string };
     expect(err.message).toMatch(/^HTTP server did not start: /);
     expect(err.hint).toBe("Check --host and --port; datanotes status shows what holds the vault.");
+    // the store is let go once the host is closed
+    expect(fs.existsSync(path.join(storeLocation(s.root, { env: s.env })!.store, "engine.lock"))).toBe(false);
+  });
+
+  it("claims the store with a heartbeat before it reads the vault, says it is starting until it listens, and lets the store go when the start fails", async () => {
+    const s = setup();
+    onTestFinished(() => void vi.restoreAllMocks());
+    const order: string[] = [];
+    const acquire = LockHolder.prototype.acquire;
+    vi.spyOn(LockHolder.prototype, "acquire").mockImplementation(function (this: LockHolder) {
+      order.push("lock");
+      return acquire.call(this);
+    });
+    const open = IndexDb.open.bind(IndexDb);
+    let during: Record<string, unknown> | null = null;
+    const opening = vi.spyOn(IndexDb, "open").mockImplementation((store, o) => {
+      order.push("index");
+      during = JSON.parse(fs.readFileSync(path.join(store, "engine.lock"), "utf8")) as Record<string, unknown>;
+      return open(store, o);
+    });
+    const svc = await start(s);
+    expect(order).toEqual(["lock", "index"]);
+    expect(during).toMatchObject({ kind: "service", pid: process.pid, port: 0 });
+    expect(JSON.parse(fs.readFileSync(path.join(svc.store.store, "engine.lock"), "utf8"))).toMatchObject({ pid: process.pid, port: svc.port });
+    await stop(svc);
+    // a start that fails once it holds the store: its lock goes (no heartbeat keeps the process alive)
+    opening.mockImplementation(() => {
+      throw new Error("the disk went away");
+    });
+    await expect(start(s)).rejects.toThrow("the disk went away");
+    expect(fs.existsSync(path.join(storeLocation(s.root, { env: s.env })!.store, "engine.lock"))).toBe(false);
   });
 
   it("git sync on a vault outside any repository stays off", async () => {
     const s = setup();
     const svc = await start(s, { gitSync: { intervalMs: 3_600_000, quietMs: 60_000, push: false } });
     expect(svc.git).toBeNull();
+  });
+
+  it("keeps the vault index in its store: the next start reads only what changed, and the index checks agree", async () => {
+    const s = setup();
+    write(s.root, "Daily/a.md", "---\ntable: log\nkind: walk\noccurred_at: 2026-09-25T08:00\n---\nA walk with [[b]].\n");
+    write(s.root, "Daily/b.md", "---\ntable: log\nkind: mood\noccurred_at: 2026-09-25T09:00\n---\n");
+    const past = Date.now() / 1000 - 3600; // written long ago: recorded at once, not in the racy window
+    for (const f of ["Daily/a.md", "Daily/b.md", METASTORE]) fs.utimesSync(path.join(s.root, f), past, past);
+    const read = (svc: RunningService) => {
+      const dir = path.join(svc.store.store, "logs");
+      const records = fs.readdirSync(dir).flatMap((f) => fs.readFileSync(path.join(dir, f), "utf8").split("\n")).filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+      return records.filter((r) => r.msg === "datanotes read the vault").map(({ notes, notes_read, notes_moved, vault_index }) => ({ notes, notes_read, notes_moved, vault_index }));
+    };
+    const first = await start(s);
+    await stop(first);
+    expect(fs.existsSync(path.join(first.store.store, "index", "vault.sqlite"))).toBe(true);
+    write(s.root, "Daily/b.md", "---\ntable: log\nkind: mood\noccurred_at: 2026-09-25T09:30\n---\n");
+    fs.utimesSync(path.join(s.root, "Daily/b.md"), past + 60, past + 60);
+    const second = await start(s);
+    const { verifyIndex } = await import("../src/core/index-check");
+    expect(await verifyIndex(second.runtime.app, second.settings)).toEqual([]);
+    await stop(second);
+    expect(read(second)).toEqual([
+      { notes: 2, notes_read: 2, notes_moved: 0, vault_index: "built: none yet" },
+      { notes: 2, notes_read: 1, notes_moved: 0, vault_index: "used" },
+    ]);
+    // turned off: every note read, the index deleted
+    fs.writeFileSync(s.settingsFile, JSON.stringify({ httpServerToken: TOKEN, fileLogEnabled: true, autoRecompute: false, vaultIndexEnabled: false }));
+    const third = await start(s);
+    await stop(third);
+    expect(read(third).at(-1)).toEqual({ notes: 2, notes_read: 2, notes_moved: 0, vault_index: "off" });
+    expect(fs.existsSync(path.join(third.store.store, "index", "vault.sqlite"))).toBe(false);
+  });
+
+  it("follows the OS's reports once the notes are read, compares what changed meanwhile without blocking, and closes them when the start fails", async () => {
+    const s = setup();
+    const watch = vi.spyOn(fs, "watch");
+    // the engine's own watchers: on Linux, Node's recursive watcher calls fs.watch itself for every folder and file (not recursive)
+    const recursive = () => watch.mock.calls.filter(([, o]) => typeof o === "object" && o !== null && (o as fs.WatchOptions).recursive);
+    const svc = await start(s, { watch: "events" });
+    expect(recursive()).toHaveLength(1);
+    expect(recursive()[0]![0]).toBe(s.root);
+    // outside Windows, an operation in the first second also compares the whole tree: the OS's stream may still be starting
+    // (startupRescanMs); on a slow machine that second is over before the flush, and only the comparison after the walk runs
+    await svc.watcher.flush(); // the comparison after the walk
+    const after = svc.watcher.rescans;
+    if (process.platform === "win32") expect(after).toBe(1);
+    else expect([1, 2]).toContain(after);
+    // a comparison asked for (the OS's buffer overflowed) runs at once while the engine does not write
+    const os = (svc.watcher as unknown as { watcher: fs.FSWatcher }).watcher;
+    write(s.root, "Daily/new.md", "---\ntable: log\n---\n");
+    os.emit("error", new Error("overflow"));
+    svc.watcher.flush();
+    expect(svc.watcher.rescans).toBe(after + 1);
+    await stop(svc);
+    // a start that fails after its walk (a port setting no engine takes) follows nothing
+    fs.writeFileSync(s.settingsFile, JSON.stringify({ httpServerToken: TOKEN, httpServerPort: 1 }));
+    watch.mockClear();
+    await expect(start(s, { watch: "events", port: undefined })).rejects.toThrow("invalid setting httpServerPort");
+    expect(watch).not.toHaveBeenCalled();
   });
 });
 

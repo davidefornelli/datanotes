@@ -84,14 +84,43 @@ The transaction log records each version of a table, so you can read or restore 
 
 Change the database’s setting with [`configure_database`](/reference/operations/auxiliary/#configure_database) and `history`. [Table history and time travel](/guides/history/table-history/) shows it at work.
 
-Each table’s log lives in the engine’s store, in `transaction_log/your_catalog.your_schema.your_table/`, with one numbered JSON file per change. A commit holds these entries:
+Each table’s log lives in the engine’s store, in `transaction_log/your_catalog.your_schema.your_table/`. Each version is a commit with these entries:
 
 - **`commitInfo`**: the operation, its time and, when known, its actor
 - **`metaData`**: the table’s definition, when the commit changes it
 - **`add`**: the path, the hash and the full content of each row written
 - **`remove`**: the path and the hash of each row removed
 
-The engine writes a checkpoint, a full copy of the table, once the commits since the last checkpoint outweigh it. That means twice the table’s size and at least 256 KB, or 1,000 versions. The log therefore grows with what you write, not with the table’s size. Hand edits appear as `EXTERNAL_EDIT` commits.
+The engine writes a checkpoint, a full copy of the table, once the commits since the last checkpoint outweigh it. That means twice the table’s size and at least 256 KB. With one file per version, it also writes one after 1,000 versions, or after one version per 16 KB of rows for a large table. The log therefore grows with what you write, not with the table’s size. Hand edits appear as `EXTERNAL_EDIT` commits.
+
+### How the engine writes the log
+
+The setting `transactionLogFormat` picks how the engine writes new versions:
+
+- **`segments`**, the default since 3.1: versions added to the end of a few large files, such as `00000000000000001000.segment.jsonl`. Fewer files mean less work for an antivirus, git and the store backup. Datanotes 3.0 can’t read them.
+- **`files`**: one numbered JSON file per version, such as `00000000000000000007.json`. Every Datanotes 3 release reads it.
+
+A segment holds up to 1,000 versions or 8 MB. The engine then seals it: it renames the file after its first and last version, and never writes to it again. The engine reads both formats, also mixed in one folder.
+
+A store from Datanotes 3.0 needs no conversion. Its versions stay in their files, and the new versions go to segments in the same folder. To keep one file per version, set `transactionLogFormat` to `files`.
+
+A checkpoint is a manifest and its parts. The manifest, `your_version.manifest.jsonl`, lists each row’s path and hash. The parts, `your_version.part-0.jsonl.gz`, hold the rows’ texts, compressed. No file holds more than 4 MB of text, far under the 95 MB the store backup pushes. The engine writes a checkpoint after the write that made it due, so the write doesn’t wait for it. When it starts, it reads the manifests only.
+
+A vacuum writes its checkpoint as one file, `your_version.checkpoint.json`, which Datanotes 3.0 reads too. A table with more than 32 MB of text gets a manifest instead.
+
+A crash or a power loss can leave the newest version half written. The engine leaves that version out, as if it never wrote it. The next write sets the file aside as `your_file.torn-your_time` and writes the version again.
+
+### Convert the log to another format
+
+To switch formats, stop the engine and run `datanotes store convert-log`:
+
+```bash
+datanotes store convert-log --to segments --vault ~/notes
+```
+
+The command rewrites every table’s log in the new format and sets `transactionLogFormat` to match. Run it with `--to files` before you go back to Datanotes 3.0, as [Compatibility](/reference/compatibility/#downgrade-to-30) explains.
+
+The command holds the store while it runs. An engine you start meanwhile refuses to start.
 
 History costs disk space in the store. Each version keeps the full text of every note it writes, so a note saved ten times is stored about ten times, plus the checkpoints. A table you rewrite often grows its log fastest. [`vacuum_table`](/reference/operations/history/#vacuum_table) deletes the old versions, and `history: false` stops the log of a table that doesn’t need it.
 
@@ -139,9 +168,12 @@ The store holds these files:
 - **`blobs/your_hash.txt`**: texts of 2 KB or more, such as `metastore.yaml` before and after a change, stored once
 - **`transaction_log/`**, **`changes/`** and **`semantic/`**: the history of tables, the change feed and the semantic index
 - **`logs/YYYY-MM-DD.your_source.jsonl`**: the engine’s log records, when `fileLogEnabled` is on
+- **`index/vault.sqlite`**: the vault index, what the engine read from each note, so a start reads only the notes changed since; you can delete it at any time
 - **`store.json`**: the vault and the database folder the store belongs to
 
-When the engine starts, it drops journal entries older than `journalRetentionDays` (90) and deletes log files older than `logRetentionDays` (30).
+When the engine starts, and then once a day, it drops journal entries older than `journalRetentionDays` (90). It also deletes log files older than `logRetentionDays` (30). It reads the journal without the write lock, so writes don’t wait for it.
+
+At the end of each operation, the engine syncs the store files it wrote to the disk: the journal line, the new versions, the blobs and the change feed. A power loss then can’t take the undo data or the history of an operation that returned. The setting `storeSync` set to `off` skips that, for faster writes. The engine never syncs notes: it writes them atomically, as Obsidian does.
 
 Your vault holds only your notes: sync tools, git and Obsidian never see the store. The store belongs to the machine the engine runs on, so the journal and the history do too. Results name store files with a `store:` prefix, such as `store:journal/2026-10.jsonl`.
 

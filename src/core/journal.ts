@@ -16,8 +16,9 @@ import type { JournalEntry } from "./changeset";
 import { contentHash } from "./file-cache";
 import { actorName } from "./actor";
 import type { DatanotesSettings } from "./settings";
-import { storeAppend, storeExists, storeList, storePath, storeRead, storeRemove, storeWrite } from "./store";
+import { storeAppend, storeExists, storeList, storePath, storeRead, storeRemove, storeStat, storeWrite } from "./store";
 import { databaseMoves, translateJournalEntry } from "./database-move";
+import { phase } from "./tracing";
 
 type Settings = Pick<DatanotesSettings, "journalRetentionDays"> & Partial<Pick<DatanotesSettings, "databaseId">>;
 
@@ -87,11 +88,94 @@ function parseLines(text: string): Line[] {
   return out;
 }
 
+// --- the monthly files, kept in memory ---
+
+/**
+ * A journal file as this engine last read or appended it, with the size and time the host gave
+ * for it: every write appends to a file of several MB and must find a free id in it, and every
+ * undo looks one entry up in it. Read again when its size or time differ (another program
+ * changed it). Its lines are kept by the ids they hold, so a lookup reads no other line.
+ */
+interface KeptFile {
+  size: number;
+  mtime: number;
+  /** Whether the text ends with a line break (an append after a torn last line starts a new one). */
+  endsWithNewline: boolean;
+  /** The lines by the ids they name (`"migration_id":"…"`): an entry and its undo. */
+  lines: Map<string, string[]>;
+}
+
+const KEPT = new WeakMap<object, Map<string, KeptFile>>();
+
+function keptFiles(app: App): Map<string, KeptFile> {
+  let m = KEPT.get(app);
+  if (!m) KEPT.set(app, (m = new Map()));
+  return m;
+}
+
+/** Forget the kept copies of the journal files (after they were rewritten or removed). */
+export function forgetJournalFiles(app: App): void {
+  KEPT.delete(app);
+}
+
+const ID_RE = /"migration_id":"([^"]+)"/g;
+
+/** Index one line by the ids it names (a line glued to a torn one names two). */
+function addLine(file: KeptFile, line: string): void {
+  if (line.trim() === "") return;
+  for (const id of new Set([...line.matchAll(ID_RE)].map((m) => m[1]!))) {
+    const lines = file.lines.get(id);
+    if (lines) lines.push(line);
+    else file.lines.set(id, [line]);
+  }
+}
+
+function keptOf(text: string, stamp: { size: number; mtime: number }): KeptFile {
+  const file: KeptFile = { size: stamp.size, mtime: stamp.mtime, endsWithNewline: text === "" || text.endsWith("\n"), lines: new Map() };
+  for (const line of text.split("\n")) addLine(file, line);
+  return file;
+}
+
+/**
+ * A journal file (null when there is none), from memory while the host reports it unchanged; a
+ * host without `stat` has it read every time.
+ */
+async function journalFile(app: App, path: string): Promise<KeptFile | null> {
+  const stat = await storeStat(app, path);
+  const files = keptFiles(app);
+  if (stat === null) {
+    files.delete(path);
+    return null;
+  }
+  const kept = stat ? files.get(path) : undefined;
+  if (kept && kept.size === stat!.size && kept.mtime === stat!.mtime) return kept;
+  const text = await storeRead(app, path);
+  /* v8 ignore next -- a race: the file was removed between its stat and its read */
+  if (text == null) return null;
+  // the size and time from before the read: a change in between has the file read again next time
+  const file = keptOf(text, stat ?? { size: -1, mtime: -1 });
+  if (stat) files.set(path, file);
+  return file;
+}
+
 /** Append one line; after a torn last line (a crash while appending) start on a new line. */
 async function appendLine(app: App, path: string, line: Line): Promise<void> {
-  const text = await storeRead(app, path);
-  const sep = text && !text.endsWith("\n") ? "\n" : "";
-  await storeAppend(app, path, `${sep}${JSON.stringify(line)}\n`);
+  const file = await journalFile(app, path);
+  const sep = file && !file.endsWithNewline ? "\n" : "";
+  const json = JSON.stringify(line);
+  await storeAppend(app, path, `${sep}${json}\n`);
+  const stat = await storeStat(app, path);
+  const files = keptFiles(app);
+  if (!stat) {
+    files.delete(path); // a host without stat keeps nothing
+    return;
+  }
+  const next = file && files.get(path) === file ? file : keptOf("", stat);
+  next.size = stat.size;
+  next.mtime = stat.mtime;
+  next.endsWithNewline = true;
+  addLine(next, json);
+  files.set(path, next);
 }
 
 // --- blobs ---
@@ -155,11 +239,9 @@ function slug(s: string): string {
     .slice(0, 60);
 }
 
-async function idsIn(app: App, path: string): Promise<Set<string>> {
-  const text = await storeRead(app, path);
-  const out = new Set<string>();
-  if (text) for (const m of text.matchAll(/"migration_id":"([^"]+)"/g)) out.add(m[1]!);
-  return out;
+/** The ids a journal file holds (any kind of line). */
+async function idsIn(app: App, path: string): Promise<ReadonlyMap<string, unknown>> {
+  return (await journalFile(app, path))?.lines ?? new Map();
 }
 
 async function appendEntry(app: App, settings: Settings, entry: JournalEntry): Promise<string> {
@@ -169,7 +251,7 @@ async function appendEntry(app: App, settings: Settings, entry: JournalEntry): P
 }
 
 /** Append an operation; returns its id and where it is (`<file>#<id>`). */
-export async function writeJournal(
+async function writeJournalImpl(
   app: App,
   settings: Settings,
   entry: Omit<JournalEntry, "migration_id">,
@@ -185,11 +267,11 @@ export async function writeJournal(
 
 async function findInStore(app: App, settings: Settings, id: string): Promise<{ entry: JournalEntry; undone: boolean; path: string } | null> {
   const path = journalFileFor(settings, id);
-  const text = await storeRead(app, path);
-  if (!text) return null;
+  const file = await journalFile(app, path);
+  if (!file) return null;
   let entry: JournalEntry | null = null;
   let undone = false;
-  for (const l of parseLines(text)) {
+  for (const l of parseLines((file.lines.get(id) ?? []).join("\n"))) {
     if (l.migration_id !== id) continue;
     if (l.type === "migration") {
       const { type: _t, ...rest } = l;
@@ -333,31 +415,98 @@ export interface CompactResult {
   blobsRemoved: number;
 }
 
-/** Drop entries older than the retention and blobs no entry refers to. */
-export async function compactJournal(app: App, settings: Settings, now: Date = new Date()): Promise<CompactResult> {
+/** How often the blobs are checked when no entry was dropped (a blob a crash left without its entry). */
+export const BLOB_CHECK_DAYS = 7;
+
+/** When this engine last checked the blobs against every entry, by app (ms). */
+const BLOBS_CHECKED = new WeakMap<object, number>();
+
+/** What a compaction read of a journal file: its stamp then, its lines, those it keeps. */
+interface JournalPlan {
+  stamp: string;
+  lines: Line[];
+  kept: Line[];
+  dropped: number;
+}
+
+/** A store file's size and time as one string ("" when the host cannot tell: always read again). */
+async function stampOf(app: App, path: string): Promise<string> {
+  const s = await storeStat(app, path);
+  return s ? `${s.size}/${s.mtime}` : "";
+}
+
+/** One journal file read and planned: the entries inside the retention kept, with their undo marks. */
+async function planFile(app: App, path: string, cutoff: number): Promise<JournalPlan> {
+  const stamp = await stampOf(app, path);
+  const lines = parseLines((await storeRead(app, path)) ?? "");
+  const keepIds = new Set(lines.filter((l): l is MigrationLine => l.type === "migration" && Date.parse(l.executed_at) >= cutoff).map((l) => l.migration_id));
+  const kept = lines.filter((l) => keepIds.has(l.migration_id));
+  return { stamp, lines, kept, dropped: lines.filter((l) => l.type === "migration").length - keepIds.size };
+}
+
+/** The month a file holds (`2026-09`), null for one without a dated name (`undated.jsonl`). */
+function monthOfFile(path: string): string | null {
+  return /\/(\d{4}-\d{2})\.jsonl$/.exec(path)?.[1] ?? null;
+}
+
+/**
+ * Drop entries older than the retention and blobs no entry refers to. The files are read and the
+ * work planned without the write lock (`lock`, the engine's: no write waits for the reading);
+ * it is held only to apply the plan, where a file changed since it was read (an append) is read
+ * again first and the blobs of the entries appended meanwhile are kept. A month after the
+ * retention's first one holds only entries to keep: it is read only to check the blobs, which
+ * happens when entries were dropped, at the first compaction of a run, and then every
+ * {@link BLOB_CHECK_DAYS} days. `kept` counts the entries of the files read.
+ */
+export async function compactJournal(
+  app: App,
+  settings: Settings,
+  now: Date = new Date(),
+  lock: <T>(fn: () => Promise<T>) => Promise<T> = (fn) => fn(),
+): Promise<CompactResult> {
   const cutoff = now.getTime() - settings.journalRetentionDays * 86_400_000;
-  const res: CompactResult = { kept: 0, dropped: 0, blobsRemoved: 0 };
-  const used = new Set<string>();
-  for (const f of (await storeList(app, journalDir(settings))).files.filter((x) => x.endsWith(".jsonl"))) {
-    const text = (await storeRead(app, f)) ?? "";
-    const lines = parseLines(text);
-    const keepIds = new Set(
-      lines.filter((l): l is MigrationLine => l.type === "migration" && Date.parse(l.executed_at) >= cutoff).map((l) => l.migration_id),
-    );
-    const kept = lines.filter((l) => keepIds.has(l.migration_id));
-    const migrations = lines.filter((l) => l.type === "migration").length;
-    res.dropped += migrations - keepIds.size;
-    res.kept += keepIds.size;
-    for (const l of kept) if (l.type === "migration") blobRefs(l).forEach((h) => used.add(h));
-    if (kept.length === 0) await storeRemove(app, f);
-    else if (kept.length !== lines.length) await storeWrite(app, f, kept.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  }
-  for (const b of (await storeList(app, blobDir(settings))).files) {
-    const hash = b.slice(b.lastIndexOf("/") + 1).replace(/\.txt$/, "");
-    if (!used.has(hash)) {
-      await storeRemove(app, b);
-      res.blobsRemoved++;
+  const firstMonth = new Date(cutoff).toISOString().slice(0, 7);
+  const files = (await storeList(app, journalDir(settings))).files.filter((x) => x.endsWith(".jsonl"));
+  /** Files that may hold entries to drop. */
+  const dropping = new Set(files.filter((f) => (monthOfFile(f) ?? "") <= firstMonth));
+  const plans = new Map<string, JournalPlan>();
+  for (const f of dropping) plans.set(f, await planFile(app, f, cutoff));
+  const checked = BLOBS_CHECKED.get(app);
+  const gc = [...plans.values()].some((p) => p.dropped > 0) || checked === undefined || now.getTime() - checked >= BLOB_CHECK_DAYS * 86_400_000;
+  if (gc) for (const f of files) if (!plans.has(f)) plans.set(f, await planFile(app, f, cutoff));
+  const blobs = gc ? (await storeList(app, blobDir(settings))).files : [];
+  return lock(async () => {
+    const res: CompactResult = { kept: 0, dropped: 0, blobsRemoved: 0 };
+    const used = new Set<string>();
+    // the files now (one created since the listing holds new entries only)
+    const current = gc ? (await storeList(app, journalDir(settings))).files.filter((x) => x.endsWith(".jsonl")) : [...plans.keys()];
+    for (const f of current) {
+      const planned = plans.get(f);
+      // appended (or rewritten) since it was read: read again, now that no write runs
+      const p = planned && planned.stamp !== "" && (await stampOf(app, f)) === planned.stamp ? planned : await planFile(app, f, cutoff);
+      const kept = dropping.has(f) ? p.kept : p.lines;
+      res.kept += kept.filter((l) => l.type === "migration").length;
+      for (const l of kept) if (l.type === "migration") blobRefs(l).forEach((h) => used.add(h));
+      if (!dropping.has(f)) continue;
+      res.dropped += p.dropped;
+      if (p.kept.length === 0) await storeRemove(app, f);
+      else if (p.kept.length !== p.lines.length) await storeWrite(app, f, p.kept.map((l) => JSON.stringify(l)).join("\n") + "\n");
     }
-  }
-  return res;
+    forgetJournalFiles(app);
+    if (gc) {
+      for (const b of blobs) {
+        const hash = b.slice(b.lastIndexOf("/") + 1).replace(/\.txt$/, "");
+        if (used.has(hash)) continue;
+        await storeRemove(app, b);
+        res.blobsRemoved++;
+      }
+      BLOBS_CHECKED.set(app, now.getTime());
+    }
+    return res;
+  });
+}
+
+/** {@link writeJournalImpl}, traced. */
+export function writeJournal(...args: Parameters<typeof writeJournalImpl>): ReturnType<typeof writeJournalImpl> {
+  return phase("engine.journal.append", () => writeJournalImpl(...args), { "datanotes.journal.op": args[2].op });
 }

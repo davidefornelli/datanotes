@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTable, INDEX_RETRY, undoOperation } from "../src/core/engine";
-import { embed, EmbeddingError, normalize, type HttpRequest, type Transport } from "../src/core/embeddings";
-import { quantize, SemanticIndex } from "../src/core/semantic";
+import { dot, embed, EmbeddingError, normalize, type HttpRequest, type Transport } from "../src/core/embeddings";
+import { dequantize, quantize, SemanticIndex, topHits } from "../src/core/semantic";
 import type { DatanotesSettings } from "../src/core/settings";
 import { createDbVault, LOG_YAML, METASTORE } from "./helpers/db-vault";
 import { described } from "./helpers/descriptions";
@@ -185,5 +185,114 @@ describe("SemanticIndex.search", () => {
     expect(hit).toMatchObject({ path: "Books/Dune.md", heading: "Food" });
     const [plot] = (await idx.search({ query: "desert sand", limit: 1 })).results;
     expect(plot).toMatchObject({ path: "Books/Dune.md", heading: "Plot" });
+  });
+
+  /** The search as it was: every passage dequantized to floats, a dot product, a stable sort. */
+  async function floatSearch(v: ReturnType<typeof vault>, query: string, limit: number, minScore?: number) {
+    const q = normalize(fakeVector(query));
+    const best = new Map<string, { path: string; score: number; heading: string }>();
+    const shards = v.listAll().filter((p) => p.startsWith("store:semantic/")).sort();
+    const files: [string, { passages: { h: string; q: string; k: number }[] }][] = [];
+    for (const shard of shards) files.push(...Object.entries((JSON.parse(v.read(shard)) as { files: Record<string, { passages: { h: string; q: string; k: number }[] }> }).files));
+    for (const [path, f] of files) {
+      for (const p of f.passages) {
+        const score = dot(q, dequantize(p.q, p.k));
+        if (minScore !== undefined && score < minScore) continue;
+        const prev = best.get(path);
+        if (!prev || score > prev.score) best.set(path, { path, score, heading: p.h });
+      }
+    }
+    return [...best.values()].sort((a, b) => b.score - a.score).slice(0, limit).map((h) => ({ ...h, score: Math.round(h.score * 1000) / 1000 }));
+  }
+
+  it("scores with the int8 vectors exactly as with the floats a load gave, before and after a restart; ties keep the notes' order", async () => {
+    const v = vault();
+    // notes with the same text score the same: they keep the order the index has them in
+    for (const n of ["p", "q", "r", "s", "t"]) v.write(`Twins/${n}.md`, "Basil and tomato in the garden.\n");
+    const idx = new SemanticIndex(v.app, () => v.settings, service().transport);
+    await idx.sync();
+    const again = new SemanticIndex(v.app, () => v.settings, service().transport);
+    for (const [query, limit, minScore] of [["garden tomato", 3, undefined], ["spice dinner", 10, undefined], ["desert", 2, 0.2], ["basil", 100, undefined]] as const) {
+      const want = await floatSearch(v, query, limit, minScore);
+      const fresh = (await idx.search({ query, limit, ...(minScore !== undefined ? { minScore } : {}) })).results.map((h) => ({ path: h.path, score: h.score, heading: h.heading }));
+      const loaded = (await again.search({ query, limit, ...(minScore !== undefined ? { minScore } : {}) })).results.map((h) => ({ path: h.path, score: h.score, heading: h.heading }));
+      expect(loaded, query).toEqual(want.map((h) => ({ path: h.path, score: h.score, heading: h.heading })));
+      // the order of equal scores is the order of the index, which a new instance reads shard by shard
+      expect(fresh.map((h) => h.score), query).toEqual(loaded.map((h) => h.score));
+    }
+    // the shards keep the same bytes and scales when written again
+    const kept = () =>
+      Object.fromEntries(
+        v
+          .listAll()
+          .filter((p) => p.startsWith("store:semantic/"))
+          .flatMap((p) => Object.entries((JSON.parse(v.read(p)) as { files: Record<string, unknown> }).files))
+          .filter(([p]) => p !== "Books/Earthsea.md"),
+      );
+    const before = kept();
+    v.write("Books/Earthsea.md", "# Earthsea\nA wizard and a dragon.\n");
+    again.touch("Books/Earthsea.md");
+    await again.sync({ onlyPending: true });
+    expect(kept()).toEqual(before);
+    expect(Object.keys(before).length).toBeGreaterThan(5);
+  });
+
+  it("decides a minScore at a passage's very score as the floats did", async () => {
+    const v = vault();
+    const idx = new SemanticIndex(v.app, () => v.settings, service().transport);
+    await idx.sync();
+    // the exact float score of Dune's best passage for this query
+    const q = normalize(fakeVector("desert"));
+    const shard = v.listAll().filter((p) => p.startsWith("store:semantic/")).map((p) => JSON.parse(v.read(p)) as { files: Record<string, { passages: { q: string; k: number }[] }> }).find((x) => x.files["Books/Dune.md"])!;
+    const exact = Math.max(...shard.files["Books/Dune.md"]!.passages.map((p) => dot(q, dequantize(p.q, p.k))));
+    const paths = async (minScore: number) => (await idx.search({ query: "desert", minScore, limit: 100 })).results.map((h) => h.path);
+    expect(await paths(exact)).toContain("Books/Dune.md");
+    expect(await paths(exact + 1e-12)).not.toContain("Books/Dune.md");
+  });
+
+  it("picks the best hits as a stable sort by score does, whatever their order", () => {
+    let seed = 5;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let t = 0; t < 200; t++) {
+      const hits = Array.from({ length: Math.floor(next() * 30) }, (_, id) => ({ id, score: Math.floor(next() * 6) / 5 }));
+      const limit = 1 + Math.floor(next() * 12);
+      expect(topHits(hits, limit), JSON.stringify({ hits, limit })).toEqual([...hits].sort((a, b) => b.score - a.score).slice(0, limit));
+    }
+  });
+
+  it("a passage whose vector is all zeros scores 0, as its floats did", async () => {
+    const v = vault({ "Notes/empty.md": "nothing at all\n" });
+    const zero = service((req) => {
+      const { input } = JSON.parse(req.body) as { input: string[] };
+      return { status: 200, text: JSON.stringify({ data: input.map((t, index) => ({ embedding: t.includes("nothing") ? VOCAB.map(() => 0) : fakeVector(t), index })) }) };
+    });
+    const idx = new SemanticIndex(v.app, () => v.settings, zero.transport);
+    await idx.sync();
+    const hit = (await idx.search({ query: "spice", limit: 100 })).results.find((h) => h.path === "Notes/empty.md");
+    expect(hit?.score).toBe(0);
+    const again = new SemanticIndex(v.app, () => v.settings, zero.transport);
+    expect((await again.search({ query: "spice", limit: 100 })).results.find((h) => h.path === "Notes/empty.md")?.score).toBe(0);
+  });
+
+  it("asks the service once for a query asked again, per vector space, keeping the latest 64", async () => {
+    const v = vault();
+    const s = service();
+    const idx = new SemanticIndex(v.app, () => v.settings, s.transport);
+    await idx.sync();
+    const asked = () => s.calls.filter((c) => (JSON.parse(c.body) as { input: string[] }).input.length === 1).length;
+    const first = await idx.search({ query: "spice", limit: 1 });
+    const n = asked();
+    expect(await idx.search({ query: " spice ", limit: 1 })).toEqual({ query: " spice ", results: first.results });
+    expect(asked()).toBe(n);
+    for (let i = 0; i < 64; i++) await idx.search({ query: `query ${i}`, limit: 1 });
+    expect(asked()).toBe(n + 64);
+    await idx.search({ query: "spice", limit: 1 });
+    expect(asked()).toBe(n + 65);
+    await idx.search({ query: "query 63", limit: 1 });
+    expect(asked()).toBe(n + 65);
+    // another model: its own vectors
+    v.settings.semanticModel = "other";
+    await idx.search({ query: "query 63", limit: 1 });
+    expect(asked()).toBe(n + 66);
   });
 });

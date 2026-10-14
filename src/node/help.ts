@@ -12,9 +12,11 @@ Usage:
   datanotes store new-id --database <folder>      a new database id (a copied folder gets its own store)
   datanotes store backup --database <folder>      show or set the store's git backup (--remote <url>, --off)
   datanotes store restore --from <url> --database <folder>   restore the store from its git backup
+  datanotes store convert-log --to <files|segments> --database <folder>   rewrite the transaction log in that format
   Every command takes --vault <folder> instead of --database for a vault holding the database.
 ${MCP_USAGE}
   datanotes --version | --help
+  dnotes is a short name for datanotes: every command works under both names.
 
 Options of serve:
   --database <folder>         the database folder (or DATANOTES_DATABASE): metastore.yaml at its
@@ -43,6 +45,8 @@ Options of serve:
                               between two operations, then a push (or DATANOTES_STORE_BACKUP_INTERVAL_S;
                               default: the setting storeBackupIntervalSeconds, 60)
   --log <file>                append console output to a file
+                              DATANOTES_INDEX_CHECK=1: check the engine's indexes against the vault
+                              after every operation, and log any difference as an error (slow: debugging)
 
 Options of status (the engine is found through the lock in its store, called with the owner's token):
   --database <folder>         the database folder (or DATANOTES_DATABASE; --vault <folder> for a vault)
@@ -70,7 +74,7 @@ commit and push, releases its lock and exits):
 
 Options of store:
   --database <folder>         the database folder (or DATANOTES_DATABASE; --vault <folder> for a vault)
-  --json                      store path, store backup: the answer as JSON
+  --json                      store path, store backup, store convert-log: the answer as JSON
   --remote <url>              store backup: turn it on, pushing to this git repository (a first push now)
   --ssh-command <cmd>         store backup, with --remote: the store repository's core.sshCommand
                               (default: the vault repository's), e.g. C:/Windows/System32/OpenSSH/ssh.exe
@@ -81,7 +85,10 @@ Options of store:
   --port <port>               store restore: the HTTP port in the new settings (default 27150)
   --force                     store restore: restore over a store that exists (kept aside, renamed)
   --no-backup                 store restore: leave the store backup off in the new settings
-  backup and restore change the store only while no engine runs on the database.
+  --to <files|segments>       store convert-log: segments (a few large files) or files (one per
+                              version, what Datanotes 3.0 reads); sets transactionLogFormat
+  new-id, backup, restore and convert-log run only while no engine runs on the database, and
+  hold its store while they run: an engine started meanwhile refuses to start.
   The data home holds one store per database: %LOCALAPPDATA%\\Datanotes (Windows),
   ~/Library/Application Support/Datanotes (macOS), $XDG_DATA_HOME/datanotes or
   ~/.local/share/datanotes (Linux); DATANOTES_DATA_HOME moves it.

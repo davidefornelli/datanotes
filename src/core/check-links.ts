@@ -297,7 +297,7 @@ export class CheckLinks {
       const owns = (o: OrderedFrontmatter) => rowTableFull(t.catalog.model, fmGet(o, this.settings.tableKey)) === full;
       const put = (path: string, ordered: OrderedFrontmatter) => {
         const prev = state.get(path);
-        state.set(path, { file: prev?.file ?? ({ path } as TFile), ordered, body: prev?.body ?? "" });
+        state.set(path, { file: prev?.file ?? ({ path } as TFile), ordered });
         this.touched.add(full);
       };
       const drop = (path: string) => {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { appendLog, logFilePath, pruneLogs } from "../src/core/file-log";
-import { isStorePath, storeAppend, storeExists, storeKey, storeList, storePath, storeRead, storeRemove, storeRename, storeWrite } from "../src/core/store";
+import { isStorePath, storeAppend, storeExists, storeGeneration, storeKey, storeList, storePath, storeRead, storeRemove, storeRename, storeWrite } from "../src/core/store";
 import type { App } from "../src/core/host";
 import { createDbVault } from "./helpers/db-vault";
 
@@ -75,5 +75,27 @@ describe("log files of a named process", () => {
     const removed = await pruneLogs(v.app, { ...v.settings, logRetentionDays: 30 }, new Date("2026-10-01T09:00:00Z"));
     expect(removed).toEqual(["store:logs/2026-08-01.service.jsonl"]);
     expect(v.listAll().filter((p) => p.startsWith("store:logs/"))).toEqual(["store:logs/2026-10-01.service.jsonl"]);
+  });
+});
+
+describe("the store's count of changes", () => {
+  it("moves for a file and every folder above it, on a write, an append, a removal and a rename, failed ones too", async () => {
+    const v = createDbVault({});
+    const gens = () => ["", "store:a", "store:a/b", "store:a/b/x.json", "store:c"].map((p) => storeGeneration(v.app, p));
+    expect(gens()).toEqual([0, 0, 0, 0, 0]);
+    await storeWrite(v.app, "store:a/b/x.json", "1");
+    expect(gens()).toEqual([1, 1, 1, 1, 0]);
+    await storeAppend(v.app, "store:a/b/x.json", "2");
+    await storeRemove(v.app, "store:a/b/missing.json"); // nothing removed: nothing changed
+    expect(gens()).toEqual([2, 2, 2, 2, 0]);
+    await storeRename(v.app, "store:a/b/x.json", "store:c/x.json");
+    expect(gens()).toEqual([4, 3, 3, 3, 1]);
+    await storeRemove(v.app, "store:c/x.json");
+    expect(storeGeneration(v.app, "store:c")).toBe(2);
+    const adapter = v.app.store! as unknown as { write(p: string, d: string): Promise<void> };
+    adapter.write = () => Promise.reject(new Error("ENOSPC: no space left on device"));
+    await expect(storeWrite(v.app, "store:c/y.json", "1")).rejects.toThrow("ENOSPC");
+    expect(storeGeneration(v.app, "store:c")).toBe(3);
+    expect(storeGeneration(createDbVault({}).app)).toBe(0);
   });
 });

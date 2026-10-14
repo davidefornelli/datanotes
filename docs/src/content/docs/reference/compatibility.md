@@ -22,7 +22,7 @@ These parts of Datanotes follow the version rules:
 - Operations, their arguments and their answer fields
 - HTTP routes and headers
 - Violation codes
-- Commands, their options and their exit codes
+- The commands the package installs (`datanotes` and `dnotes`), their options and their exit codes
 - Environment variables and settings
 - The words of `metastore.yaml`
 
@@ -33,6 +33,21 @@ These cases fall outside them:
 - **Undocumented behavior**: only what the docs describe is covered.
 - **Messages**: the text of refusals and hints can improve in any version.
 - **Node.js versions**: support follows the Node.js long-term support releases.
+
+## Downgrade to 3.0
+
+From 3.1, the engine writes the transaction log in segments by default. Datanotes 3.0 can’t read segments, so convert the log before you downgrade:
+
+1. Stop the engine.
+2. Convert every table’s log to one file per version:
+
+   ```bash
+   datanotes store convert-log --to files --vault ~/notes
+   ```
+
+3. Install Datanotes 3.0 and start it.
+
+The command also sets `transactionLogFormat` to `files`, so a 3.1 engine started on the store again keeps writing files. [How the engine writes the log](/start/how-it-works/#how-the-engine-writes-the-log) describes both formats.
 
 ## Write tolerant clients
 
@@ -62,6 +77,6 @@ if (r.ok) console.log((r.value as Created).planned_creates);
 
 ## How the tests check it
 
-The repository keeps the public interface in `contract/datanotes-3.txt`. It has one line for every operation, argument, answer field, route, command option, environment variable, setting and violation code.
+The repository keeps the public interface in `contract/datanotes-3.txt`. It has one line for every operation, argument, answer field, route, installed command, command option, environment variable, setting and violation code.
 
 The test suite fails when a line goes or changes within a major version, so a breaking change cannot ship by accident. A second test checks every new name against the naming rules.

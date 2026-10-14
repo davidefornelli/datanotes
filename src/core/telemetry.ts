@@ -1,10 +1,12 @@
 /**
  * The engine's log records: one global sink (`telemetry()`), fed by every operation and request.
  * Sinks: the log files (`FileLogger`), and an OpenTelemetry collector (`server/otlp-sink.ts`).
- * Telemetry must never break a vault operation: sinks never throw.
+ * Telemetry must never break a vault operation: sinks never throw. A record made inside a span
+ * (tracing.ts) names it: `trace_id` and `span_id` in the files, the OTLP record's own fields.
  */
 
 import { messageOf } from "./message";
+import { activeSpanContext, rootOrChild, type Span } from "./tracing";
 
 export type Severity = "DEBUG" | "INFO" | "WARN" | "ERROR";
 
@@ -18,6 +20,16 @@ export interface TelemetrySettings {
   telemetryServiceName: string;
   telemetryHeaders?: Record<string, string>;
   telemetryProtocol?: "http/protobuf" | "http/json";
+  /** Send traces too (default true). */
+  telemetryTraces?: boolean;
+  /** Share of new traces kept, 0 to 1 (default 1). */
+  telemetryTraceSampleRatio?: number;
+  /** Most spans one trace may hold (default 1000). */
+  telemetryMaxSpansPerTrace?: number;
+  /** Operations and requests lasting at least this many ms are logged as WARN (0: never; default 0). */
+  telemetrySlowSpanMs?: number;
+  /** `deployment.environment.name` of the logs and traces (empty: none). */
+  telemetryEnvironment?: string;
 }
 
 export interface Telemetry {
@@ -40,36 +52,55 @@ export function telemetry(): Telemetry {
   return current;
 }
 
+/** A log attribute as a span attribute: plain names get the `datanotes.` namespace. */
+function spanAttributes(span: Span, attributes: Record<string, AttrValue>): void {
+  for (const k in attributes) span.setAttribute(k.includes(".") ? k : `datanotes.${k}`, attributes[k]);
+}
+
 /**
- * Run `fn`, then log one record with its duration and the attributes returned by `summarize`.
- * Thrown errors are logged at ERROR and rethrown.
+ * Run `fn` in a span named after `event` (`datanotes insert_row` → `engine.insert_row`, and
+ * `datanotes select` → `engine.query.execute`: a child of the
+ * active span, or a trace of its own for work no request started), then log one record with its
+ * duration and the attributes returned by `summarize`. The span gets the same attributes;
+ * `error.type` when the result says `ok: false` (`refused`) or the write failed (`failed`, with
+ * status ERROR). While the span is exported, an INFO record is logged as DEBUG: the span says it
+ * all. Thrown errors are logged at ERROR and rethrown.
  */
-export async function traced<T>(
+export function traced<T>(
   event: string,
   attributes: Record<string, AttrValue>,
   fn: () => Promise<T>,
   summarize: (result: T) => { severity?: Severity; attributes?: Record<string, AttrValue> } = () => ({}),
   now: () => number = Date.now,
 ): Promise<T> {
-  const start = now();
-  try {
-    const result = await fn();
-    const s = summarize(result);
-    telemetry().log(s.severity ?? "INFO", event, {
-      ...attributes,
-      ...(s.attributes ?? {}),
-      duration_ms: now() - start,
-    });
-    return result;
-  } catch (e) {
-    telemetry().log("ERROR", event, {
-      ...attributes,
-      duration_ms: now() - start,
-      "error.type": e instanceof Error ? e.name : "Error",
-      "error.message": messageOf(e),
-    });
-    throw e;
-  }
+  return rootOrChild(event === "datanotes select" ? "engine.query.execute" : event.replace(/^datanotes /, "engine."), async (span) => {
+    spanAttributes(span, attributes);
+    const start = now();
+    try {
+      const result = await fn();
+      const s = summarize(result);
+      const summary = s.attributes ?? {};
+      spanAttributes(span, summary);
+      // a failed write is an error; a refused one (violations, conflicts) is the caller's to fix
+      if (s.severity === "ERROR") span.setStatus("error", "failed").setAttribute("error.type", "failed");
+      else if (summary.ok === false) span.setAttribute("error.type", "refused");
+      // the span carries what the INFO record said: the record stays, as DEBUG
+      telemetry().log(s.severity === undefined || s.severity === "INFO" ? (span.recording ? "DEBUG" : "INFO") : s.severity, event, {
+        ...attributes,
+        ...summary,
+        duration_ms: now() - start,
+      });
+      return result;
+    } catch (e) {
+      telemetry().log("ERROR", event, {
+        ...attributes,
+        duration_ms: now() - start,
+        "error.type": e instanceof Error ? e.name : "Error",
+        "error.message": messageOf(e),
+      });
+      throw e;
+    }
+  });
 }
 
 export interface FileLoggerOptions {
@@ -93,7 +124,9 @@ export class FileLogger implements Telemetry {
     const pad = (n: number) => String(n).padStart(2, "0");
     const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const attrs = Object.fromEntries(Object.entries(attributes).filter(([, v]) => v !== undefined));
-    this.buffer.push({ day, line: JSON.stringify({ time: d.toISOString(), level: severity, msg: body, ...attrs }) });
+    const ctx = activeSpanContext();
+    const trace = ctx ? { trace_id: ctx.traceId, span_id: ctx.spanId } : {};
+    this.buffer.push({ day, line: JSON.stringify({ time: d.toISOString(), level: severity, msg: body, ...trace, ...attrs }) });
   }
 
   flush(): Promise<void> {

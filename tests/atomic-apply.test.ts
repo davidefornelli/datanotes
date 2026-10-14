@@ -6,9 +6,9 @@
  * undo_migration on the write's migration_id finishes it. Runs on both hosts (`VAULT_HOST=node`).
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeRefusal } from "../src/api/results";
-import { applyChangeSet, bodyOf, emptyChangeSet, readJournal, type NoteEdit } from "../src/core/changeset";
+import { applyChangeSet, bodyOf, emptyChangeSet, readJournal, WRITE_CONCURRENCY, type NoteEdit } from "../src/core/changeset";
 import { configureDatabase } from "../src/core/database";
 import { emptyResult, finish, INDEX_RETRY, onApplied, undoOperation } from "../src/core/engine";
 import { fmSet, readOrderedFromMarkdown } from "../src/core/frontmatter";
@@ -336,5 +336,74 @@ describe("the HTTP status of a write that did not apply", () => {
       ],
     });
     expect(refused.status).toBe(422);
+  });
+});
+
+describe("notes written several at a time", () => {
+  // every change set writes several notes at a time here (a bulk write does: WRITE_CONCURRENCY.from)
+  beforeEach(() => void (WRITE_CONCURRENCY.from = 1));
+  afterEach(() => void (WRITE_CONCURRENCY.from = 32));
+
+  /** Front matter writes of `path` fail; the others are let through once every write has started. */
+  function failPath(v: DbVault, path: string): void {
+    const fm = v.app.fileManager as unknown as { processFrontMatter(f: TFile, fn: (fm: Record<string, unknown>) => void): Promise<void> };
+    const real = fm.processFrontMatter.bind(fm);
+    vi.spyOn(fm, "processFrontMatter").mockImplementation(async (f, fn) => {
+      await new Promise((r) => setTimeout(r, 5));
+      if (f.path === path) throw new Error(`EBUSY: resource busy or locked, open '${f.path}'`);
+      return real(f, fn);
+    });
+  }
+
+  it("leave what one at a time leaves: the edits before the first failure; one after it is taken back", async () => {
+    const v = await vault();
+    const before = texts(v);
+    failPath(v, "Daily/b.md");
+    const cs = emptyChangeSet("update_rows", "edit three rows");
+    cs.edits.push(edit(v, "Daily/a.md", 1), edit(v, "Daily/b.md", 2), edit(v, C, 3));
+    const applied = await applyChangeSet(v.app, v.settings, cs);
+    expect(applied).toMatchObject({ ok: false, notesChanged: 1, failed: [{ path: "Daily/b.md", error: expect.stringMatching(/^EBUSY/) }] });
+    const { entry } = await readJournal(v.app, v.settings, applied.migrationId);
+    expect(entry.rows.map((r) => r.path)).toEqual(["Daily/a.md"]);
+    expect(v.read(C)).toBe(before[C]); // written while b failed, then taken back
+    expect(v.read("Daily/a.md")).not.toBe(before["Daily/a.md"]);
+  });
+
+  it("an edit after the failure that cannot be taken back stays written, and the journal names it", async () => {
+    const v = await vault();
+    failPath(v, "Daily/b.md");
+    const process = v.app.vault.process.bind(v.app.vault);
+    vi.spyOn(v.app.vault, "process").mockImplementation(async (f, fn) => {
+      if (f.path === C) throw new Error("EBUSY: held");
+      return process(f, fn);
+    });
+    const cs = emptyChangeSet("update_rows", "edit three rows");
+    cs.edits.push(edit(v, "Daily/a.md", 1), edit(v, "Daily/b.md", 2), edit(v, C, 3));
+    const applied = await applyChangeSet(v.app, v.settings, cs);
+    const { entry } = await readJournal(v.app, v.settings, applied.migrationId);
+    expect(entry.rows.map((r) => r.path)).toEqual(["Daily/a.md", C]);
+    expect(applied.failed.map((f) => f.path)).toEqual(["Daily/b.md"]);
+  });
+
+  it("notes created after the first that fails are deleted again; two edits of one note run one after the other", async () => {
+    const v = await vault();
+    const create = v.app.vault.create.bind(v.app.vault);
+    vi.spyOn(v.app.vault, "create").mockImplementation(async (p, data) => {
+      await new Promise((r) => setTimeout(r, p.endsWith("2.md") ? 1 : 10));
+      if (p.endsWith("2.md")) throw new Error("EBUSY: held");
+      return create(p, data);
+    });
+    const cs = emptyChangeSet("insert_row", "three notes");
+    cs.creates.push(...[1, 2, 3].map((i) => ({ path: `New/n${i}.md`, content: `n${i}\n` })));
+    const applied = await applyChangeSet(v.app, v.settings, cs);
+    expect(applied.failed.map((f) => f.path)).toEqual(["New/n2.md"]);
+    expect((await readJournal(v.app, v.settings, applied.migrationId)).entry.creates).toEqual(["New/n1.md"]);
+    expect([v.exists("New/n1.md"), v.exists("New/n3.md")]).toEqual([true, false]);
+    vi.restoreAllMocks();
+    const twice = emptyChangeSet("update_rows", "one note twice");
+    const first = edit(v, "Daily/a.md", 4);
+    twice.edits.push(first, { path: "Daily/a.md", before: first.after, after: fmSet(first.after, "metric_drinks", 5) });
+    expect((await applyChangeSet(v.app, v.settings, twice)).ok).toBe(true);
+    expect(readOrderedFromMarkdown(v.read("Daily/a.md")).ordered).toContainEqual(["metric_drinks", 5]);
   });
 });

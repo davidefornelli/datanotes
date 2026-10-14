@@ -482,3 +482,53 @@ describe("the database id of the store backup", () => {
     expect(fs.readFileSync(path.join(home, ID, "journal", "2026-10.jsonl"), "utf8")).toBe("{}\n");
   }, 30_000);
 });
+
+describe("the store backup and the engine's changes", () => {
+  it("stages under the lock only the folders the engine wrote; a tick without a change runs no git", async () => {
+    const { followStoreChanges } = await import("../src/node/store-backup");
+    const { nodeStoreFiles } = await import("../src/node/store-files");
+    const { storeAppend, storeWrite } = await import("../src/core/store");
+    const store = tmp("prod-backup-changes-");
+    const remote = bare();
+    write(store, "journal/2026-10.jsonl", "{}\n");
+    const app = { store: nodeStoreFiles(store) } as never;
+    const changes = followStoreChanges(app);
+    const g = recording();
+    /** A write of the engine right after the first `git add` of a commit (outside the lock). */
+    let between: (() => Promise<void>) | null = null;
+    const run: GitRunner = async (args, cwd, o) => {
+      const r = await g.run(args, cwd, o);
+      if (gitSubcommand(args) === "add" && between) {
+        const w = between;
+        between = null;
+        await w();
+      }
+      return r;
+    };
+    const b = new StoreBackup({ store, databaseId: ID, remote, every: 3_600_000, run, engine: g.engine, changes });
+    expect(await b.start()).toBe(true);
+    await b.idle();
+    expect(git(remote, "show", "main:journal/2026-10.jsonl")).toBe("{}");
+    expect(git(store, "config", "core.untrackedCache")).toBe("true");
+    expect(git(store, "config", "feature.manyFiles")).toBe("true");
+    // nothing written since: a tick asks git nothing
+    g.calls.length = 0;
+    await b.tick();
+    expect(g.calls.map((c) => gitSubcommand(c.args))).not.toContain("status");
+    // the engine writes: the add under the lock names the folders it wrote (and an untracked file is never staged)
+    await storeAppend(app, "store:journal/2026-10.jsonl", "{}\n");
+    await storeWrite(app, "store:transaction_log/main.metrics.mood/00000000000000000000.json", "{}\n");
+    await storeWrite(app, "store:webhooks.json", "[]\n");
+    g.calls.length = 0;
+    // the tick sees the change; its commit stages outside the lock, then what changed meanwhile
+    between = () => storeWrite(app, "store:changes/2026-10-14.jsonl", "{}\n");
+    await b.tick();
+    await b.idle();
+    const locked = g.of("add").filter((c) => c.locked).map((c) => c.args.slice(c.args.indexOf("add")));
+    expect(locked).toEqual([["add", "-A", "--", "changes"]]);
+    expect(git(remote, "show", "main:transaction_log/main.metrics.mood/00000000000000000000.json")).toBe("{}");
+    expect(git(store, "ls-files")).not.toContain("webhooks.json");
+    await b.stop();
+    changes.dispose();
+  }, 30_000);
+});

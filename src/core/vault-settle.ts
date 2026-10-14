@@ -8,17 +8,23 @@
 
 import type { App } from "./host";
 
-const SETTLERS = new WeakMap<object, () => void | Promise<void>>();
+/**
+ * A host's catch-up. `since`: when the request that asks arrived (`performance.now()`); a host that
+ * compared the whole disk after that moment has nothing more to catch up for it.
+ */
+export type VaultSettler = (since?: number) => void | Promise<void>;
+
+const SETTLERS = new WeakMap<object, VaultSettler>();
 
 /** Register (or with null remove) the host's way to apply the changes it knows of but has not indexed yet. */
-export function setVaultSettler(app: App, fn: (() => void | Promise<void>) | null): void {
+export function setVaultSettler(app: App, fn: VaultSettler | null): void {
   if (fn) SETTLERS.set(app, fn);
   else SETTLERS.delete(app);
 }
 
-/** Bring the host's index up to date with the disk, when the host can. */
-export async function settleVault(app: App): Promise<void> {
-  await SETTLERS.get(app)?.();
+/** Bring the host's index up to date with the disk, when the host can (for a request arrived at `since`). */
+export async function settleVault(app: App, since?: number): Promise<void> {
+  await SETTLERS.get(app)?.(since);
 }
 
 type BulkWriter = <T>(work: () => Promise<T>) => Promise<T>;

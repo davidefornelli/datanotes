@@ -158,6 +158,19 @@ describe("datanotes/client: the published entry point", () => {
         "parseOtlpHeaders",
         "resultOf",
         "toolDocs",
+        // traces (W3C Trace Context, a small tracer, the OTLP trace exporter)
+        "OtlpTraceExporter",
+        "TRACEPARENT_HEADER",
+        "TRACESTATE_HEADER",
+        "TraceSpan",
+        "Tracer",
+        "formatTraceparent",
+        "newSpanId",
+        "newTraceId",
+        "otlpTracesFromEnv",
+        "parseTraceparent",
+        "samplerRatioFromEnv",
+        "traceHeaders",
       ].sort(),
     );
     expect(client.OPERATIONS.length).toBeGreaterThan(50);

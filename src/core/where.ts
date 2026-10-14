@@ -90,49 +90,76 @@ export function comparable(spec: ColumnSpec | undefined, v: unknown): unknown {
   return v;
 }
 
-function eq(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Equality as the filters define it, two values with the same JSON, against an expected value
+ * whose JSON is computed once: strings (most values) compare as they are, which says the same.
+ */
+function equalTo(e: unknown): (a: unknown) => boolean {
+  const json = JSON.stringify(e);
+  if (typeof e === "string") return (a) => (typeof a === "string" ? a === e : JSON.stringify(a) === json);
+  return (a) => JSON.stringify(a) === json;
 }
 
-function matchOp(op: string, actual: unknown, expected: unknown, spec: ColumnSpec | undefined): boolean {
-  if (op === "exists") return (expected === false) === isEmptyValue(actual);
-  if (op === "within") throw new OperationInputError(`"within" is not available here`, guide(`"within" works in select_rows and views on a link column whose table has a hierarchy column; elsewhere, list the rows with "in".`, "linkFilters"));
+/** Membership as the filters define it (some item with the same JSON), with the items' JSON computed once. */
+function memberOf(items: readonly unknown[]): (a: unknown) => boolean {
+  const strings = new Set<string>();
+  const json = new Set<string | undefined>();
+  for (const i of items) {
+    if (typeof i === "string") strings.add(i);
+    json.add(JSON.stringify(i));
+  }
+  return (a) => (typeof a === "string" ? strings.has(a) : json.has(JSON.stringify(a)));
+}
+
+/**
+ * One operator of a condition, compiled once for every row: the expected value made comparable,
+ * folded or turned into a set before the rows are read. A misuse (`within` where it is not
+ * available, `in` without a list) is refused when a row is tested, as before compiling.
+ */
+function compileOp(op: string, expected: unknown, spec: ColumnSpec | undefined): (actual: unknown) => boolean {
+  if (op === "exists") return (actual) => (expected === false) === isEmptyValue(actual);
+  if (op === "within") {
+    return () => {
+      throw new OperationInputError(`"within" is not available here`, guide(`"within" works in select_rows and views on a link column whose table has a hierarchy column; elsewhere, list the rows with "in".`, "linkFilters"));
+    };
+  }
   if (op === "in_any") {
     const allowed = new Set((expected as unknown[]).map((e) => comparable(spec, e)));
-    return (Array.isArray(actual) ? actual : [actual]).some((x) => allowed.has(comparable(spec, x)));
+    return (actual) => (Array.isArray(actual) ? actual : [actual]).some((x) => allowed.has(comparable(spec, x)));
   }
   if (op === "icontains") {
     // Case- and accent-insensitive substring, of the text or of any item of a list (names, aliases).
-    if (expected == null || typeof expected === "object") return false;
+    if (expected == null || typeof expected === "object") return () => false;
     const needle = fold(expected);
-    const items = Array.isArray(actual) ? actual : [actual];
-    return items.some((x) => x != null && typeof x !== "object" && fold(comparable(spec, x)).includes(needle));
+    return (actual) => (Array.isArray(actual) ? actual : [actual]).some((x) => x != null && typeof x !== "object" && fold(comparable(spec, x)).includes(needle));
   }
   if (op === "contains") {
-    if (Array.isArray(actual)) return actual.some((x) => eq(comparable(spec, x), comparable(spec, expected)));
-    return typeof actual === "string" && typeof expected === "string" && actual.includes(expected);
+    const same = equalTo(comparable(spec, expected));
+    return (actual) => {
+      if (Array.isArray(actual)) return actual.some((x) => same(comparable(spec, x)));
+      return typeof actual === "string" && typeof expected === "string" && actual.includes(expected);
+    };
   }
-  const a = comparable(spec, actual);
   if (op === "in") {
-    if (!Array.isArray(expected)) throw new OperationInputError(`"in" expects a list`, guide(`Write {"<column>": {"in": ["a", "b"]}}; for one value use {"<column>": "a"}.`, "filters"));
-    return expected.some((e) => eq(a, comparable(spec, e)));
+    if (!Array.isArray(expected)) {
+      return () => {
+        throw new OperationInputError(`"in" expects a list`, guide(`Write {"<column>": {"in": ["a", "b"]}}; for one value use {"<column>": "a"}.`, "filters"));
+      };
+    }
+    const member = memberOf(expected.map((e) => comparable(spec, e)));
+    return (actual) => member(comparable(spec, actual));
   }
   const e = comparable(spec, expected);
-  if (op === "eq") return eq(a, e);
-  if (op === "ne") return !eq(a, e);
-  if (isEmptyValue(a)) return false;
-  const x = a as number | string;
-  const y = e as number | string;
-  switch (op) {
-    case "gt":
-      return x > y;
-    case "gte":
-      return x >= y;
-    case "lt":
-      return x < y;
-    default:
-      return x <= y;
+  if (op === "eq" || op === "ne") {
+    const same = equalTo(e);
+    return op === "eq" ? (actual) => same(comparable(spec, actual)) : (actual) => !same(comparable(spec, actual));
   }
+  const y = e as number | string;
+  const cmp: (x: number | string) => boolean = op === "gt" ? (x) => x > y : op === "gte" ? (x) => x >= y : op === "lt" ? (x) => x < y : (x) => x <= y;
+  return (actual) => {
+    const a = comparable(spec, actual);
+    return !isEmptyValue(a) && cmp(a as number | string);
+  };
 }
 
 /**
@@ -200,6 +227,9 @@ export function rowGetter(app: App | null, t: LoadedTable, settings: DatanotesSe
   let inlinks: Map<string, number> | null = null;
   const backlinks = (path: string): number | null => {
     if (!app) return null;
+    // a host that keeps backlinks counts them for one note (no pass over every link)
+    const kept = app.metadataCache.backlinksOf;
+    if (kept) return Object.keys(kept.call(app.metadataCache, path)).filter((src) => src !== path).length;
     if (!inlinks) {
       inlinks = new Map();
       const resolved = app.metadataCache.resolvedLinks;
@@ -290,7 +320,10 @@ export async function resolveWithin(app: App, settings: DatanotesSettings, t: Lo
     const children = new Map<string, string[]>();
     for (const r of rows) {
       const p = linkName(fmGet(r.ordered, h.name));
-      if (p) children.set(p, [...(children.get(p) ?? []), basenameOf(r.file.path)]);
+      if (!p) continue;
+      const list = children.get(p);
+      if (list) list.push(basenameOf(r.file.path));
+      else children.set(p, [basenameOf(r.file.path)]);
     }
     const subtree = new Set<string>([root]);
     for (const n of subtree) for (const c of children.get(n) ?? []) subtree.add(c);
@@ -308,13 +341,23 @@ export function compileWhere(
   /** CHECKs only: dotted keys follow links to the rows loaded there (see CheckLinks). */
   links?: WhereLinks,
 ): (row: LoadedRow) => boolean {
+  return compileWhereOn(where, t, readableKeys(t, settings), new Map(t.def.columns.map((c) => [c.name, c])), get, links);
+}
+
+/** {@link compileWhere} with the table's keys and column specs computed once for every logical branch. */
+function compileWhereOn(
+  where: Where | undefined,
+  t: LoadedTable,
+  known: ReadonlySet<string>,
+  specs: ReadonlyMap<string, ColumnSpec>,
+  get: RowGetter,
+  links: WhereLinks | undefined,
+): (row: LoadedRow) => boolean {
   if (where == null) return () => true;
   if (typeof where !== "object" || Array.isArray(where)) throw new OperationInputError(`"where" must be an object`, guide(`Write "where" as an object of conditions: {"status": "watched", "rating": {"gte": 4}}.`, "filters"));
-  const known = readableKeys(t, settings);
-  const specs = new Map(t.def.columns.map((c) => [c.name, c]));
   const tests: ((row: LoadedRow) => boolean)[] = Object.entries(where).map(([col, cond]) => {
     if (LOGICAL_KEYS.has(col)) {
-      const parts = logicalParts(col, cond).map((w) => compileWhere(w, t, settings, get, links));
+      const parts = logicalParts(col, cond).map((w) => compileWhereOn(w, t, known, specs, get, links));
       if (col === "or") return (row) => parts.some((p) => p(row));
       if (col === "and") return (row) => parts.every((p) => p(row));
       return (row) => !parts[0]!(row);
@@ -332,9 +375,15 @@ export function compileWhere(
     }
     const ops = withoutUnfilledTokens(isOperatorObject(cond) ? Object.entries(cond) : [["eq", cond]]);
     if (ops === null) return () => false;
+    const spec = specs.get(col);
+    const matchers = ops.map(([op, expected]) => compileOp(op, expected, spec));
+    if (matchers.length === 1) {
+      const only = matchers[0]!;
+      return (row) => only(get(row, col));
+    }
     return (row) => {
       const actual = get(row, col);
-      return ops.every(([op, expected]) => matchOp(op, actual, expected, specs.get(col)));
+      return matchers.every((m) => m(actual));
     };
   });
   return (row) => tests.every((test) => test(row));

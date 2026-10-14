@@ -8,11 +8,12 @@
  * their own MCP servers.
  */
 
-import { DatanotesClient, DatanotesError, type ActorInfo } from "../api/client";
+import { DatanotesClient, DatanotesError, type ActorInfo, type RecordedToolCall, type ToolCallRecord } from "../api/client";
 import { openDocs, type DocsLibrary } from "../api/docs";
 import { callDocsTool, callProblem, docsTools, ENGINE_INSTRUCTIONS, engineTools, isDocsTool, offlineDocs, toolContent, type EngineTool, type EngineToolFilter, type ToolContent } from "../api/mcp";
-import { redactToolCall } from "../api/redact";
+import { cutToolCall, redactToolCall } from "../api/redact";
 import { estimateTokens } from "../api/tokens";
+import { parseTraceparent, type TraceContext, type Tracer, type TraceSpan } from "../api/tracing";
 import { noLog, type Log } from "./log";
 
 /** The engine's operations, for one engine, and the docs tools. */
@@ -28,13 +29,34 @@ export class Toolbox {
     readonly docs: DocsLibrary = openDocs(),
     /** The names of the tools to offer (default: every one); a call to another is refused as an unknown tool. */
     only?: readonly string[],
+    /** Traces (log.ts tracerFromEnv): a SERVER span per tool call, a CLIENT span per request to the engine. */
+    readonly tracer: Tracer | null = null,
   ) {
     this.filter = only ? { only } : {};
     this.tools = [...engineTools(), ...docsTools()].filter((t) => !only || only.includes(t.name));
   }
 
-  client(token: string): DatanotesClient {
-    return new DatanotesClient({ url: this.engineUrl, token });
+  /** A client for the agent's token; `trace`: the tool call's span, which its requests continue. */
+  client(token: string, trace?: TraceContext): DatanotesClient {
+    return new DatanotesClient({ url: this.engineUrl, token, ...(this.tracer && trace ? { tracer: this.tracer, trace } : {}) });
+  }
+
+  /** The SERVER span of a tool call (OpenTelemetry MCP and GenAI conventions); continues the client's `traceparent` when it sent one. */
+  private toolSpan(name: string, actor: ActorInfo, trace: CallTrace = {}): ToolSpan {
+    if (!this.tracer) return NO_SPAN;
+    return this.tracer.startSpan(`tools/call ${name}`, {
+      kind: "server",
+      parent: parseTraceparent(trace.traceparent as string, trace.tracestate as string),
+      attributes: {
+        "mcp.method.name": "tools/call",
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": name,
+        "mcp.session.id": actor.session,
+        "datanotes.client.harness": actor.harness,
+        "datanotes.client.harness_version": actor.harness_version,
+        "datanotes.client.model": actor.model,
+      },
+    });
   }
 
   /** What the server tells agents at `initialize`. */
@@ -47,13 +69,22 @@ export class Toolbox {
   }
 
   /** Run a tool for an agent, report the call to the engine and log it (argument names only). */
-  async call(token: string, name: string, args: Record<string, unknown>, actor: ActorInfo): Promise<ToolContent> {
-    if (isDocsTool(name, this.filter)) return this.readDocs(token, name, args, actor);
-    const client = this.client(token);
+  async call(token: string, name: string, args: Record<string, unknown>, actor: ActorInfo, trace?: CallTrace): Promise<ToolContent> {
+    const span = this.toolSpan(name, actor, trace);
+    try {
+      return await (isDocsTool(name, this.filter) ? this.readDocs(token, name, args, actor, span) : this.engineCall(token, name, args, actor, span));
+    } finally {
+      span.end();
+    }
+  }
+
+  private async engineCall(token: string, name: string, args: Record<string, unknown>, actor: ActorInfo, span: ToolSpan): Promise<ToolContent> {
+    const client = this.client(token, span.context);
     const started = Date.now();
     let ok: boolean;
     let value: unknown;
     let unexpected = false;
+    let thrown: unknown = undefined;
     // a tool that does not exist, or arguments it does not take, never reach the engine
     const problem = callProblem(name, args, this.filter);
     try {
@@ -62,16 +93,20 @@ export class Toolbox {
       ok = false;
       value = e instanceof Error ? e.message : String(e);
       unexpected = !(e instanceof DatanotesError);
+      thrown = e;
     }
     const durationMs = Date.now() - started;
     const content = offlineDocs(toolContent(ok, value));
     const returned = content.content.map((c) => c.text).join("\n");
     const resultTokens = estimateTokens(returned);
+    // a refusal is the agent's to fix (status unset); an engine that does not answer, or an unexpected failure, is an error
+    if (thrown !== undefined && (unexpected || (thrown as DatanotesError).kind === "unreachable")) span.recordException(thrown);
+    else if (!ok) span.setAttribute("error.type", problem ? "invalid_arguments" : thrown !== undefined ? (thrown as DatanotesError).kind : "refused");
+    span.setAttributes({ "datanotes.result_chars": returned.length, "datanotes.result_tokens": resultTokens });
     // secrets (a webhook's) never leave for the change feed, which the store backup commits
     const recorded = redactToolCall(name, args, value);
-    void client
-      .recordToolCall({ tool: name, args: recorded.args, ok, duration_ms: durationMs, value: recorded.value, served_by: "engine", ...(actor.session ? { session: actor.session } : {}), result_chars: returned.length, result_tokens: resultTokens }, { ...actor, tool: name })
-      .catch(() => undefined);
+    // the report is not part of the call's trace
+    void this.report(token, { tool: name, args: recorded.args, ok, duration_ms: durationMs, value: recorded.value, served_by: "engine", ...(actor.session ? { session: actor.session } : {}), result_chars: returned.length, result_tokens: resultTokens }, { ...actor, tool: name });
     this.log(ok ? "INFO" : unexpected ? "ERROR" : "WARN", `tool ${name}: ${ok ? "ok" : "failed"} (${durationMs} ms)`, {
       tool: name,
       ok,
@@ -83,8 +118,25 @@ export class Toolbox {
       session: actor.session,
       arg_names: Object.keys(args).join(","),
       error: ok ? undefined : returned.slice(0, 300),
-    });
+    }, span.context);
     return content;
+  }
+
+  /** The engine takes a call's value cut, with its summary: it said so when it recorded a call. */
+  private takesSummary = false;
+
+  /**
+   * Report a call to the engine's change feed. Once the engine has said it takes them, the
+   * arguments and the value go cut, with the result's summary: a large result is not sent back
+   * whole. A report that fails is lost; the call's answer is not affected.
+   */
+  private async report(token: string, call: ToolCallRecord, actor: ActorInfo): Promise<void> {
+    try {
+      const answer: Partial<RecordedToolCall> | undefined = await this.client(token).recordToolCall(this.takesSummary ? { ...call, ...cutToolCall(call) } : call, actor);
+      if (answer?.takes_summary === true) this.takesSummary = true;
+    } catch {
+      // lost
+    }
   }
 
   /**
@@ -92,10 +144,11 @@ export class Toolbox {
    * search_docs also asks the engine for its ranking by meaning (hybrid search); without one, it
    * ranks by words alone.
    */
-  private async readDocs(token: string, name: string, args: Record<string, unknown>, actor: ActorInfo): Promise<ToolContent> {
+  private async readDocs(token: string, name: string, args: Record<string, unknown>, actor: ActorInfo, span: ToolSpan): Promise<ToolContent> {
     const started = Date.now();
-    const content = offlineDocs(await callDocsTool(name, args, { docs: this.docs, client: this.client(token), actor: { ...actor, tool: name } }));
+    const content = offlineDocs(await callDocsTool(name, args, { docs: this.docs, client: this.client(token, span.context), actor: { ...actor, tool: name } }));
     const ok = !content.isError;
+    if (!ok) span.setAttribute("error.type", "refused");
     const returned = content.content.map((c) => c.text).join("\n");
     const durationMs = Date.now() - started;
     this.log(ok ? "INFO" : "WARN", `tool ${name}: ${ok ? "ok" : "failed"} (${durationMs} ms)`, {
@@ -109,7 +162,22 @@ export class Toolbox {
       session: actor.session,
       arg_names: Object.keys(args).join(","),
       error: ok ? undefined : returned.slice(0, 300),
-    });
+    }, span.context);
     return content;
   }
 }
+
+/** The `_meta` of a call: a client that traces sends its W3C `traceparent` (and `tracestate`) there. */
+export type CallTrace = Record<string, unknown>;
+
+/** What a tool call does with its span. */
+type ToolSpan = Pick<TraceSpan, "setAttribute" | "setAttributes" | "recordException" | "end"> & { readonly context: TraceContext | undefined };
+
+/** The span of a call while the server sends no traces. */
+const NO_SPAN: ToolSpan = {
+  context: undefined,
+  setAttribute: () => NO_SPAN as never,
+  setAttributes: () => NO_SPAN as never,
+  recordException: () => NO_SPAN as never,
+  end: () => undefined,
+};

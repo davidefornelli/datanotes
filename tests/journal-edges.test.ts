@@ -117,7 +117,7 @@ describe("listMigrations filters", () => {
     const list = adapter.list.bind(adapter);
     const spy = vi.spyOn(adapter, "list").mockImplementation(async (p: string) => {
       const r = await list(p);
-      if (p === "journal") fs.rmSync(path.join(v.storeRoot, "journal", "2026-08.jsonl"));
+      if (p === "journal") fs.rmSync(path.join(v.storeRoot, "journal", "2026-08.jsonl"), { force: true });
       return r;
     });
     onTestFinished(() => spy.mockRestore());
@@ -186,7 +186,7 @@ describe("compactJournal", () => {
     const list = adapter.list.bind(adapter);
     const spy = vi.spyOn(adapter, "list").mockImplementation(async (p: string) => {
       const r = await list(p);
-      if (p === "journal") fs.rmSync(path.join(v.storeRoot, "journal", "2026-08.jsonl"));
+      if (p === "journal") fs.rmSync(path.join(v.storeRoot, "journal", "2026-08.jsonl"), { force: true });
       return r;
     });
     onTestFinished(() => spy.mockRestore());
@@ -210,5 +210,65 @@ describe("list_migrations: the table filter", () => {
       ["alter_column", "main.public.log"],
       ["add_column", "main.public.log"],
     ]);
+  });
+});
+
+describe("compactJournal without the write lock", () => {
+  it("plans outside the lock and applies under it: an entry appended meanwhile, and the blob it shares, are kept", async () => {
+    const v = logVault();
+    const big = `${v.read("Daily/a.md")}${"long note body. ".repeat(200)}\n`;
+    v.write("Daily/a.md", big);
+    const old = await deleteRows(v.app, v.settings, { table: "log", where: { kind: "alcohol" }, mode: "delete" }, now("2026-09-04T08:00:00Z"));
+    expect(old.ok).toBe(true);
+    const blobs = () => v.listAll().filter((p) => p.startsWith("store:blobs/"));
+    expect(blobs()).toHaveLength(1);
+    let held = false;
+    let recent = "";
+    const res = await compactJournal(v.app, { ...v.settings, journalRetentionDays: 10 }, new Date("2026-10-01T00:00:00Z"), async (fn) => {
+      // an operation that ran before the compaction got the lock: it deletes the same text again
+      v.write("Daily/a.md", big);
+      const again = await deleteRows(v.app, v.settings, { table: "log", where: { kind: "alcohol" }, mode: "delete" }, now("2026-09-30T08:00:00Z"));
+      expect(again.ok).toBe(true);
+      recent = again.migration_id!;
+      held = true;
+      return fn();
+    });
+    expect(held).toBe(true);
+    expect(res).toEqual({ kept: 1, dropped: 1, blobsRemoved: 0 });
+    expect(blobs()).toHaveLength(1); // the recent entry uses it
+    expect((await readJournal(v.app, v.settings, recent)).entry.deleted).toEqual([{ path: "Daily/a.md", content: big }]);
+    await expect(readJournal(v.app, v.settings, old.migration_id!)).rejects.toThrow(MigrationNotFoundError);
+  });
+
+  it("reads no month after the retention's first one when nothing is dropped and the blobs were checked lately", async () => {
+    const v = logVault();
+    await insertMood(v, "2026-08-20T08:00:00Z", "2026-08-20T07:00");
+    await insertMood(v, "2026-09-26T08:00:00Z", "2026-09-26T07:00");
+    const settings = { ...v.settings, journalRetentionDays: 40 }; // from 2026-08-18 on: August may hold entries to drop
+    // the first compaction of a run checks the blobs: it reads every file
+    expect(await compactJournal(v.app, settings, new Date("2026-09-27T00:00:00Z"))).toEqual({ kept: 2, dropped: 0, blobsRemoved: 0 });
+    const reads: string[] = [];
+    const store = v.app.store!;
+    const read = store.read.bind(store);
+    vi.spyOn(store, "read").mockImplementation(async (p: string) => {
+      reads.push(p);
+      return read(p);
+    });
+    onTestFinished(() => void vi.restoreAllMocks());
+    expect(await compactJournal(v.app, settings, new Date("2026-09-28T00:00:00Z"))).toEqual({ kept: 1, dropped: 0, blobsRemoved: 0 });
+    // September holds only entries to keep (August is read again under the lock: this store cannot tell a file changed)
+    expect([...new Set(reads)]).toEqual(["journal/2026-08.jsonl"]);
+  });
+});
+
+describe("compactJournal and entries without a dated id", () => {
+  it("reads the undated file as a month that may hold entries to drop", async () => {
+    const v = logVault();
+    await insertMood(v, "2026-09-26T08:00:00Z", "2026-09-26T07:00");
+    const line = JSON.parse(v.read(SEPT).trim()) as Record<string, unknown>;
+    // an entry an older engine wrote with an id that names no date
+    storeFile(v, "store:journal/undated.jsonl", `${JSON.stringify({ ...line, migration_id: "old-entry", executed_at: "2026-01-01T00:00:00.000Z" })}\n`);
+    expect(await compactJournal(v.app, { ...v.settings, journalRetentionDays: 30 }, new Date("2026-10-01T00:00:00Z"))).toEqual({ kept: 1, dropped: 1, blobsRemoved: 0 });
+    expect(v.exists("store:journal/undated.jsonl")).toBe(false);
   });
 });

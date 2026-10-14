@@ -82,6 +82,7 @@ export const DOCS = {
   webhooks: "/guides/history/change-data-feed.md#push-changes-to-a-web-address-with-webhooks",
   readNote: "/guides/search/text.md#read-a-note",
   graph: "/guides/search/link-graph.md#walk-the-links-from-a-note",
+  graphTables: "/guides/search/link-graph.md#read-the-whole-graph-in-one-call",
   semantic: "/guides/search/semantic.md#turn-on-semantic-search",
   docsSearch: "/guides/agents/docs-offline.md#search-by-words-and-by-meaning",
   tokens: "/guides/security/tokens.md#choose-what-a-token-can-do",
@@ -104,6 +105,7 @@ export const DOCS = {
   storeBackupFileSize: "/guides/history/back-up.md#keep-each-file-under-95-mb",
   storeBackupSsh: "/guides/history/back-up.md#push-over-ssh",
   restoreStore: "/guides/history/back-up.md#restore-the-store-from-its-backup",
+  convertLog: "/start/how-it-works.md#convert-the-log-to-another-format",
 } as const;
 
 export type DocsTopic = keyof typeof DOCS;

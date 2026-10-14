@@ -424,10 +424,27 @@ export function openApiDocument(version: string): Schema {
       body: {
         type: "object",
         required: ["tool"],
-        properties: { tool: { type: "string" }, args: { type: "object" }, ok: { type: "boolean" }, duration_ms: { type: "number" }, value: {}, served_by: { type: "string" }, session: { type: "string" }, result_chars: { type: "number" }, result_tokens: { type: "number" } },
+        properties: {
+          tool: { type: "string" },
+          args: { type: "object" },
+          ok: { type: "boolean" },
+          duration_ms: { type: "number" },
+          value: {},
+          served_by: { type: "string" },
+          session: { type: "string" },
+          result_chars: { type: "number" },
+          result_tokens: { type: "number" },
+          summary: { type: "object", description: "The result's summary, when `value` is sent already cut: the engine records it (the answer says `takes_summary`)." },
+        },
       },
       bodyRequired: true,
-      result: ok,
+      result: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean", const: true },
+          takes_summary: { type: "boolean", description: "The engine records a `value` sent cut with its `summary`: a reporter may send them so." },
+        },
+      },
       writes: true,
     },
     {

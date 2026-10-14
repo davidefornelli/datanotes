@@ -25,7 +25,8 @@ import { metastorePath, withNewDatabaseConfig } from "./metastore";
 import { withMetastoreId } from "./database-id";
 import type { OrderedFrontmatter } from "./types";
 import { messageOf } from "./message";
-import { contentHash } from "./file-cache";
+import { contentHash, readHashed } from "./file-cache";
+import { phase } from "./tracing";
 
 /**
  * The hash a journal keeps of a note it created (`created_hashes`): of its front matter values,
@@ -294,6 +295,72 @@ async function storeFilesSince(app: App, moves: readonly FileMove[]): Promise<Fi
   return out;
 }
 
+/**
+ * Bulk writes: a change set creating or editing at least `from` notes writes `atOnce` of them at
+ * a time (a smaller one writes one at a time, in order).
+ */
+export const WRITE_CONCURRENCY = { atOnce: 16, from: 32 };
+
+/** How many of `count` notes a write creates or edits at a time. */
+function atOnceFor(count: number): number {
+  return count >= WRITE_CONCURRENCY.from ? WRITE_CONCURRENCY.atOnce : 1;
+}
+
+/** A write of one note done, and how to take it back. */
+interface Written<R> {
+  value: R;
+  undo(): Promise<void>;
+}
+
+/**
+ * Run `fn` on `items`, `limit` at a time, in their order: once one fails no other starts (those
+ * under way end). What it leaves is what one at a time leaves: the items before the first that
+ * failed written, that failure, nothing after it; the items after it that were under way and
+ * succeeded are taken back (`undo`, newest first). One that cannot be taken back stays written
+ * and is returned with the others, so the journal names everything written.
+ */
+async function inOrder<T, R>(
+  items: readonly T[],
+  pathOf: (item: T) => string,
+  fn: (item: T) => Promise<Written<R>>,
+  limit = atOnceFor(items.length),
+): Promise<{ done: R[]; failed: { path: string; error: string } | null }> {
+  const results: ({ ok: true; written: Written<R> } | { ok: false; error: string } | undefined)[] = new Array(items.length);
+  let next = 0;
+  let stop = false;
+  const worker = async () => {
+    while (!stop && next < items.length) {
+      const i = next++;
+      try {
+        results[i] = { ok: true, written: await fn(items[i]!) };
+      } catch (e) {
+        results[i] = { ok: false, error: messageOf(e) };
+        stop = true;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  const first = results.findIndex((r) => r !== undefined && !r.ok);
+  const kept = new Set<number>();
+  if (first >= 0) {
+    for (let i = results.length - 1; i > first; i--) {
+      const r = results[i];
+      if (!r?.ok) continue;
+      try {
+        await r.written.undo();
+      } catch {
+        kept.add(i); // still written: the journal names it, the rollback takes it back
+      }
+    }
+  }
+  const done: R[] = [];
+  results.forEach((r, i) => {
+    if (r?.ok && (first < 0 || i < first || kept.has(i))) done.push(r.written.value);
+  });
+  const f = first >= 0 ? (results[first] as { error: string }) : null;
+  return { done, failed: f ? { path: pathOf(items[first]!), error: f.error } : null };
+}
+
 async function moveFile(app: App, from: string, to: string): Promise<void> {
   // Files of the engine's store (e.g. a transaction log following a renamed table).
   if (inStore(from)) return storeRename(app, from, to);
@@ -308,7 +375,7 @@ async function moveFile(app: App, from: string, to: string): Promise<void> {
  * Write a change set. Order: creates → frontmatter edits → reference rewrites → moves.
  * Stops at the first failure; the journal records exactly what was applied.
  */
-export async function applyChangeSet(
+async function applyChangeSetImpl(
   app: App,
   settings: DatanotesSettings,
   cs: ChangeSet,
@@ -327,16 +394,29 @@ export async function applyChangeSet(
   };
 
   run: {
-    for (const c of cs.creates) {
-      try {
-        if (app.vault.getAbstractFileByPath(c.path) != null) throw new Error(`file exists: ${c.path}`);
-        await ensureFolder(app, parentFolder(c.path));
-        await app.vault.create(c.path, c.content);
-        creates.push(c.path);
-      } catch (e) {
-        fail(c.path, e);
-        break run;
+    // notes created several at a time (each folder made once); they stop at the first failure
+    const folders = new Map<string, Promise<void>>();
+    const folderOnce = (folder: string): Promise<void> => {
+      if (folder === "") return Promise.resolve();
+      let p = folders.get(folder);
+      if (!p) {
+        p = folderOnce(parentFolder(folder)).then(async () => {
+          if (app.vault.getAbstractFileByPath(folder) == null) await app.vault.createFolder(folder);
+        });
+        folders.set(folder, p);
       }
+      return p;
+    };
+    const created = await inOrder(cs.creates, (c) => c.path, async (c) => {
+      if (app.vault.getAbstractFileByPath(c.path) != null) throw new Error(`file exists: ${c.path}`);
+      await folderOnce(parentFolder(c.path));
+      const file = await app.vault.create(c.path, c.content);
+      return { value: c.path, undo: () => app.vault.delete(file, true) };
+    });
+    creates.push(...created.done);
+    if (created.failed) {
+      failed.push(created.failed);
+      break run;
     }
     for (const t of cs.texts) {
       try {
@@ -362,32 +442,39 @@ export async function applyChangeSet(
         break run;
       }
     }
-    for (const e of cs.edits) {
-      if (editIsNoop(e)) continue;
+    // notes edited several at a time when no note is edited twice (each is read, changed and
+    // written on its own); journaled in the order of the change set, up to the first failure
+    const edits = cs.edits.filter((e) => !editIsNoop(e));
+    const distinct = new Set(edits.map((e) => e.path)).size === edits.length;
+    const atOnce = distinct ? atOnceFor(edits.length) : 1;
+    const edited = await inOrder(edits, (e) => e.path, async (e): Promise<Written<JournalRow>> => {
       const file = fileOrNull(app, e.path);
-      try {
-        if (!file) throw new Error("file not found");
-        const d = diffOrdered(e.before, e.after);
-        const order = e.after.map(([k]) => k);
-        const fmChanged =
-          d.set.length > 0 || d.remove.length > 0 || !same(e.before.map(([k]) => k), order);
-        if (fmChanged) {
-          await writeFrontmatter(app, file, (fm) => applyDiff(fm, d.set, d.remove, order));
-        }
-        if (bodyChanges(e)) await writeBody(app, file, e.bodyBefore!, e.bodyAfter!);
-        rows.push({
-          path: e.path,
-          before: d.beforeValues,
-          before_absent: d.beforeAbsent,
-          before_order: e.before.map(([k]) => k),
-          after: d.afterValues,
-          after_absent: d.afterAbsent,
-          ...(bodyChanges(e) ? { body_before: e.bodyBefore!, body_after: e.bodyAfter! } : {}),
-        });
-      } catch (err) {
-        fail(e.path, err);
-        break run;
+      if (!file) throw new Error("file not found");
+      // the text before, to take the edit back when an earlier one fails (only when several run at once)
+      const was = atOnce > 1 ? (await readHashed(app, file)).content : "";
+      const d = diffOrdered(e.before, e.after);
+      const order = e.after.map(([k]) => k);
+      const fmChanged =
+        d.set.length > 0 || d.remove.length > 0 || !same(e.before.map(([k]) => k), order);
+      if (fmChanged) {
+        await writeFrontmatter(app, file, (fm) => applyDiff(fm, d.set, d.remove, order));
       }
+      if (bodyChanges(e)) await writeBody(app, file, e.bodyBefore!, e.bodyAfter!);
+      const row: JournalRow = {
+        path: e.path,
+        before: d.beforeValues,
+        before_absent: d.beforeAbsent,
+        before_order: e.before.map(([k]) => k),
+        after: d.afterValues,
+        after_absent: d.afterAbsent,
+        ...(bodyChanges(e) ? { body_before: e.bodyBefore!, body_after: e.bodyAfter! } : {}),
+      };
+      return { value: row, undo: async () => void (await app.vault.process(file, () => was)) };
+    }, atOnce);
+    rows.push(...edited.done);
+    if (edited.failed) {
+      failed.push(edited.failed);
+      break run;
     }
     for (const m of cs.moves) {
       try {
@@ -810,4 +897,15 @@ export async function undoMigration(
       ...entry.deleted!.map((d) => d.path),
     ],
   };
+}
+
+/** {@link applyChangeSetImpl}, traced: the files written, moved and deleted, with the journal entry. */
+export function applyChangeSet(...args: Parameters<typeof applyChangeSetImpl>): ReturnType<typeof applyChangeSetImpl> {
+  const cs = args[2];
+  return phase("engine.apply", async (span) => {
+    const r = await applyChangeSetImpl(...args);
+    span.setAttributes({ "datanotes.notes_changed": r.notesChanged, "datanotes.files_created": r.filesCreated, "datanotes.files_moved": r.filesMoved, "datanotes.files_deleted": r.filesDeleted, "datanotes.failed": r.failed.length });
+    if (!r.ok) span.setAttribute("error.type", "write_failed").setStatus("error", "the write failed partway");
+    return r;
+  }, { "datanotes.edits": cs.edits.length, "datanotes.creates": cs.creates.length, "datanotes.moves": cs.moves.length, "datanotes.deletes": cs.deletes.length });
 }

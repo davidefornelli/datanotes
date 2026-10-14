@@ -15,6 +15,8 @@ import { DEFAULT_DATABASE_FOLDER, readRegistry, vaultKey } from "../src/api/loca
 import { metastoreId } from "../src/core/database-id";
 import { docsUrl } from "../src/core/hints";
 import {
+  CLAIM_HEARTBEAT,
+  claimStore,
   discoverDatabase,
   fileRetry,
   freshLock,
@@ -258,7 +260,7 @@ describe("a copied database, a moved vault", () => {
     expect(out).toBe(`store      ${path.join(home, id)}\ndatabase   Datanotes (id ${id})\n`);
     out = "";
     await storeCommand(["path", "--vault", copy, "--json"], { env, write: (t) => (out += t) });
-    expect(JSON.parse(out)).toEqual({ vault: copy, store: path.join(home, id), database_id: id, database_folder: "Datanotes" });
+    expect(JSON.parse(out)).toEqual({ vault: copy, store: path.join(home, id), database_id: id, database_folder: "Datanotes", database_path: path.join(copy, "Datanotes") });
     out = "";
     expect(await storeCommand(["path", "--vault", tmp()], { env, write: (t) => (out += t) })).toBe(2);
     expect(out).toMatch(/^datanotes store: no store yet for /);
@@ -274,7 +276,7 @@ describe("a copied database, a moved vault", () => {
     expect(out).toBe(`store      ${path.join(home, ID)}\ndatabase   ${db} (id ${ID})\n`);
     out = "";
     await storeCommand(["path", "--database", db, "--json"], { env, write: (t) => (out += t) });
-    expect(JSON.parse(out)).toMatchObject({ vault: db, database_id: ID, database_folder: "" });
+    expect(JSON.parse(out)).toMatchObject({ vault: db, database_id: ID, database_folder: "", database_path: db });
   });
 
   it("new-id refuses while an engine holds the database, without a metastore, and without a known command or vault", async () => {
@@ -283,8 +285,8 @@ describe("a copied database, a moved vault", () => {
     const env = { DATANOTES_DATA_HOME: home };
     await expect(storeCommand(["new-id", "--vault", vault], { env, write: () => undefined })).rejects.toThrow("datanotes/metastore.yaml does not exist: there is no database to give a new id");
     write(vault, "Datanotes/metastore.yaml", `id: ${ID}\n`);
-    write(home, `${ID}/engine.lock`, JSON.stringify({ kind: "service", pid: 1, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date().toISOString() }));
-    await expect(storeCommand(["new-id", "--vault", vault], { env, write: () => undefined })).rejects.toThrow("an engine holds this database (pid 1 on");
+    write(home, `${ID}/engine.lock`, JSON.stringify({ kind: "service", pid: process.ppid, host: os.hostname(), port: 9, startedAt: "", heartbeat: new Date().toISOString() }));
+    await expect(storeCommand(["new-id", "--vault", vault], { env, write: () => undefined })).rejects.toThrow(`an engine holds this database (pid ${process.ppid} on`);
     write(vault, "Datanotes/metastore.yaml", "catalogs: {}\n");
     let out = "";
     expect(await storeCommand(["new-id", "--vault", vault], { env, write: (t) => (out += t) })).toBe(0);
@@ -403,14 +405,14 @@ function deadPid(): number {
   return r.pid!;
 }
 
-describe("the lock of another engine", () => {
-  const lockAt = (pid: number, heartbeat: Date, host = os.hostname()) => JSON.stringify({ kind: "service", pid, host, port: 27150, startedAt: "", heartbeat: heartbeat.toISOString() });
-  /**
-   * A heartbeat long stale (over LOCK_STALE_MS) but after the machine started: an hour ago, or a
-   * few seconds after the start on a machine up for less (a CI runner boots just before the job).
-   */
-  const staleBeat = (now: number) => now - Math.min(3_600_000, os.uptime() * 1000 - 5_000);
+const lockAt = (pid: number, heartbeat: Date, host = os.hostname()) => JSON.stringify({ kind: "service", pid, host, port: 27150, startedAt: "", heartbeat: heartbeat.toISOString() });
+/**
+ * A heartbeat long stale (over LOCK_STALE_MS) but after the machine started: an hour ago, or a
+ * few seconds after the start on a machine up for less (a CI runner boots just before the job).
+ */
+const staleBeat = (now: number) => now - Math.min(3_600_000, os.uptime() * 1000 - 5_000);
 
+describe("the lock of another engine", () => {
   it("refuses while an engine of another machine has a fresh heartbeat on the store", () => {
     const vault = tmp();
     const home = tmp();
@@ -478,6 +480,88 @@ describe("the lock of another engine", () => {
     expect(err?.hint).toContain(`datanotes stop --vault "${vault}"`);
     expect(err?.docs).toBe("https://datanotes.dev/administration/run-the-service.md#run-one-engine-per-database");
     expect(fs.existsSync(path.join(home, ID, "store.json"))).toBe(false);
+  });
+});
+
+describe("a command that claims the store", () => {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("names this process in the lock, port 0: a start meanwhile refuses; the release lets the store go", () => {
+    const vault = tmp();
+    const home = tmp();
+    write(vault, "Datanotes/metastore.yaml", `id: ${ID}
+`);
+    const store = path.join(home, ID);
+    fs.mkdirSync(store, { recursive: true });
+    const release = claimStore({ vault, store, env: { DATANOTES_DATA_HOME: home } }, (l) => new Error(`held by ${l.pid}`));
+    expect(JSON.parse(read(store, "engine.lock"))).toMatchObject({ kind: "service", pid: process.pid, host: os.hostname(), port: 0 });
+    expect(fs.existsSync(setupLockFile(home, undefined, vault))).toBe(false);
+    expect(() => open(vault, home, { pid: process.ppid })).toThrow(`another engine holds the vault (pid ${process.pid} on ${os.hostname()}, port 0)`);
+    release();
+    expect(fs.existsSync(path.join(store, "engine.lock"))).toBe(false);
+    expect(open(vault, home, { pid: process.ppid }).id).toBe(ID);
+  });
+
+  it("is refused while an engine holds the store, and writes nothing: another machine's fresh heartbeat, a live engine of this machine whose heartbeat stopped", () => {
+    const vault = tmp();
+    const home = tmp();
+    write(vault, "Datanotes/metastore.yaml", `id: ${ID}
+`);
+    const store = path.join(home, ID);
+    for (const lock of [lockAt(7, new Date(), "box"), lockAt(process.ppid, new Date(staleBeat(Date.now())))]) {
+      write(home, `${ID}/engine.lock`, lock);
+      const pid = (JSON.parse(lock) as { pid: number }).pid;
+      expect(() => claimStore({ vault, store, env: { DATANOTES_DATA_HOME: home } }, (l) => new Error(`held by ${l.pid}`))).toThrow(`held by ${pid}`);
+      expect(read(store, "engine.lock")).toBe(lock);
+      expect(fs.existsSync(setupLockFile(home, undefined, vault))).toBe(false);
+    }
+  });
+
+  it("keeps its heartbeat fresh, and leaves a lock another took over", async () => {
+    const vault = tmp();
+    const home = tmp();
+    const store = path.join(home, ID);
+    fs.mkdirSync(store, { recursive: true });
+    const saved = CLAIM_HEARTBEAT.ms;
+    CLAIM_HEARTBEAT.ms = 20;
+    try {
+      const release = claimStore({ vault, store, env: { DATANOTES_DATA_HOME: home } }, (l) => new Error(`held by ${l.pid}`));
+      const first = (JSON.parse(read(store, "engine.lock")) as { heartbeat: string }).heartbeat;
+      await wait(80);
+      expect(Date.parse((JSON.parse(read(store, "engine.lock")) as { heartbeat: string }).heartbeat)).toBeGreaterThan(Date.parse(first));
+      // another took the store over (a lock with another startedAt): never overwritten, never removed
+      const other = JSON.stringify({ kind: "service", pid: process.pid, host: os.hostname(), port: 0, startedAt: "2026-10-01T10:00:00.000Z", heartbeat: "2026-10-01T10:00:00.000Z" });
+      write(store, "engine.lock", other);
+      await wait(80);
+      expect(read(store, "engine.lock")).toBe(other);
+      release();
+      expect(read(store, "engine.lock")).toBe(other);
+    } finally {
+      CLAIM_HEARTBEAT.ms = saved;
+    }
+  });
+
+  it("new-id holds the old id's store while the id changes; a live engine whose heartbeat stopped refuses it; without a store nothing is claimed", async () => {
+    const home = tmp();
+    const vault = tmp();
+    const env = { DATANOTES_DATA_HOME: home };
+    write(vault, "Datanotes/metastore.yaml", `id: ${ID}\ncatalogs: {}\n`);
+    // no store of the old id: nothing claimed, no folder made
+    expect(await storeCommand(["new-id", "--vault", vault], { env, write: () => undefined })).toBe(0);
+    expect(fs.existsSync(path.join(home, ID))).toBe(false);
+    const id2 = metastoreId(read(vault, "Datanotes/metastore.yaml"))!;
+    // its store held by a live engine whose heartbeat stopped (hung): refused, nothing changes
+    const hung = lockAt(process.ppid, new Date(staleBeat(Date.now())));
+    write(home, `${id2}/engine.lock`, hung);
+    await expect(storeCommand(["new-id", "--vault", vault], { env, write: () => undefined })).rejects.toThrow(`an engine holds this database (pid ${process.ppid} on ${os.hostname()}, port 27150)`);
+    expect(metastoreId(read(vault, "Datanotes/metastore.yaml"))).toBe(id2);
+    expect(read(home, `${id2}/engine.lock`)).toBe(hung);
+    // the store free: claimed while the id changes, let go after
+    fs.rmSync(path.join(home, id2, "engine.lock"));
+    expect(await storeCommand(["new-id", "--vault", vault], { env, write: () => undefined })).toBe(0);
+    expect(metastoreId(read(vault, "Datanotes/metastore.yaml"))).not.toBe(id2);
+    expect(fs.readdirSync(path.join(home, id2))).toEqual([]);
+    expect(fs.existsSync(setupLockFile(home, undefined, vault))).toBe(false);
   });
 });
 

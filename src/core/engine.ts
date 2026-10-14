@@ -10,7 +10,7 @@ import { currentActor, type Actor } from "./actor";
 import { markUndone, readJournal, writeJournal } from "./journal";
 import { inverseEditsFor } from "./inverse";
 import type { App, TFile } from "./host";
-import { invalidateFiles, readParsed } from "./file-cache";
+import { invalidateFiles, readBody, readFrontmatter, readFrontmatterEntries } from "./file-cache";
 import {
   transactionLogRoot,
   EXTERNAL_EDIT,
@@ -44,7 +44,8 @@ import {
   readOrderedFromMarkdown,
 } from "./frontmatter";
 import { TABLE_META_KEYS } from "./reserved-keys";
-import { catalogRowFiles } from "./row-files";
+import { catalogRowFiles, sortedRowFiles } from "./row-files";
+import { vaultIndex } from "./vault-index";
 import {
   catalogTablePath,
   entryToOrdered,
@@ -54,9 +55,10 @@ import {
   parseMetastore,
   refOf,
   orderedToEntry,
-  primeMetastore,
+  primeWrittenMetastore,
   resolveCatalogRef,
   effectiveColumns,
+  setTableEntries,
   setTableEntry,
   withTableTags,
   type CatalogRef,
@@ -88,6 +90,7 @@ import { messageOf } from "./message";
 import { closestNames, guide, GuidedError, unknownColumn, type Guidance } from "./hints";
 import { addColumnRefusal, createTableRefusal, hasText, missingDescriptions, removedDescriptionRefusal, withEngineDescription, type Refusal } from "./descriptions";
 import { STALE_WRITE, staleWrite, wrote } from "./write-check";
+import { count, phase } from "./tracing";
 
 export interface OpConflict {
   path: string;
@@ -237,30 +240,127 @@ export function memberEntry(settings: DatanotesSettings, t: LoadedTable): [strin
 export interface LoadedRow {
   file: TFile;
   ordered: OrderedFrontmatter;
-  /** Markdown after the frontmatter block. */
+}
+
+/**
+ * A row with its body, the Markdown after the frontmatter block: {@link loadRows} reads the bodies
+ * only when asked (`bodies`), since a body needs the note's text; {@link rowBody} reads one later.
+ */
+export interface LoadedRowWithBody extends LoadedRow {
   body: string;
 }
 
-/** The rows of a table, by path. `skipUnreadable`: a row whose frontmatter cannot be read is left out instead of failing the call. */
-export async function loadRows(
+/** A row's body: the one it carries, else its note's (as the file cache reads it now). */
+export async function rowBody(app: App, r: LoadedRow): Promise<string> {
+  const own = (r as Partial<LoadedRowWithBody>).body;
+  return typeof own === "string" ? own : readBody(app, r.file);
+}
+
+/**
+ * The rows of a table, by path. `skipUnreadable`: a row whose frontmatter cannot be read is left
+ * out instead of failing the call. `bodies`: each row with its body, read from the same version
+ * of its note as its front matter (writes that keep the body); without, no note's text is needed
+ * while the file cache holds its parse.
+ */
+export function loadRows(app: App, settings: DatanotesSettings, t: LoadedTable, skipUnreadable?: boolean): Promise<LoadedRow[]>;
+export function loadRows(app: App, settings: DatanotesSettings, t: LoadedTable, skipUnreadable: boolean, o: { bodies: true }): Promise<LoadedRowWithBody[]>;
+export function loadRows(app: App, settings: DatanotesSettings, t: LoadedTable, skipUnreadable = false, o: { bodies?: boolean } = {}): Promise<LoadedRow[]> {
+  // a full scan of the table's notes (no index: the file cache spares the reads of unchanged ones)
+  return phase("engine.query.scan", async (span) => {
+    const out: LoadedRow[] = [];
+    // in the order of the answer (by path): the vault index keeps it while the rows stay
+    const files = sortedRowFiles(app, settings, t.catalog.ref.full, t.def);
+    const keep = new Set([settings.tableKey]);
+    for (const f of files) {
+      let row: LoadedRow;
+      try {
+        row = o.bodies ? { file: f, ...(await readFrontmatter(app, f, keep)) } : { file: f, ordered: await readFrontmatterEntries(app, f, keep) };
+      } catch (e) {
+        if (skipUnreadable) continue;
+        // the error is the one of the first row that cannot be read in the vault's order of its notes
+        return rowsInVaultOrder(app, settings, t, keep, o.bodies === true);
+      }
+      out.push(row);
+    }
+    span.setAttribute("db.collection.name", t.catalog.ref.full);
+    count("datanotes.rows_scanned", out.length);
+    return out;
+  }, { "datanotes.query.plan": "full_scan" });
+}
+
+/**
+ * The paths a filter pins its rows to (`{path: "a.md"}`, `{path: {eq: …}}`, `{path: {in: […]}}` at
+ * its top level), or null when it does not: only those notes can match.
+ */
+export function pinnedPaths(where: unknown, t: LoadedTable): string[] | null {
+  if (where == null || typeof where !== "object" || Array.isArray(where)) return null;
+  const cond = (where as Record<string, unknown>).path;
+  // a column of its own named path: its values, not the notes' paths
+  if (cond === undefined || t.def.columns.some((c) => c.name === "path")) return null;
+  let list: unknown[] | null = null;
+  if (typeof cond === "string") list = [cond];
+  else if (cond !== null && typeof cond === "object" && !Array.isArray(cond)) {
+    const ops = Object.entries(cond as Record<string, unknown>);
+    if (ops.length !== 1) return null;
+    const [op, v] = ops[0]!;
+    if (op === "eq" && typeof v === "string") list = [v];
+    else if (op === "in" && Array.isArray(v)) list = v;
+  }
+  // a token (`{this.path}`, a date) is resolved later: every row is read
+  if (!list || list.some((v) => typeof v !== "string" || v.includes("{"))) return null;
+  return list as string[];
+}
+
+/**
+ * The rows of `t` that a filter can match: only the notes it pins (see {@link pinnedPaths}),
+ * looked up in the vault index, else every row ({@link loadRows}). The caller still applies the
+ * filter. Same rows, same order, as {@link loadRows} filtered.
+ */
+export function loadRowsWhere(app: App, settings: DatanotesSettings, t: LoadedTable, where: unknown): Promise<LoadedRow[]> {
+  const paths = pinnedPaths(where, t);
+  const idx = paths ? vaultIndex(app, settings) : null;
+  if (!paths || !idx || idx.hasFailures) return loadRows(app, settings, t);
+  return phase("engine.query.scan", async (span) => {
+    const full = t.catalog.ref.full;
+    const excluded = [...(t.def.options.exclude ?? []), t.def.layout.archive];
+    const files: TFile[] = [];
+    for (const p of new Set(paths)) {
+      const n = idx.note(p);
+      if (n?.table === full && !excluded.some((dir) => p.startsWith(`${dir}/`))) files.push(n.file);
+    }
+    files.sort((a, b) => a.path.localeCompare(b.path));
+    const keep = new Set([settings.tableKey]);
+    const out: LoadedRow[] = [];
+    for (const f of files) {
+      let ordered: OrderedFrontmatter;
+      try {
+        // the front matter only: no text needed while the cache holds the note's parse
+        ordered = await readFrontmatterEntries(app, f, keep);
+      } catch {
+        // a row that cannot be read: the full read says which, as without the lookup
+        return loadRows(app, settings, t);
+      }
+      // the body is read when asked for (rowBody), as loadRows does
+      out.push({ file: f, ordered });
+    }
+    span.setAttribute("db.collection.name", full);
+    count("datanotes.rows_scanned", out.length);
+    return out;
+  }, { "datanotes.query.plan": "path_lookup" });
+}
+
+/** {@link loadRows} reading the rows in the vault's order of its notes (it throws the first row's error), then sorted. */
+async function rowsInVaultOrder(
   app: App,
   settings: DatanotesSettings,
   t: LoadedTable,
-  skipUnreadable = false,
+  keep: ReadonlySet<string>,
+  bodies: boolean,
 ): Promise<LoadedRow[]> {
   const out: LoadedRow[] = [];
-  const files = catalogRowFiles(app, settings, t.catalog.ref.full, t.def);
-  const key = `row|${settings.tableKey}`;
-  const keep = new Set([settings.tableKey]);
-  for (const f of files) {
-    let parsed: { ordered: OrderedFrontmatter; body: string };
-    try {
-      parsed = await readParsed(app, f, key, (text) => readOrderedFromMarkdown(text, keep));
-    } catch (e) {
-      if (skipUnreadable) continue;
-      throw e;
-    }
-    out.push({ file: f, ordered: parsed.ordered, body: parsed.body });
+  for (const f of catalogRowFiles(app, settings, t.catalog.ref.full, t.def)) {
+    // with their bodies when the first pass read them (clone_table writes them)
+    out.push(bodies ? { file: f, ...(await readFrontmatter(app, f, keep)) } : { file: f, ordered: await readFrontmatterEntries(app, f, keep) });
   }
   return out.sort((a, b) => a.file.path.localeCompare(b.file.path));
 }
@@ -274,26 +374,35 @@ export function uniqueViolations(
   rows: readonly { path: string; ordered: OrderedFrontmatter }[],
 ): RowViolations[] {
   const byPath = new Map<string, Violation[]>();
+  // the first row of each path (a row inserted at a path that is taken comes after the one there)
+  const rowOf = new Map<string, { path: string; ordered: OrderedFrontmatter }>();
+  for (const r of rows) if (!rowOf.has(r.path)) rowOf.set(r.path, r);
   for (const col of columns.filter((c) => c.unique)) {
     const seen = new Map<string, string[]>();
     for (const r of rows) {
-      const v = fmGet(r.ordered, col.name);
-      if (isEmptyValue(v)) continue;
-      const key = typeof v === "string" ? v.trim().toLowerCase() : JSON.stringify(v);
-      seen.set(key, [...(seen.get(key) ?? []), r.path]);
+      const key = uniqueKey(fmGet(r.ordered, col.name));
+      if (key === null) continue;
+      const paths = seen.get(key);
+      if (paths) paths.push(r.path);
+      else seen.set(key, [r.path]);
     }
     for (const paths of seen.values()) {
       if (paths.length < 2) continue;
       for (const p of paths) {
         const others = paths.filter((x) => x !== p).join(", ");
-        byPath.set(p, [
-          ...(byPath.get(p) ?? []),
-          { column: col.name, code: "unique", message: `must be unique (also used by ${others})`, value: fmGet(rows.find((r) => r.path === p)!.ordered, col.name) },
-        ]);
+        let list = byPath.get(p);
+        if (!list) byPath.set(p, (list = []));
+        list.push({ column: col.name, code: "unique", message: `must be unique (also used by ${others})`, value: fmGet(rowOf.get(p)!.ordered, col.name) });
       }
     }
   }
   return [...byPath.entries()].map(([path, violations]) => ({ path, violations }));
+}
+
+/** The key a `unique` column compares a value by (strings trimmed, in lower case; null for an empty value). */
+export function uniqueKey(v: unknown): string | null {
+  if (isEmptyValue(v)) return null;
+  return typeof v === "string" ? v.trim().toLowerCase() : JSON.stringify(v);
 }
 
 /** Table metadata keys of the ordered description; never column names, kept after the fields. */
@@ -438,8 +547,9 @@ export async function finish(
     invalidateFiles(app, [...touchedPaths(cs), ...cs.moves.map((m) => m.from), ...cs.deletes]);
     if (rollback?.ok) return { applied, commits: await loggedRollback(app, settings, applied.migrationId, rollback, opts.now), rollback };
     if (rollback) await loadMetastore(app, settings);
-    else for (const t of cs.texts) if (t.path === metastorePath(settings)) primeMetastore(app, settings, t.after);
-    if (cs.moves.some((m) => m.from.startsWith(`${transactionLogRoot(settings)}/`))) forgetLoggedStates(app);
+    // the text written, with the file's stat: the next load of the metastore reads nothing
+    else for (const t of cs.texts) if (t.path === metastorePath(settings)) await primeWrittenMetastore(app, settings, t.after);
+    if (movesLogFiles(settings, cs.moves.map((m) => m.from))) forgetLoggedStates(app);
     const commits = await logChanges(app, settings, {
       operation: logOperation(cs.op),
       parameters: { summary: cs.summary },
@@ -663,7 +773,12 @@ async function logChanges(app: App, settings: DatanotesSettings, options: SyncOp
   if (actor && !options.actor) options = { ...options, actor };
   if (options.operation === EXTERNAL_EDIT && checkHandEdits && !options.check) options = { ...options, check: (changes) => externalViolationCounts(app, settings, changes) };
   try {
-    return await syncTransactionLogs(app, settings, options);
+    const kind = options.operation === EXTERNAL_EDIT ? "hand_edits" : "operation";
+    return await phase("engine.transaction_log", (span) =>
+      syncTransactionLogs(app, settings, options).then((commits) => {
+        span.setAttribute("datanotes.commits", commits.length);
+        return commits;
+      }), { "datanotes.log.kind": kind });
   } catch (e) {
     telemetry().log("WARN", "datanotes transaction log not updated", {
       operation: options.operation,
@@ -1228,7 +1343,7 @@ async function filteredLinkViolations(app: App, settings: DatanotesSettings, t: 
 function rewriteLinkFilters(cs: ChangeSet, t: LoadedTable, f: Parameters<typeof rewrittenEntries>[2]): void {
   const pending = cs.texts.find((x) => x.path === t.file.path)!; // addSchemaChange wrote it
   let text = pending.after;
-  for (const { ref, entry } of rewrittenEntries(t.catalog.model, parseMetastore(text), f)) text = setTableEntry(text, ref, entry);
+  text = setTableEntries(text, rewrittenEntries(t.catalog.model, parseMetastore(text), f).map(({ ref, entry }) => [ref, entry] as const));
   pending.after = text;
 }
 
@@ -1653,6 +1768,12 @@ async function undoCheck(app: App, settings: DatanotesSettings, cs: ChangeSet): 
   );
 }
 
+/** Whether some of these paths are files of a transaction log (moved with their table). */
+export function movesLogFiles(settings: DatanotesSettings, paths: readonly string[]): boolean {
+  const root = `${transactionLogRoot(settings)}/`;
+  return paths.some((p) => p.startsWith(root));
+}
+
 function undoOne(
   app: App,
   settings: DatanotesSettings,
@@ -1667,7 +1788,10 @@ function undoOne(
         await logChanges(app, settings, { operation: EXTERNAL_EDIT }, false);
         const r = await undoMigration(app, settings, migrationId, undefined, check ? (cs) => undoCheck(app, settings, cs) : undefined);
         invalidateFiles(app, r.touched ?? []);
-        forgetLoggedStates(app);
+        // The logged states stay valid unless the undo moved transaction log files (the undo of a
+        // table's rename takes its log back): forgetting them all makes the next log sync replay
+        // every table's log, seconds on a large vault.
+        if (movesLogFiles(settings, r.touched ?? [])) forgetLoggedStates(app);
         await loadMetastore(app, settings);
         if (r.ok) {
           // an undo that succeeded has its journal entry and names the files it wrote

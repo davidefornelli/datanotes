@@ -90,6 +90,7 @@ function vault(host?: "fake" | "node", extra: Record<string, string> = {}): DbVa
 async function following(v: DbVault): Promise<ChangeFeed> {
   const feed = new ChangeFeed(v.app, () => v.settings);
   await feed.start();
+  await feed.states; // the rows moved while the engine was stopped are found then
   return feed;
 }
 
@@ -555,5 +556,36 @@ describe("hand moves and git", { timeout: 60_000 }, () => {
     expect(gitDirOf(wt)).toBe(dir);
     fs.writeFileSync(path.join(wt, ".git"), "not a git file\n");
     expect(gitDirOf(wt)).toBe(gitDirOf(path.dirname(wt))); // no git folder named: it looks further up
+  });
+});
+
+describe("the saved row paths", () => {
+  it("are a snapshot and the changes since; a change line of another snapshot is left out", async () => {
+    const v = createDbVault({});
+    const { saveRowPaths, rowMovesSince } = await import("../src/core/hand-moves");
+    await saveRowPaths(v.app, new Map([["a", "Daily/a.md"], ["b", "Daily/b.md"]]));
+    await saveRowPaths(v.app, new Map([["a", "Daily/x/a.md"], ["c", "Daily/c.md"]]));
+    expect(v.read("store:hand-moves/rows.log.jsonl").trim().split("\n").map((l) => JSON.parse(l) as { id: string; path: string | null }).map((l) => [l.id, l.path])).toEqual([
+      ["a", "Daily/x/a.md"],
+      ["c", "Daily/c.md"],
+      ["b", null],
+    ]);
+    // a: saved at Daily/x/a.md, found at Daily/y/a.md (and Daily/x/a.md is gone): moved while stopped
+    expect(await rowMovesSince(v.app, new Map([["a", "Daily/y/a.md"], ["c", "Daily/c.md"]]))).toEqual([{ from: "Daily/x/a.md", to: "Daily/y/a.md" }]);
+    // an engine that knows no change lines wrote every row: the old lines are not read with it
+    v.write("store:hand-moves/rows.json", JSON.stringify({ a: "Daily/z/a.md" }));
+    expect(await rowMovesSince(v.app, new Map([["a", "Daily/y/a.md"]]))).toEqual([{ from: "Daily/z/a.md", to: "Daily/y/a.md" }]);
+  });
+
+  it("are written whole again once the change lines outgrow the snapshot", async () => {
+    const v = createDbVault({});
+    const { saveRowPaths, ROW_CHANGES_MIN } = await import("../src/core/hand-moves");
+    const rows = (n: number, folder: string) => new Map(Array.from({ length: n }, (_, i) => [`r${i}`, `${folder}/r${i}.md`]));
+    await saveRowPaths(v.app, rows(ROW_CHANGES_MIN, "A"));
+    await saveRowPaths(v.app, rows(ROW_CHANGES_MIN, "B")); // every row moved: as many lines as the limit
+    expect(v.exists("store:hand-moves/rows.log.jsonl")).toBe(true);
+    await saveRowPaths(v.app, rows(ROW_CHANGES_MIN, "C"));
+    expect(v.exists("store:hand-moves/rows.log.jsonl")).toBe(false);
+    expect((JSON.parse(v.read("store:hand-moves/rows.json")) as Record<string, string>).r0).toBe("C/r0.md");
   });
 });

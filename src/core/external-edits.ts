@@ -4,13 +4,13 @@
  * (checkExternalEdits), and the tables a hand edit of metastore.yaml changes (checkChangedTables).
  */
 
-import { readParsed } from "./file-cache";
+import { readFrontmatterEntries } from "./file-cache";
 import type { App, TFile } from "./host";
 import { emptyChangeSet } from "./changeset";
 import { linkReads, linkTargetOf, modelColumns } from "./link-paths";
 import { catalogTables, loadMetastore, rowTableFull } from "./metastore";
 import { archiveFolder, loadTable, OperationInputError, uniqueViolations, type LoadedRow, type LoadedTable } from "./engine";
-import { buildMarkdownWithFrontmatter, fmGet, readOrderedFromMarkdown } from "./frontmatter";
+import { buildMarkdownWithFrontmatter, fmGet } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
 import type { Violation, ViolationCode } from "./types-table";
 import type { OrderedFrontmatter } from "./types";
@@ -199,7 +199,6 @@ export async function checkExternalEdits(app: App, settings: DatanotesSettings, 
   const tableOfOrdered = (o: OrderedFrontmatter | null | undefined) => (o ? rowTableFull(model, fmGet(o, tp)) : null);
   // The edited rows as they are now.
   const now = new Map<string, { row: LoadedRow; full: string }>();
-  const key = `row|${tp}`;
   const keep = new Set([tp]);
   for (const e of edits.values()) {
     if (e.gone || !e.path.endsWith(".md")) continue;
@@ -207,8 +206,7 @@ export async function checkExternalEdits(app: App, settings: DatanotesSettings, 
     if (f == null || !("extension" in f)) continue;
     let row: LoadedRow;
     try {
-      const { ordered, body } = await readParsed(app, f as TFile, key, (text) => readOrderedFromMarkdown(text, keep));
-      row = { file: f as TFile, ordered, body };
+      row = { file: f as TFile, ordered: await readFrontmatterEntries(app, f as TFile, keep) };
     } catch {
       continue; // malformed frontmatter: not a row until fixed
     }
@@ -280,7 +278,7 @@ export async function checkExternalEdits(app: App, settings: DatanotesSettings, 
       for (const r of rows) {
         const e = edits.get(r.file.path)!;
         if (found.get(r.file.path)!.length > 0 && tableOfOrdered(e.before) === full) {
-          was.push({ file: { path: e.oldPath ?? r.file.path } as TFile, ordered: e.before!, body: "" });
+          was.push({ file: { path: e.oldPath ?? r.file.path } as TFile, ordered: e.before! });
         }
       }
       if (was.length > 0) {
