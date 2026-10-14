@@ -201,16 +201,23 @@ describe("datanotes serve: starting", () => {
   it("follows the OS's reports once the notes are read, compares what changed meanwhile without blocking, and closes them when the start fails", async () => {
     const s = setup();
     const watch = vi.spyOn(fs, "watch");
+    // the engine's own watchers: on Linux, Node's recursive watcher calls fs.watch itself for every folder and file (not recursive)
+    const recursive = () => watch.mock.calls.filter(([, o]) => typeof o === "object" && o !== null && (o as fs.WatchOptions).recursive);
     const svc = await start(s, { watch: "events" });
-    expect(watch).toHaveBeenCalledTimes(1);
+    expect(recursive()).toHaveLength(1);
+    expect(recursive()[0]![0]).toBe(s.root);
+    // outside Windows, an operation in the first second also compares the whole tree: the OS's stream may still be starting
+    // (startupRescanMs); on a slow machine that second is over before the flush, and only the comparison after the walk runs
     await svc.watcher.flush(); // the comparison after the walk
-    expect(svc.watcher.rescans).toBe(1);
+    const after = svc.watcher.rescans;
+    if (process.platform === "win32") expect(after).toBe(1);
+    else expect([1, 2]).toContain(after);
     // a comparison asked for (the OS's buffer overflowed) runs at once while the engine does not write
     const os = (svc.watcher as unknown as { watcher: fs.FSWatcher }).watcher;
     write(s.root, "Daily/new.md", "---\ntable: log\n---\n");
     os.emit("error", new Error("overflow"));
     svc.watcher.flush();
-    expect(svc.watcher.rescans).toBe(2);
+    expect(svc.watcher.rescans).toBe(after + 1);
     await stop(svc);
     // a start that fails after its walk (a port setting no engine takes) follows nothing
     fs.writeFileSync(s.settingsFile, JSON.stringify({ httpServerToken: TOKEN, httpServerPort: 1 }));

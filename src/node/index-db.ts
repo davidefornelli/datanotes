@@ -43,6 +43,7 @@ interface Statement {
   run(...params: unknown[]): unknown;
   get(...params: unknown[]): Record<string, unknown> | undefined;
   all(...params: unknown[]): Record<string, unknown>[];
+  setReadBigInts(enabled: boolean): void;
 }
 interface Database {
   exec(sql: string): void;
@@ -228,6 +229,19 @@ CREATE TABLE IF NOT EXISTS search_rows (id INTEGER PRIMARY KEY, path TEXT NOT NU
  */
 const SEARCH_SCHEMA = "CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(name, text, tokenize = 'trigram case_sensitive 1', content = '', contentless_delete = 1, detail = none)";
 
+/**
+ * A statement the index runs (`run()`): its answer as BigInts. `run()` answers the connection's
+ * last inserted rowid, whatever table set it: after a delete from the search table that is the
+ * rowid of an FTS5 tombstone page (2^53 and up), and Node 26 refuses to give it as a number
+ * ("Value is too large to be represented"), where Node 22 and 24 gave it rounded. As a BigInt it
+ * is exact on every Node; the index reads only `search_rows`' own ids from it.
+ */
+function writeStatement(db: Database, sql: string): Statement {
+  const s = db.prepare(sql);
+  s.setReadBigInts(true);
+  return s;
+}
+
 /** Create the search table where this SQLite can: whether it is there. */
 function searchTable(db: Database): boolean {
   try {
@@ -311,25 +325,27 @@ export class IndexDb {
     /** Whether it holds the search table (FTS5 in this SQLite): only then can it answer a search. */
     readonly searchable: boolean,
   ) {
-    this.clean = db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('clean', ?)");
-    this.put = db.prepare(
+    const writer = (sql: string) => writeStatement(db, sql);
+    this.clean = writer("INSERT OR REPLACE INTO meta (key, value) VALUES ('clean', ?)");
+    this.put = writer(
       "INSERT OR REPLACE INTO files (path, mtime, size, ctime, changed, file_id, indexed_at, note, hash, fm_state, fm, body_start, tags, links, resolved, unresolved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
-    this.putText = db.prepare("INSERT OR REPLACE INTO texts (path, hash, text) VALUES (?, ?, ?)");
-    this.drop = db.prepare("DELETE FROM files WHERE path = ?");
-    this.dropText = db.prepare("DELETE FROM texts WHERE path = ?");
+    this.putText = writer("INSERT OR REPLACE INTO texts (path, hash, text) VALUES (?, ?, ?)");
+    this.drop = writer("DELETE FROM files WHERE path = ?");
+    this.dropText = writer("DELETE FROM texts WHERE path = ?");
     // a note moved: its links resolve from its new folder, written by a later update (none: resolved again)
-    this.move = db.prepare("UPDATE files SET path = ?, resolved = NULL, unresolved = NULL WHERE path = ?");
-    this.moveText = db.prepare("UPDATE texts SET path = ? WHERE path = ?");
-    this.update = db.prepare("UPDATE files SET mtime = ?, size = ?, ctime = ?, changed = ?, file_id = ?, indexed_at = ?, resolved = ?, unresolved = ? WHERE path = ?");
+    this.move = writer("UPDATE files SET path = ?, resolved = NULL, unresolved = NULL WHERE path = ?");
+    this.moveText = writer("UPDATE texts SET path = ? WHERE path = ?");
+    this.update = writer("UPDATE files SET mtime = ?, size = ?, ctime = ?, changed = ?, file_id = ?, indexed_at = ?, resolved = ?, unresolved = ? WHERE path = ?");
     this.getText = db.prepare("SELECT text FROM texts WHERE path = ? AND hash = ?");
     this.textAt = db.prepare("SELECT text FROM texts WHERE path = ?");
     const prep = (sql: string) => (searchable ? db.prepare(sql) : null);
+    const prepWriter = (sql: string) => (searchable ? writer(sql) : null);
     this.searchId = prep("SELECT id FROM search_rows WHERE path = ?");
-    this.searchRowAdd = prep("INSERT INTO search_rows (path) VALUES (?)");
-    this.searchRowDrop = prep("DELETE FROM search_rows WHERE id = ?");
-    this.searchPut = prep("INSERT INTO search (rowid, name, text) VALUES (?, ?, ?)");
-    this.searchDrop = prep("DELETE FROM search WHERE rowid = ?");
+    this.searchRowAdd = prepWriter("INSERT INTO search_rows (path) VALUES (?)");
+    this.searchRowDrop = prepWriter("DELETE FROM search_rows WHERE id = ?");
+    this.searchPut = prepWriter("INSERT INTO search (rowid, name, text) VALUES (?, ?, ?)");
+    this.searchDrop = prepWriter("DELETE FROM search WHERE rowid = ?");
     this.searchQuery = prep("SELECT rowid AS id FROM search WHERE search MATCH ?");
     this.pathsAfter = prep("SELECT id, path FROM search_rows WHERE id > ? ORDER BY id LIMIT ?");
   }
@@ -375,7 +391,7 @@ export class IndexDb {
         if (meta.size === 0) {
           db.exec("DELETE FROM files; DELETE FROM texts; DELETE FROM search_rows;");
           if (searchable) db.exec("DELETE FROM search;");
-          const set = db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)");
+          const set = writeStatement(db, "INSERT INTO meta (key, value) VALUES (?, ?)");
           for (const [k, v] of Object.entries(want)) set.run(k, v);
         }
         const files = readFiles(db);
