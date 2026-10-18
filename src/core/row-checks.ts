@@ -4,7 +4,7 @@
  */
 
 import type { App, TFile } from "./host";
-import { catalogTables, loadMetastore, type Metastore } from "./metastore";
+import { catalogTables, constraintHints, loadMetastore, type Metastore } from "./metastore";
 import { loadRows, loadTable, uniqueViolations, type LoadedRow, type LoadedTable, type RowViolations } from "./engine";
 import { fmGet } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
@@ -20,6 +20,7 @@ import { compileCheck, linkName, type Where } from "./where";
 import { CheckLinks, followsLinks } from "./check-links";
 import { filteredLinkColumns, linkTargetCheck } from "./link-targets";
 import { messageOf } from "./message";
+import { acyclicViolations } from "./acyclic";
 import { unreadableMessage, unreadableRows, type UnreadableNote } from "./unreadable";
 import { phase, tally, traceNow, tracingOn } from "./tracing";
 
@@ -34,12 +35,13 @@ function constraintViolationsImpl(t: LoadedTable, settings: DatanotesSettings, p
   const raw = t.catalog.entry.constraints;
   if (!raw || typeof raw !== "object") return [];
   const out: Violation[] = [];
+  const hints = constraintHints(t.catalog.entry);
   for (const [name, where] of Object.entries(raw)) {
     if (!where || typeof where !== "object" || Array.isArray(where)) continue;
     if (!links && followsLinks(where)) continue;
     try {
       if (!compileCheck(where as Where, t, settings, links)({ file: { path } as TFile, ordered })) {
-        out.push({ constraint: name, code: "check", message: `violates CHECK ${name}: ${JSON.stringify(where)}` });
+        out.push({ constraint: name, code: "check", message: `violates CHECK ${name}: ${JSON.stringify(where)}`, ...(hints[name] ? { hint: hints[name] } : {}) });
       }
     } catch (e) {
       out.push({ constraint: name, code: "check", message: `CHECK ${name} is invalid: ${messageOf(e)}` });
@@ -95,6 +97,8 @@ export interface CheckViolation {
   /** The item of a list column, from 0. */
   index?: number;
   constraint?: string;
+  /** The CHECK's own hint (code `check`), when the constraint has one. */
+  hint?: string;
   message: string;
   value?: unknown;
 }
@@ -181,6 +185,7 @@ export async function checkOne(
   const back = await missingBackLinks(app, settings, t.catalog.model, t.catalog.ref.full, rows.map((r) => ({ path: r.file.path, ordered: r.ordered })));
   for (const [path, list] of back) report(path, list.map((x) => ({ column: x.column, code: "inverse" as const, message: x.message, value: x.value })));
   for (const h of await hierarchyViolations(app, settings, t, rows.map((r) => ({ path: r.file.path, ordered: r.ordered })), rows)) report(h.path, h.violations);
+  for (const a of acyclicViolations(t.def.columns, t.catalog.ref.full, rows.map((r) => ({ path: r.file.path, ordered: r.ordered })), { wording: "check" })) report(a.path, a.violations);
   // rows whose front matter cannot be read: every other read leaves them out
   const unreadable =
     everyUnreadable && everyUnreadable.model === t.catalog.model

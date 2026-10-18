@@ -46,7 +46,7 @@ import { configureDatabase, describeDatabase } from "./database";
 import { describeHistory, restoreTable, tableChanges, vacuumTable } from "./history";
 import { describeDatabaseHistory, restoreDatabase } from "./database-history";
 import { listMigrations } from "./journal";
-import { catalogViews, loadMetastore, tableTags } from "./metastore";
+import { catalogViews, constraintHints, loadMetastore, tableInstructions, tableTags } from "./metastore";
 import { missingDescriptions } from "./descriptions";
 import type { TableColumn } from "./types-table";
 import { catalogRowFiles } from "./row-files";
@@ -231,6 +231,10 @@ export interface DescribedTableAnswer {
   bases?: string[];
   /** Its CHECK constraints: name → the `where` every row must match. */
   constraints?: Record<string, Record<string, unknown>>;
+  /** The hint of each CHECK that has one: name → text. */
+  constraint_hints?: Record<string, string>;
+  /** How to fill a row of the table: follow them before writing. */
+  instructions?: string;
   /** The text of every new row's note. */
   row_template?: string;
   /** Its own history setting (absent: the database's). */
@@ -248,6 +252,8 @@ export async function describeTable(app: App, settings: DatanotesSettings, table
   const o = def.options;
   const e = t.catalog.entry;
   const tags = tableTags(e);
+  const hints = constraintHints(e);
+  const instructions = tableInstructions(e);
   const missing = missingDescriptions(o.description, def.columns);
   return {
     qualified: t.catalog.ref.full,
@@ -270,6 +276,8 @@ export async function describeTable(app: App, settings: DatanotesSettings, table
     ...(missing ? { missing_descriptions: missing } : {}),
     ...(e.bases && e.bases.length > 0 ? { bases: [...e.bases] } : {}),
     ...(e.constraints && Object.keys(e.constraints).length > 0 ? { constraints: e.constraints } : {}),
+    ...(Object.keys(hints).length > 0 ? { constraint_hints: hints } : {}),
+    ...(instructions !== undefined ? { instructions } : {}),
     ...(typeof e.row_template === "string" ? { row_template: e.row_template } : {}),
     ...(typeof e.options?.history === "boolean" ? { history: e.options.history } : {}),
     ...(typeof e.options?.autolink_target === "boolean" ? { autolink_target: e.options.autolink_target } : {}),

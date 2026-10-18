@@ -37,6 +37,7 @@ import { basenameOf, claimFreeName, renderPathTemplate } from "./path-templates"
 import { withIdentity, withRowId } from "./computed-columns";
 import { knownKeys } from "./where";
 import { messageOf } from "./message";
+import { guide } from "./hints";
 import { hasText, removedDescriptionRefusal } from "./descriptions";
 
 // --- move_table ---
@@ -74,6 +75,8 @@ async function relocateTable(
   tags?: Record<string, string>,
   /** Untyped fields to set (`null` removes one): the entry's `defaults`. */
   fields: Record<string, unknown> = {},
+  /** New `instructions` (null or "" removes them; undefined keeps them). */
+  instructions?: string | null,
 ): Promise<OpResult> {
   const conflicts: OpConflict[] = [];
   const merged: Record<string, unknown> = { ...serializeOptions(t.def.options)[0] }; // it has a name at least
@@ -116,6 +119,8 @@ async function relocateTable(
     }
     if (rowTemplate === null || (typeof rowTemplate === "string" && rowTemplate.trim() === "")) delete entry.row_template;
     else if (typeof rowTemplate === "string") entry.row_template = rowTemplate;
+    if (instructions === null || (typeof instructions === "string" && instructions.trim() === "")) delete entry.instructions;
+    else if (typeof instructions === "string") entry.instructions = instructions;
     // a move: the old entry removed and the new one set, in one edit of the text
     const after = setTableEntries(text, [...(t.catalog.ref.full !== ref.full ? [[t.catalog.ref, null] as const] : []), [ref, tags === undefined ? entry : withTableTags(entry, tags)] as const]);
     const from = t.catalog.ref.full;
@@ -239,6 +244,8 @@ export interface AlterTableInput {
   autolinkTarget?: boolean | null;
   /** Body of new rows (insert_row, notes created in the table folder); null removes it. */
   rowTemplate?: string | null;
+  /** How to fill a row, for agents (Markdown); null or "" removes them. */
+  instructions?: string | null;
   /** Tags to add or change (`{ domain: "health" }`); a `null` value removes that tag. */
   tags?: Record<string, string | null>;
   /** Remove every tag first (with `tags`: the table ends up with exactly those). */
@@ -277,6 +284,9 @@ async function alterTableImpl(
   input: AlterTableInput,
   opts: RunOptions = {},
 ): Promise<OpResult> {
+  if (input.instructions !== undefined && input.instructions !== null && typeof input.instructions !== "string") {
+    throw new OperationInputError(`"instructions" must be text: how to fill a row of the table`, guide(`Pass instructions as Markdown text, e.g. "1. Ask which film and when.", or leave them out; "" removes them.`, "instructions"));
+  }
   const t = await loadTable(app, settings, input.table);
   const cfg = await readDatabaseConfig(app, settings);
   const schema = assertIdentifier("schema", input.schema ?? t.def.schema);
@@ -331,7 +341,7 @@ async function alterTableImpl(
   return relocateTable(app, settings, t, { catalogRef: refOf(catalog, schema, name) }, changes, opts, {
     ...(input.history !== undefined ? { history: input.history } : {}),
     ...(input.autolinkTarget !== undefined ? { autolink_target: input.autolinkTarget } : {}),
-  }, input.rowTemplate, tags, fields);
+  }, input.rowTemplate, tags, fields, input.instructions);
 }
 
 export const alterTable = instrumented("alter_table", alterTableImpl, (i) => ({ table: i.table, schema: i.schema, name: i.name }));

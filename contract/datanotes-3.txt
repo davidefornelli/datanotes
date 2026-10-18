@@ -71,6 +71,7 @@ answer add_column.violations[].violations[].code = "vocabulary"
 answer add_column.violations[].violations[].code: string
 answer add_column.violations[].violations[].column: string
 answer add_column.violations[].violations[].constraint: string
+answer add_column.violations[].violations[].hint: string
 answer add_column.violations[].violations[].index: integer
 answer add_column.violations[].violations[].message: string
 answer add_column.violations[].violations[].value: any
@@ -144,6 +145,7 @@ answer add_constraint.violations[].violations[].code = "vocabulary"
 answer add_constraint.violations[].violations[].code: string
 answer add_constraint.violations[].violations[].column: string
 answer add_constraint.violations[].violations[].constraint: string
+answer add_constraint.violations[].violations[].hint: string
 answer add_constraint.violations[].violations[].index: integer
 answer add_constraint.violations[].violations[].message: string
 answer add_constraint.violations[].violations[].value: any
@@ -217,6 +219,7 @@ answer adopt_rows.violations[].violations[].code = "vocabulary"
 answer adopt_rows.violations[].violations[].code: string
 answer adopt_rows.violations[].violations[].column: string
 answer adopt_rows.violations[].violations[].constraint: string
+answer adopt_rows.violations[].violations[].hint: string
 answer adopt_rows.violations[].violations[].index: integer
 answer adopt_rows.violations[].violations[].message: string
 answer adopt_rows.violations[].violations[].value: any
@@ -290,6 +293,7 @@ answer align_relations.violations[].violations[].code = "vocabulary"
 answer align_relations.violations[].violations[].code: string
 answer align_relations.violations[].violations[].column: string
 answer align_relations.violations[].violations[].constraint: string
+answer align_relations.violations[].violations[].hint: string
 answer align_relations.violations[].violations[].index: integer
 answer align_relations.violations[].violations[].message: string
 answer align_relations.violations[].violations[].value: any
@@ -363,6 +367,7 @@ answer alter_column.violations[].violations[].code = "vocabulary"
 answer alter_column.violations[].violations[].code: string
 answer alter_column.violations[].violations[].column: string
 answer alter_column.violations[].violations[].constraint: string
+answer alter_column.violations[].violations[].hint: string
 answer alter_column.violations[].violations[].index: integer
 answer alter_column.violations[].violations[].message: string
 answer alter_column.violations[].violations[].value: any
@@ -436,6 +441,7 @@ answer alter_table.violations[].violations[].code = "vocabulary"
 answer alter_table.violations[].violations[].code: string
 answer alter_table.violations[].violations[].column: string
 answer alter_table.violations[].violations[].constraint: string
+answer alter_table.violations[].violations[].hint: string
 answer alter_table.violations[].violations[].index: integer
 answer alter_table.violations[].violations[].message: string
 answer alter_table.violations[].violations[].value: any
@@ -522,6 +528,7 @@ answer batch.steps[].result.violations[].violations[].code = "vocabulary"
 answer batch.steps[].result.violations[].violations[].code: string
 answer batch.steps[].result.violations[].violations[].column: string
 answer batch.steps[].result.violations[].violations[].constraint: string
+answer batch.steps[].result.violations[].violations[].hint: string
 answer batch.steps[].result.violations[].violations[].index: integer
 answer batch.steps[].result.violations[].violations[].message: string
 answer batch.steps[].result.violations[].violations[].value: any
@@ -557,6 +564,7 @@ answer check_table.violations[].violations[].code = "vocabulary"
 answer check_table.violations[].violations[].code: string
 answer check_table.violations[].violations[].column: string
 answer check_table.violations[].violations[].constraint: string
+answer check_table.violations[].violations[].hint: string
 answer check_table.violations[].violations[].index: integer
 answer check_table.violations[].violations[].message: string
 answer check_table.violations[].violations[].value: any
@@ -630,6 +638,7 @@ answer clone_table.violations[].violations[].code = "vocabulary"
 answer clone_table.violations[].violations[].code: string
 answer clone_table.violations[].violations[].column: string
 answer clone_table.violations[].violations[].constraint: string
+answer clone_table.violations[].violations[].hint: string
 answer clone_table.violations[].violations[].index: integer
 answer clone_table.violations[].violations[].message: string
 answer clone_table.violations[].violations[].value: any
@@ -703,6 +712,7 @@ answer comment_on.violations[].violations[].code = "vocabulary"
 answer comment_on.violations[].violations[].code: string
 answer comment_on.violations[].violations[].column: string
 answer comment_on.violations[].violations[].constraint: string
+answer comment_on.violations[].violations[].hint: string
 answer comment_on.violations[].violations[].index: integer
 answer comment_on.violations[].violations[].message: string
 answer comment_on.violations[].violations[].value: any
@@ -818,6 +828,7 @@ answer create_table.violations[].violations[].code = "vocabulary"
 answer create_table.violations[].violations[].code: string
 answer create_table.violations[].violations[].column: string
 answer create_table.violations[].violations[].constraint: string
+answer create_table.violations[].violations[].hint: string
 answer create_table.violations[].violations[].index: integer
 answer create_table.violations[].violations[].message: string
 answer create_table.violations[].violations[].value: any
@@ -891,6 +902,7 @@ answer create_view.violations[].violations[].code = "vocabulary"
 answer create_view.violations[].violations[].code: string
 answer create_view.violations[].violations[].column: string
 answer create_view.violations[].violations[].constraint: string
+answer create_view.violations[].violations[].hint: string
 answer create_view.violations[].violations[].index: integer
 answer create_view.violations[].violations[].message: string
 answer create_view.violations[].violations[].value: any
@@ -989,6 +1001,7 @@ answer define_base.violations[].violations[].code = "vocabulary"
 answer define_base.violations[].violations[].code: string
 answer define_base.violations[].violations[].column: string
 answer define_base.violations[].violations[].constraint: string
+answer define_base.violations[].violations[].hint: string
 answer define_base.violations[].violations[].index: integer
 answer define_base.violations[].violations[].message: string
 answer define_base.violations[].violations[].value: any
@@ -1062,6 +1075,7 @@ answer delete_rows.violations[].violations[].code = "vocabulary"
 answer delete_rows.violations[].violations[].code: string
 answer delete_rows.violations[].violations[].column: string
 answer delete_rows.violations[].violations[].constraint: string
+answer delete_rows.violations[].violations[].hint: string
 answer delete_rows.violations[].violations[].index: integer
 answer delete_rows.violations[].violations[].message: string
 answer delete_rows.violations[].violations[].value: any
@@ -1147,6 +1161,7 @@ answer describe_table.autolink_target: boolean
 answer describe_table.bases: string[]
 answer describe_table.catalog: string
 answer describe_table.columns: object[]
+answer describe_table.columns[].acyclic: boolean
 answer describe_table.columns[].aliases: string[]
 answer describe_table.columns[].default: any
 answer describe_table.columns[].dense: boolean
@@ -1170,10 +1185,12 @@ answer describe_table.columns[].type: string
 answer describe_table.columns[].unique: boolean
 answer describe_table.columns[].value_descriptions: object
 answer describe_table.columns[].values: string[]
+answer describe_table.constraint_hints: object
 answer describe_table.constraints: object
 answer describe_table.description: string
 answer describe_table.fields: object
 answer describe_table.history: boolean
+answer describe_table.instructions: string
 answer describe_table.layout.archive: string
 answer describe_table.layout.folder: string
 answer describe_table.layout.row_folder: string
@@ -1259,6 +1276,7 @@ answer drop_column.violations[].violations[].code = "vocabulary"
 answer drop_column.violations[].violations[].code: string
 answer drop_column.violations[].violations[].column: string
 answer drop_column.violations[].violations[].constraint: string
+answer drop_column.violations[].violations[].hint: string
 answer drop_column.violations[].violations[].index: integer
 answer drop_column.violations[].violations[].message: string
 answer drop_column.violations[].violations[].value: any
@@ -1332,6 +1350,7 @@ answer drop_constraint.violations[].violations[].code = "vocabulary"
 answer drop_constraint.violations[].violations[].code: string
 answer drop_constraint.violations[].violations[].column: string
 answer drop_constraint.violations[].violations[].constraint: string
+answer drop_constraint.violations[].violations[].hint: string
 answer drop_constraint.violations[].violations[].index: integer
 answer drop_constraint.violations[].violations[].message: string
 answer drop_constraint.violations[].violations[].value: any
@@ -1405,6 +1424,7 @@ answer drop_table.violations[].violations[].code = "vocabulary"
 answer drop_table.violations[].violations[].code: string
 answer drop_table.violations[].violations[].column: string
 answer drop_table.violations[].violations[].constraint: string
+answer drop_table.violations[].violations[].hint: string
 answer drop_table.violations[].violations[].index: integer
 answer drop_table.violations[].violations[].message: string
 answer drop_table.violations[].violations[].value: any
@@ -1478,6 +1498,7 @@ answer drop_view.violations[].violations[].code = "vocabulary"
 answer drop_view.violations[].violations[].code: string
 answer drop_view.violations[].violations[].column: string
 answer drop_view.violations[].violations[].constraint: string
+answer drop_view.violations[].violations[].hint: string
 answer drop_view.violations[].violations[].index: integer
 answer drop_view.violations[].violations[].message: string
 answer drop_view.violations[].violations[].value: any
@@ -1620,6 +1641,7 @@ answer insert_row.violations[].violations[].code = "vocabulary"
 answer insert_row.violations[].violations[].code: string
 answer insert_row.violations[].violations[].column: string
 answer insert_row.violations[].violations[].constraint: string
+answer insert_row.violations[].violations[].hint: string
 answer insert_row.violations[].violations[].index: integer
 answer insert_row.violations[].violations[].message: string
 answer insert_row.violations[].violations[].value: any
@@ -1833,6 +1855,7 @@ answer merge_rows.violations[].violations[].code = "vocabulary"
 answer merge_rows.violations[].violations[].code: string
 answer merge_rows.violations[].violations[].column: string
 answer merge_rows.violations[].violations[].constraint: string
+answer merge_rows.violations[].violations[].hint: string
 answer merge_rows.violations[].violations[].index: integer
 answer merge_rows.violations[].violations[].message: string
 answer merge_rows.violations[].violations[].value: any
@@ -1906,6 +1929,7 @@ answer move_rows.violations[].violations[].code = "vocabulary"
 answer move_rows.violations[].violations[].code: string
 answer move_rows.violations[].violations[].column: string
 answer move_rows.violations[].violations[].constraint: string
+answer move_rows.violations[].violations[].hint: string
 answer move_rows.violations[].violations[].index: integer
 answer move_rows.violations[].violations[].message: string
 answer move_rows.violations[].violations[].value: any
@@ -1989,6 +2013,7 @@ answer recompute_columns.violations[].violations[].code = "vocabulary"
 answer recompute_columns.violations[].violations[].code: string
 answer recompute_columns.violations[].violations[].column: string
 answer recompute_columns.violations[].violations[].constraint: string
+answer recompute_columns.violations[].violations[].hint: string
 answer recompute_columns.violations[].violations[].index: integer
 answer recompute_columns.violations[].violations[].message: string
 answer recompute_columns.violations[].violations[].value: any
@@ -2062,6 +2087,7 @@ answer rename_column.violations[].violations[].code = "vocabulary"
 answer rename_column.violations[].violations[].code: string
 answer rename_column.violations[].violations[].column: string
 answer rename_column.violations[].violations[].constraint: string
+answer rename_column.violations[].violations[].hint: string
 answer rename_column.violations[].violations[].index: integer
 answer rename_column.violations[].violations[].message: string
 answer rename_column.violations[].violations[].value: any
@@ -2135,6 +2161,7 @@ answer rename_value.violations[].violations[].code = "vocabulary"
 answer rename_value.violations[].violations[].code: string
 answer rename_value.violations[].violations[].column: string
 answer rename_value.violations[].violations[].constraint: string
+answer rename_value.violations[].violations[].hint: string
 answer rename_value.violations[].violations[].index: integer
 answer rename_value.violations[].violations[].message: string
 answer rename_value.violations[].violations[].value: any
@@ -2228,6 +2255,7 @@ answer restore_database.violations[].violations[].code = "vocabulary"
 answer restore_database.violations[].violations[].code: string
 answer restore_database.violations[].violations[].column: string
 answer restore_database.violations[].violations[].constraint: string
+answer restore_database.violations[].violations[].hint: string
 answer restore_database.violations[].violations[].index: integer
 answer restore_database.violations[].violations[].message: string
 answer restore_database.violations[].violations[].value: any
@@ -2301,6 +2329,7 @@ answer restore_table.violations[].violations[].code = "vocabulary"
 answer restore_table.violations[].violations[].code: string
 answer restore_table.violations[].violations[].column: string
 answer restore_table.violations[].violations[].constraint: string
+answer restore_table.violations[].violations[].hint: string
 answer restore_table.violations[].violations[].index: integer
 answer restore_table.violations[].violations[].message: string
 answer restore_table.violations[].violations[].value: any
@@ -2397,6 +2426,7 @@ answer set_table_bases.violations[].violations[].code = "vocabulary"
 answer set_table_bases.violations[].violations[].code: string
 answer set_table_bases.violations[].violations[].column: string
 answer set_table_bases.violations[].violations[].constraint: string
+answer set_table_bases.violations[].violations[].hint: string
 answer set_table_bases.violations[].violations[].index: integer
 answer set_table_bases.violations[].violations[].message: string
 answer set_table_bases.violations[].violations[].value: any
@@ -2498,6 +2528,7 @@ answer update_row.violations[].violations[].code = "vocabulary"
 answer update_row.violations[].violations[].code: string
 answer update_row.violations[].violations[].column: string
 answer update_row.violations[].violations[].constraint: string
+answer update_row.violations[].violations[].hint: string
 answer update_row.violations[].violations[].index: integer
 answer update_row.violations[].violations[].message: string
 answer update_row.violations[].violations[].value: any
@@ -2571,6 +2602,7 @@ answer update_rows.violations[].violations[].code = "vocabulary"
 answer update_rows.violations[].violations[].code: string
 answer update_rows.violations[].violations[].column: string
 answer update_rows.violations[].violations[].constraint: string
+answer update_rows.violations[].violations[].hint: string
 answer update_rows.violations[].violations[].index: integer
 answer update_rows.violations[].violations[].message: string
 answer update_rows.violations[].violations[].value: any
@@ -2585,6 +2617,9 @@ argument add_column.table: string
 argument add_constraint.check: object
 argument add_constraint.dry_run optional
 argument add_constraint.dry_run: boolean
+argument add_constraint.hint optional
+argument add_constraint.hint: null
+argument add_constraint.hint: string
 argument add_constraint.name: string
 argument add_constraint.table: string
 argument adopt_rows.drop optional
@@ -2651,6 +2686,9 @@ argument alter_table.history optional
 argument alter_table.history: boolean
 argument alter_table.history: null
 argument alter_table.history: string
+argument alter_table.instructions optional
+argument alter_table.instructions: null
+argument alter_table.instructions: string
 argument alter_table.name optional
 argument alter_table.name: null
 argument alter_table.name: string
@@ -2756,6 +2794,9 @@ argument create_table.filename: string
 argument create_table.history optional
 argument create_table.history: boolean
 argument create_table.history: null
+argument create_table.instructions optional
+argument create_table.instructions: null
+argument create_table.instructions: string
 argument create_table.name: string
 argument create_table.partition optional
 argument create_table.partition: null

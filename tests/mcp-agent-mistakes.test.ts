@@ -55,6 +55,7 @@ beforeAll(async () => {
   });
   await ok("alter_column", { table: "film", column: "status", changes: { value_descriptions: { "to watch": "on the list, not seen yet", watched: "seen at least once" } } });
   await ok("add_constraint", { table: "film", name: "rated_when_watched", check: { or: [{ status: "watched" }, { rating: { exists: false } }] } });
+  await ok("add_constraint", { table: "film", name: "under_four_hours", check: { minutes: { lte: 240 } }, hint: "Split a film longer than four hours into its parts." });
   await ok("insert_row", { table: "film", values: { title: "Metropolis", year: 1927, minutes: 153 } });
 
   io = fakeIo({ DATANOTES_TOKEN: TOKEN });
@@ -155,6 +156,13 @@ describe("an agent's mistakes, as the MCP server answers them", () => {
     expect(e.message).toContain("violates CHECK rated_when_watched");
     expect(e.hint).toContain("The row breaks a CHECK constraint of the table");
     expect(e.hint).toContain("describe_table lists the table's constraints");
+    expect(e.docs).toBe(`${DOCS}/guides/data-quality/check-constraints.md#enforce-rules-with-check-constraints`);
+  });
+
+  it("a CHECK with its own hint: the hint first, then the generic one", async () => {
+    const e = await mistake("insert_row", { table: "film", values: { title: "Long", minutes: 300 } });
+    expect(e.hint.startsWith("Split a film longer than four hours into its parts.")).toBe(true);
+    expect(e.hint).toContain("The row breaks a CHECK constraint of the table");
     expect(e.docs).toBe(`${DOCS}/guides/data-quality/check-constraints.md#enforce-rules-with-check-constraints`);
   });
 

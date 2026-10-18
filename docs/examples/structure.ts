@@ -142,9 +142,9 @@ const chapter: Chapter = {
     },
     {
       title: "Enforce rules with CHECK constraints",
-      say: "`add_constraint` adds a CHECK constraint, a rule every row must satisfy, written as a `where` filter. The engine refuses it while existing rows break the rule and lists them; after that, it enforces the rule on every write. A condition on a column the row leaves empty passes, as in Structured Query Language (SQL). Inside `or`, `and` and `not`, the engine tests an empty value as it is, so a watched film without a `rating` breaks `rated_when_watched`.",
+      say: "`add_constraint` adds a CHECK constraint, a rule every row must satisfy, written as a `where` filter. The engine refuses it while existing rows break the rule and lists them; after that, it enforces the rule on every write. A condition on a column the row leaves empty passes, as in Structured Query Language (SQL). Inside `or`, `and` and `not`, the engine tests an empty value as it is, so a watched film without a `rating` breaks `rated_when_watched`. `hint` says what to do when a row breaks the rule. The refusal puts it first, and `describe_table` lists it in `constraint_hints`.",
       steps: [
-        { op: "add_constraint", args: { table: "film", name: "rated_when_watched", check: { or: [{ status: { ne: "watched" } }, { rating: { exists: true } }] } } },
+        { op: "add_constraint", args: { table: "film", name: "rated_when_watched", check: { or: [{ status: { ne: "watched" } }, { rating: { exists: true } }] }, hint: "A watched film needs a rating from 1 to 5: ask me for it." } },
         { op: "add_constraint", args: { table: "film", name: "at_most_three_hours", check: { minutes: { lte: 180 } } }, quiet: true },
         { op: "insert_row", args: { table: "film", values: { title: "His Girl Friday", year: 1940, minutes: 92, status: "watched" } }, refused: true },
         { op: "insert_row", args: { table: "film", values: { title: "His Girl Friday", year: 1940, minutes: 92, status: "watched", rating: 5 } } },

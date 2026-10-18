@@ -84,6 +84,10 @@ export interface CatalogTableEntry {
   constraints?: Record<string, Record<string, unknown>>;
   /** Text of every new row's note, with `{column}` placeholders (`body` in create_table). */
   row_template?: string;
+  /** How to fill a row, for agents (Markdown): the order of the columns, what to ask the user (`instructions` in create_table / alter_table). */
+  instructions?: string;
+  /** The hint of each CHECK that has one (name → what a refused write tells the agent to do; add_constraint `hint`). */
+  constraint_hints?: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -364,6 +368,23 @@ export function tableTags(entry: Pick<CatalogTableEntry, "tags">): Record<string
     ? Object.entries(tags).map(([k, v]) => [k, text(v)])
     : (Array.isArray(tags) ? tags : [tags]).map((k) => [text(k).trim(), ""] as [string, string]).filter(([k]) => k !== "");
   return pairs.length === 0 ? undefined : Object.fromEntries(pairs);
+}
+
+/** A table's CHECK hints: name → text, only for CHECKs the table has and only with text. */
+export function constraintHints(entry: Pick<CatalogTableEntry, "constraints" | "constraint_hints">): Record<string, string> {
+  const out: Record<string, string> = {};
+  const raw: unknown = entry.constraint_hints;
+  if (!isRecord(raw)) return out;
+  const checks = entry.constraints ?? {};
+  for (const [name, hint] of Object.entries(raw)) {
+    if (typeof hint === "string" && hint.trim() !== "" && Object.prototype.hasOwnProperty.call(checks, name)) out[name] = hint.trim();
+  }
+  return out;
+}
+
+/** A table's instructions: the text, or undefined when it has none. */
+export function tableInstructions(entry: Pick<CatalogTableEntry, "instructions">): string | undefined {
+  return typeof entry.instructions === "string" && entry.instructions.trim() !== "" ? entry.instructions : undefined;
 }
 
 /** The entry with `tags` replaced (after `description` and `aliases`); no `tags` key when `tags` is empty. */

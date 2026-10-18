@@ -53,6 +53,8 @@ import {
   setViewEntry,
   SYSTEM_CATALOG,
   tableTags,
+  constraintHints,
+  tableInstructions,
   type CatalogRef,
   type CatalogTableEntry,
   type Metastore,
@@ -132,6 +134,8 @@ export interface AddConstraintInput {
   name: string;
   /** `where` filter every row must match, e.g. `{ "value": { "gte": 1, "lte": 5 } }`. */
   check: Where;
+  /** What a refused write tells the agent when a row breaks this CHECK: how to fix the row. */
+  hint?: string;
 }
 
 /** ALTER TABLE … ADD CONSTRAINT … CHECK: refused while existing rows violate it. */
@@ -142,6 +146,10 @@ async function addConstraintImpl(app: App, settings: DatanotesSettings, input: A
   if (!input.check || typeof input.check !== "object" || Array.isArray(input.check) || Object.keys(input.check).length === 0) {
     throw new OperationInputError(`"check" must be a non-empty where filter`, guide(`A CHECK is a where filter every row must match, e.g. {"or": [{"status": "to watch"}, {"rating": {"exists": true}}]}.`, "check"));
   }
+  if (input.hint !== undefined && input.hint !== null && typeof input.hint !== "string") {
+    throw new OperationInputError(`"hint" must be text: what to do when a row breaks the CHECK`, guide(`Pass hint as one or two sentences, e.g. "A watched film needs a rating: ask for it.", or leave it out.`, "check"));
+  }
+  const hint = typeof input.hint === "string" && input.hint.trim() !== "" ? input.hint.trim() : undefined;
   if (cat.entry.constraints?.[input.name]) throw new OperationInputError(`constraint "${input.name}" already exists; drop it first`, guide(`Choose another name, or drop_constraint "${input.name}" first to replace it; describe_table lists the constraints.`, "check"));
   // the same predicate as write-time validation; unknown columns / operators fail here. Dotted keys
   // (`parent.kind`) follow links: their target rows are loaded once, before compiling.
@@ -152,7 +160,13 @@ async function addConstraintImpl(app: App, settings: DatanotesSettings, input: A
   for (const r of await loadRows(app, settings, t)) {
     if (!passes(r)) conflicts.push({ path: r.file.path, message: `violates CHECK ${input.name}` });
   }
-  const entry: CatalogTableEntry = { ...cat.entry, constraints: { ...(cat.entry.constraints ?? {}), [input.name]: input.check } };
+  const hints = { ...constraintHints(cat.entry), ...(hint ? { [input.name]: hint } : {}) };
+  const { constraint_hints: _h, ...withoutHints } = cat.entry;
+  const entry: CatalogTableEntry = {
+    ...withoutHints,
+    constraints: { ...(cat.entry.constraints ?? {}), [input.name]: input.check },
+    ...(Object.keys(hints).length > 0 ? { constraint_hints: hints } : {}),
+  };
   const cs = emptyChangeSet("add_constraint", `add constraint ${input.name} to ${cat.ref.full}`, t.def.schemaPath);
   cs.texts.push({ path: t.file.path, before: cat.text, after: setTableEntry(cat.text, cat.ref, entry) });
   return finish(app, settings, cs, conflicts, [], opts);
@@ -165,8 +179,13 @@ async function dropConstraintImpl(app: App, settings: DatanotesSettings, input: 
     throw new OperationInputError(`${cat.ref.full} has no constraint "${input.name}"`, unknownName(input.name, Object.keys(cat.entry.constraints ?? {}), `constraints of ${cat.ref.full}`, "describe_table lists them.", "check"));
   }
   const { [input.name]: _gone, ...rest } = cat.entry.constraints;
-  const { constraints: _c, ...base } = cat.entry;
-  const entry: CatalogTableEntry = Object.keys(rest).length > 0 ? { ...base, constraints: rest } : (base as CatalogTableEntry);
+  const { [input.name]: _x, ...hintsLeft } = constraintHints(cat.entry);
+  const { constraints: _c, constraint_hints: _h, ...base } = cat.entry;
+  const entry: CatalogTableEntry = {
+    ...base,
+    ...(Object.keys(rest).length > 0 ? { constraints: rest } : {}),
+    ...(Object.keys(hintsLeft).length > 0 ? { constraint_hints: hintsLeft } : {}),
+  };
   const cs = emptyChangeSet("drop_constraint", `drop constraint ${input.name} from ${cat.ref.full}`, t.def.schemaPath);
   cs.texts.push({ path: t.file.path, before: cat.text, after: setTableEntry(cat.text, cat.ref, entry) });
   return finish(app, settings, cs, [], [], opts);
@@ -362,15 +381,16 @@ const INFO_COLUMNS: Record<InfoTable, [string, string][]> = {
   tables: [
     ["table_catalog", "string"], ["table_schema", "string"], ["table_name", "string"], ["full_name", "string"],
     ["table_type", "string"], ["comment", "string"], ["row_count", "integer"], ["latest_version", "integer"], ["tags", "json"],
+    ["instructions", "string"],
   ],
   columns: [
     ["table_catalog", "string"], ["table_schema", "string"], ["table_name", "string"], ["column_name", "string"],
     ["ordinal_position", "integer"], ["data_type", "string"], ["is_nullable", "string"], ["column_default", "string"],
     ["comment", "string"], ["generation_expression", "string"], ["is_identity", "string"], ["is_unique", "string"],
-    ["inherited_from", "string"], ["is_hierarchy", "string"],
+    ["inherited_from", "string"], ["is_hierarchy", "string"], ["is_acyclic", "string"],
   ],
   views: [["table_catalog", "string"], ["table_schema", "string"], ["table_name", "string"], ["view_definition", "string"], ["comment", "string"], ["aliases", "list"], ["labels", "string"]],
-  check_constraints: [["table_catalog", "string"], ["table_schema", "string"], ["table_name", "string"], ["constraint_name", "string"], ["check_clause", "string"]],
+  check_constraints: [["table_catalog", "string"], ["table_schema", "string"], ["table_name", "string"], ["constraint_name", "string"], ["check_clause", "string"], ["hint", "string"]],
 };
 
 /** `information_schema.<name>` or `system.information_schema.<name>`, else null. */
@@ -412,13 +432,13 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
         out.push({
           table_catalog: ref.catalog, table_schema: ref.schema, table_name: ref.table, full_name: ref.full, table_type: "TABLE",
           comment: entry.description ?? null, row_count: rows.get(ref.full)!.length,
-          latest_version: latest, tags: tableTags(entry) ?? null,
+          latest_version: latest, tags: tableTags(entry) ?? null, instructions: tableInstructions(entry) ?? null,
         });
       }
       for (const { ref, view } of catalogViews(model)) {
         out.push({
           table_catalog: ref.catalog, table_schema: ref.schema, table_name: ref.table, full_name: ref.full, table_type: "VIEW",
-          comment: view.description ?? null, row_count: null, latest_version: null, tags: null,
+          comment: view.description ?? null, row_count: null, latest_version: null, tags: null, instructions: null,
         });
       }
       return out;
@@ -432,7 +452,7 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
           data_type: c.type === "list" ? `list<${String(c.items ?? "string")}>` : c.type === "enum" ? `enum(${((c.values as string[]) ?? []).join(",")})` : c.type,
           is_nullable: c.required === true ? "NO" : "YES", column_default: text(c.default), comment: text(c.description),
           generation_expression: text(c.generated), is_identity: c.identity ? String(c.identity) : "NO", is_unique: c.unique ? "YES" : "NO",
-          inherited_from: from.get(String(c.name)) ?? null, is_hierarchy: c.hierarchy ? "YES" : "NO",
+          inherited_from: from.get(String(c.name)) ?? null, is_hierarchy: c.hierarchy ? "YES" : "NO", is_acyclic: c.acyclic ? "YES" : "NO",
         }));
       });
     case "views":
@@ -441,11 +461,13 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
         aliases: view.aliases ?? [], labels: view.labels ? JSON.stringify(view.labels) : null,
       }));
     case "check_constraints":
-      return tables.flatMap(({ ref, entry }) =>
-        Object.entries(entry.constraints ?? {}).map(([n, where]) => ({
+      return tables.flatMap(({ ref, entry }) => {
+        const hintsOf = constraintHints(entry);
+        return Object.entries(entry.constraints ?? {}).map(([n, where]) => ({
           table_catalog: ref.catalog, table_schema: ref.schema, table_name: ref.table, constraint_name: n, check_clause: JSON.stringify(where),
-        })),
-      );
+          hint: hintsOf[n] ?? null,
+        }));
+      });
   }
 }
 
@@ -788,7 +810,7 @@ export interface SetTableBasesInput {
  * must stay valid; inherited dense columns and identity columns (created, id) are filled in.
  */
 /** Column attributes that constrain values (entry form: `nullable`, not `required`). */
-const CONSTRAINT_KEYS = ["required", "unique", "min", "max", "step", "values", "ordered", "ref", "generated", "identity", "default", "hierarchy", "ref_where", "ref_by"];
+const CONSTRAINT_KEYS = ["required", "unique", "min", "max", "step", "values", "ordered", "ref", "generated", "identity", "default", "hierarchy", "acyclic", "ref_where", "ref_by"];
 
 async function setTableBasesImpl(app: App, settings: DatanotesSettings, input: SetTableBasesInput, opts: RunOptions = {}): Promise<OpResult> {
   const t = await loadTable(app, settings, input.table);

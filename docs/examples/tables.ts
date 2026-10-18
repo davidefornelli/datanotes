@@ -92,10 +92,11 @@ const chapter: Chapter = {
     {
       title: "Add fixed front matter keys, a note template and tags",
       say: [
-        "`create_table` takes three more arguments:",
+        "`create_table` takes four more arguments:",
         "",
         "- **`fields`**: front matter keys every new row gets with a fixed value and no checks, such as `cssclasses`, which styles the notes in Obsidian",
         "- **`row_template`**: the text of every new row’s note, with `{column}` placeholders",
+        "- **`instructions`**: how an agent fills a row, such as which columns come first and what to ask you",
         "- **`tags`**: key/value labels for the table, which `list_tables` and `describe_table` return",
       ].join("\n"),
       steps: [
@@ -114,11 +115,20 @@ const chapter: Chapter = {
             filename: "{occurred_at:YYYY-MM-DD} {film}",
             fields: { cssclasses: ["watch"] },
             row_template: "Watched {film} ({where}).\n\n## Thoughts\n",
+            instructions: "1. Ask me which film I watched and where.\n2. Fill `occurred_at` only when I give a time: it defaults to now.\n",
             tags: { area: "films" },
           },
           quiet: true,
         },
         { op: "insert_row", args: { table: "watch", values: { film: "Nosferatu", where: "outdoor screening", place: "the park by the river" } }, save: "watch", showFile: (ctx) => ctx.saved.watch.planned_creates[0] },
+      ],
+    },
+    {
+      title: "Tell agents how to fill a row with `instructions`",
+      say: "`describe_table` returns a table’s `instructions`, so an agent reads them before it writes a row. `alter_table` changes them, and `instructions: \"\"` removes them.",
+      steps: [
+        { op: "describe_table", args: { table: "watch" }, show: (v) => ({ qualified: v.qualified, instructions: v.instructions }), check: (v) => typeof v.instructions !== "string" && "instructions expected" },
+        { op: "alter_table", args: { table: "watch", instructions: "1. Ask me which film I watched, where and with whom.\n2. Fill `occurred_at` only when I give a time: it defaults to now.\n" } },
       ],
     },
     {

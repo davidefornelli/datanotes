@@ -8,7 +8,7 @@
 import type { App, TFile } from "./host";
 import type { ChangeSet } from "./changeset";
 import { linkReads, linkTargetOf, modelColumns } from "./link-paths";
-import { catalogTables, loadMetastore, metastorePath, parseMetastore, resolveCatalogRef, rowTableFull, type CatalogRef, type Metastore } from "./metastore";
+import { catalogTables, constraintHints, loadMetastore, metastorePath, parseMetastore, resolveCatalogRef, rowTableFull, type CatalogRef, type Metastore } from "./metastore";
 import type { LoadedRow, RowViolations } from "./engine";
 import { fmGet, readOrderedFromMarkdown } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
@@ -158,6 +158,8 @@ async function linkedCheckViolationsImpl(
     const s = await tableIn(app, settings, metastore, ref.full);
     for (const [name, where] of Object.entries(s.catalog.entry.constraints!)) { // an owner has CHECKs
       if (!followsLinks(where)) continue;
+      const checkHint = constraintHints(s.catalog.entry)[name];
+      const ownHint = checkHint ? { hint: checkHint } : {};
       await after.prepare(s, where);
       const rows = after.rowsOf(s);
       // a CHECK the change puts back holds every row, like add_constraint
@@ -182,7 +184,7 @@ async function linkedCheckViolationsImpl(
         if (passes(r)) continue;
         const message = `violates CHECK ${name}: ${JSON.stringify(where)}`;
         if (own === undefined && restored) {
-          add(r.file.path, { constraint: name, code: "check", message: `${message} (CHECK ${name} comes back with this change)` });
+          add(r.file.path, { constraint: name, code: "check", message: `${message} (CHECK ${name} comes back with this change)`, ...ownHint });
           continue;
         }
         if (own === undefined) {
@@ -192,10 +194,10 @@ async function linkedCheckViolationsImpl(
             // it compiled above, on the same tables (`before` reads the metastore `after` reads)
             passed = compileCheck(where as Where, s, settings, before);
           }
-          if (passed(r)) add(r.file.path, { constraint: name, code: "check", message: `${message}${suffix(r, heads)}` });
+          if (passed(r)) add(r.file.path, { constraint: name, code: "check", message: `${message}${suffix(r, heads)}`, ...ownHint });
           continue;
         }
-        add(own, { constraint: name, code: "check", message: consequential.has(own) ? `${message}${suffix(r, heads, own)}` : message });
+        add(own, { constraint: name, code: "check", message: consequential.has(own) ? `${message}${suffix(r, heads, own)}` : message, ...ownHint });
       }
     }
   }

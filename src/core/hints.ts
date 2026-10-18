@@ -41,6 +41,8 @@ export const DOCS = {
   linkFilters: "/guides/read-and-write/read-and-filter.md#filter-rows-by-a-link",
   vocabulary: "/guides/database-objects/relations.md#take-allowed-values-from-another-table",
   tree: "/guides/database-objects/relations.md#build-a-tree-of-rows-with-a-parent-link",
+  acyclic: "/guides/database-objects/relations.md#keep-dependencies-free-of-cycles-with-acyclic",
+  instructions: "/guides/database-objects/tables.md#tell-agents-how-to-fill-a-row-with-instructions",
   checkLinks: "/guides/data-quality/check-constraints.md#write-a-check-rule-that-follows-links",
   linkTargets: "/guides/database-objects/relations.md#limit-link-targets-with-ref_by-and-ref_where",
   inverse: "/guides/database-objects/relations.md#repair-two-way-links-with-align_relations",
@@ -333,7 +335,7 @@ export const VIOLATION_GUIDANCE: Readonly<Record<ViolationCode, Guidance>> = {
   unknown_column: guide("Write only the table's columns: describe_table lists them. To keep a new front matter key, add_column first.", "describeTable"),
   check: guide("The row breaks a CHECK constraint of the table (named in the message, with its rule): change the values so the rule holds. describe_table lists the table's constraints.", "check"),
   generated: guide("A generated column is computed by the engine: do not write it; recompute_columns sets it again.", "generated"),
-  cycle: guide("A row cannot be its own ancestor: point the hierarchy column to a row that is not below this one.", "tree"),
+  cycle: guide("A row cannot be its own ancestor in a hierarchy column, nor depend on itself through an acyclic column: the message shows the path. Point the column to a row that is not on that path.", "tree"),
   inverse: guide("Both sides of a two-way link must agree: write one side, or run align_relations to repair them.", "inverse"),
   unreadable: guide(
     "The note's front matter is not valid YAML (the message quotes the parser), so every read leaves the row out: open the note and fix the YAML, such as a quote or bracket left open or a line without `key: value`. read_note shows its text.",
@@ -346,10 +348,24 @@ export function violationGuidance(code: ViolationCode): Guidance {
   return VIOLATION_GUIDANCE[code];
 }
 
+/** The message of a cycle of an acyclic column (acyclic.ts), as a write or check_table words it. */
+export const ACYCLIC_CYCLE = /^(would close|is on) a cycle in "/;
+
+/** What to do about a cycle of an acyclic column (a hierarchy's cycle has `cycle`'s guidance). */
+export const ACYCLIC_GUIDANCE: Guidance = guide(
+  "A row cannot depend on itself through an acyclic column: the message shows the cycle. Remove one of its links, or link to a row that is not on it; check_table lists the cycles already there.",
+  "acyclic",
+);
+
+/** The guidance of one violation: its kind's, or for a cycle of an acyclic column the acyclic one. */
+export function guidanceOfViolation(v: { code: ViolationCode; message?: string }): Guidance {
+  return v.code === "cycle" && typeof v.message === "string" && ACYCLIC_CYCLE.test(v.message) ? ACYCLIC_GUIDANCE : violationGuidance(v.code);
+}
+
 interface RefusalLike {
   op: string;
   conflicts?: readonly { message: string }[];
-  violations?: readonly { violations: readonly { code: ViolationCode }[] }[];
+  violations?: readonly { violations: readonly { code: ViolationCode; message?: string; hint?: string }[] }[];
   failed?: readonly unknown[];
   rolled_back?: boolean;
 }
@@ -366,10 +382,19 @@ export function undoGuidance(r: { conflicts: readonly { message: string }[]; fai
  * order of appearance), the docs of the first; for conflicts, what they usually mean.
  */
 export function refusalGuidance(r: RefusalLike): Guidance {
-  const codes = [...new Set((r.violations ?? []).flatMap((rv) => rv.violations.map((v) => v.code)))];
-  if (codes.length > 0) {
-    const gs = codes.slice(0, 3).map(violationGuidance);
-    return { hint: `${[...new Set(gs.map((g) => g.hint))].join(" ")} Then call ${r.op} again (dry_run: true checks without writing).`, docs: gs[0]!.docs };
+  const all = (r.violations ?? []).flatMap((rv) => rv.violations);
+  // the kinds in order of appearance; a cycle of an acyclic column is a kind of its own
+  const kinds = new Map<string, Guidance>();
+  for (const v of all) {
+    const g = guidanceOfViolation(v);
+    const key = g === ACYCLIC_GUIDANCE ? "cycle:acyclic" : v.code;
+    if (!kinds.has(key)) kinds.set(key, g);
+  }
+  if (kinds.size > 0) {
+    const gs = [...kinds.values()].slice(0, 3);
+    // the table's own words first: the hints of the CHECKs broken (add_constraint `hint`), once each
+    const own = [...new Set(all.map((v) => v.hint).filter((h): h is string => typeof h === "string" && h.trim() !== ""))].slice(0, 3);
+    return { hint: `${[...own, ...new Set(gs.map((g) => g.hint))].join(" ")} Then call ${r.op} again (dry_run: true checks without writing).`, docs: gs[0]!.docs };
   }
   if ((r.failed?.length ?? 0) > 0) {
     if (r.rolled_back === true) return guide(`A file could not be written (another program may hold it): the engine put back what it had written, so nothing changed. Close that program, then call ${r.op} again.`, "failedWrite");

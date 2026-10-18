@@ -94,6 +94,11 @@ export interface ColumnSpec {
    */
   hierarchy?: boolean;
   /**
+   * Link column (or list of links) to its own table whose links never form a cycle (a task blocked
+   * by a task it blocks). The links of its inverse column count too, reversed (acyclic.ts).
+   */
+  acyclic?: boolean;
+  /**
    * Allowed values come from another table: the `name` of its rows (full `catalog.schema.table`).
    * For string columns and lists of strings, e.g. task `tags` from `personal.tasks.tag`.
    */
@@ -223,6 +228,8 @@ export interface Violation {
   index?: number;
   /** The CHECK's name (code `check`). */
   constraint?: string;
+  /** The CHECK's own hint (code `check`), when the constraint has one: how to fix the row. */
+  hint?: string;
   code: ViolationCode;
   message: string;
   value?: unknown;
