@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { operationRequest, ROUTE_PREFIX } from "../src/api/requests";
 import { INDEX_RETRY } from "../src/core/engine";
 import { toolDocs } from "../src/api/guidance";
-import { docsUrl } from "../src/core/hints";
+import { ACYCLIC_GUIDANCE, docsUrl } from "../src/core/hints";
 import { batchGuidance, createHandlers, dispatch, errorResponse, operationOf, BadRequest, Forbidden } from "../src/server/rest";
 import { EmbeddingError } from "../src/core/embeddings";
 import { createDbVault, logVault, type DbVault } from "./helpers/db-vault";
@@ -295,6 +295,43 @@ describe("rows, values and the schema", () => {
     expect((await e.fails("define_base", { name: "dated", columns: [{ name: "day", type: "date" }] })).hint).toBe(
       `Say what the tables of the base share in "description" and what each column holds in its own "description": {"name": "dated", "description": "<what tables with these columns share>", "columns": [{"name": "day", "type": "date", "description": "<what day holds>"}]}. Agents and people understand the schema through them.`,
     );
+  });
+});
+
+describe("cycles", () => {
+  const A = "Datanotes/main/public/task/A.md";
+
+  it("an acyclic cycle: its own hint and the acyclic docs", async () => {
+    const e = engine(createDbVault({}));
+    await e.ok("create_table", described({
+      name: "task",
+      columns: [
+        { name: "title", type: "string", required: true },
+        { name: "blocked_by", type: "list", items: "link", ref: "self", acyclic: true },
+      ],
+      filename: "{title}",
+    }));
+    await e.ok("insert_row", { table: "task", values: { title: "A" } });
+    await e.ok("insert_row", { table: "task", values: { title: "B", blocked_by: ["[[A]]"] } });
+    const r = await e.fails("update_row", { table: "task", path: A, set: { blocked_by: ["[[B]]"] } });
+    expect(r.hint).toBe(`${ACYCLIC_GUIDANCE.hint} Then call update_row again (dry_run: true checks without writing).`);
+    expect(r.docs).toBe(docsUrl("acyclic"));
+  });
+
+  it("a hierarchy cycle keeps the tree docs (regression)", async () => {
+    const e = engine(createDbVault({}));
+    await e.ok("create_table", described({
+      name: "task",
+      columns: [
+        { name: "title", type: "string", required: true },
+        { name: "parent", type: "link", ref: "self", hierarchy: true },
+      ],
+      filename: "{title}",
+    }));
+    await e.ok("insert_row", { table: "task", values: { title: "A" } });
+    await e.ok("insert_row", { table: "task", values: { title: "B", parent: "[[A]]" } });
+    const r = await e.fails("update_row", { table: "task", path: A, set: { parent: "[[B]]" } });
+    expect(r.docs).toBe(docsUrl("tree"));
   });
 });
 

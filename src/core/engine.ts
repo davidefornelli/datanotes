@@ -430,6 +430,7 @@ export function serializeColumn(c: ColumnSpec): Record<string, unknown> {
   if (c.generated !== undefined) out.generated = c.generated;
   if (c.identity !== undefined) out.identity = c.identity;
   if (c.hierarchy) out.hierarchy = true;
+  if (c.acyclic) out.acyclic = true;
   if (c.vocabulary !== undefined) out.vocabulary = c.vocabulary;
   if (c.inverse !== undefined) out.inverse = c.inverse;
   if (c.ref_where !== undefined) out.ref_where = c.ref_where;
@@ -523,6 +524,9 @@ export async function finish(
       const { linkedCheckViolations } = await import("./changeset-checks");
       violations = [...violations, ...(await linkedCheckViolations(app, settings, cs, mirrored))];
     }
+    // after the inverse-link edits: a cycle through an acyclic column is refused whichever side the write set
+    const { changeSetCycles } = await import("./acyclic");
+    violations = [...violations, ...(await changeSetCycles(app, settings, cs))];
   }
   const base = emptyResult(cs.op, dryRun);
   base.planned_edits = plannedFrom(cs);
@@ -904,7 +908,7 @@ export function addSchemaChange(
     const before = new Map(t.catalog.entry.columns.map((c) => [String(c.name), c]));
     const touched = entry.columns.filter((c) => {
       const prev = before.get(String(c.name));
-      return !prev || prev.ref !== c.ref || prev.hierarchy !== c.hierarchy || prev.type !== c.type || prev.items !== c.items || prev.vocabulary !== c.vocabulary || JSON.stringify(prev.ref_by) !== JSON.stringify(c.ref_by);
+      return !prev || prev.ref !== c.ref || prev.hierarchy !== c.hierarchy || prev.acyclic !== c.acyclic || prev.type !== c.type || prev.items !== c.items || prev.vocabulary !== c.vocabulary || JSON.stringify(prev.ref_by) !== JSON.stringify(c.ref_by);
     });
     checkColumnRefs(t.catalog.model, ref.full, touched, ref.full, entry.columns);
     def = tableDefinitionFromOrdered(ref, catalogTablePath(settings, ref.full), entryToOrdered(ref, entry, settings, t.catalog.model), settings);
@@ -953,6 +957,12 @@ export function checkColumnRefs(model: Metastore, owner: string | null, columns:
     if (!tables.has(ref) && ref !== owner) throw new OperationInputError(`${where}.${String(c.name)}: ref "${ref}" is not a table`, tableRefHint(ref, tables, "links"));
     if (c.hierarchy === true && ref !== owner) {
       throw new OperationInputError(`${where}.${String(c.name)}: a hierarchy column must point at its own table (ref: self)`);
+    }
+    if (c.acyclic === true && ref !== owner) {
+      throw new OperationInputError(
+        `${where}.${String(c.name)}: an acyclic column must point at its own table (ref: self)`,
+        guide(`Set ref: "self": acyclic keeps the links between rows of one table free of cycles, such as tasks blocked by tasks.`, "acyclic"),
+      );
     }
     if (typeof c.inverse === "string") checkInverse(model, owner, columns, c, ref, where);
   }
@@ -1110,6 +1120,8 @@ export interface CreateTableInput {
   columns: (Record<string, unknown> & { dense?: boolean })[];
   /** Markdown body of new rows (`row_template`). */
   rowTemplate?: string;
+  /** How to fill a row, for agents (Markdown); kept in metastore.yaml as `instructions`. */
+  instructions?: string;
   /** Key/value labels of the table (`{ domain: "health" }`), kept in `metastore.yaml`. */
   tags?: Record<string, string>;
 }
@@ -1120,6 +1132,9 @@ async function createTableImpl(
   input: CreateTableInput,
   opts: RunOptions = {},
 ): Promise<OpResult> {
+  if (input.instructions !== undefined && input.instructions !== null && typeof input.instructions !== "string") {
+    throw new OperationInputError(`"instructions" must be text: how to fill a row of the table`, guide(`Pass instructions as Markdown text, e.g. "1. Ask which film and when.", or leave them out.`, "instructions"));
+  }
   // A description passed as null is one to write: infer_table leaves them so.
   const proposal = input.description === null || input.columns.some((c) => c?.description === null);
   {
@@ -1204,6 +1219,7 @@ async function createTableImpl(
     tableDefinitionFromOrdered(ref, pseudo, cat, settings); // generated expressions and other cross-column rules
     const entry = withTableTags(orderedToEntry(cat, undefined, settings), tags);
     if (typeof input.rowTemplate === "string" && input.rowTemplate.trim() !== "") entry.row_template = input.rowTemplate; // body of new rows
+    if (typeof input.instructions === "string" && input.instructions.trim() !== "") entry.instructions = input.instructions;
     // the entry has options: a table needs a filename
     if (typeof linkTarget === "boolean") entry.options = { ...entry.options, autolink_target: linkTarget };
     if (typeof input.history === "boolean") entry.options = { ...entry.options, history: input.history };
@@ -1313,6 +1329,16 @@ async function addColumnImpl(
     violations.push(...uniqueViolations([spec], (await loadRows(app, settings, t)).map((r) => ({ path: r.file.path, ordered: r.ordered }))));
   }
   violations.push(...(await filteredLinkViolations(app, settings, t, [...t.def.columns, spec], spec)));
+  const { acyclicPairs, acyclicViolations } = await import("./acyclic");
+  const withNew = [...t.def.columns, spec];
+  if (acyclicPairs(withNew, t.catalog.ref.full).some((p) => p.column === spec.name || p.inverse === spec.name)) {
+    const rowsNow = (await loadRows(app, settings, t)).map((r) => {
+      const has = r.ordered.some(([k]) => k === spec.name);
+      const value = has ? fmGet(r.ordered, spec.name) : dense ? fill : undefined;
+      return { path: r.file.path, ordered: value === undefined ? r.ordered : fmSet(r.ordered, spec.name, value) };
+    });
+    violations.push(...acyclicViolations(withNew, t.catalog.ref.full, rowsNow, { involving: spec.name, wording: "check" }));
+  }
   return finish(app, settings, cs, [], violations, opts);
 }
 
@@ -1568,6 +1594,7 @@ async function alterColumnImpl(
     else merged[k] = v;
   }
   const spec = parseColumn(merged, idx, META_KEYS);
+  const checked: ColumnSpec = spec.ref === "self" ? { ...spec, ref: t.catalog.ref.full } : spec;
   const columns = t.def.columns.map((c, i) => (i === idx ? spec : c));
   const reserved = META_KEYS;
   let after = withColumns(t.ordered, columns);
@@ -1598,13 +1625,19 @@ async function alterColumnImpl(
         violations.push({ path: r.file.path, violations: [{ column: spec.name, code: "required", message: requiredMessage(spec) }] });
       }
     } else {
-      violations.push({ path: r.file.path, violations: validateValue(spec, v, validationContextFor(app, settings, r.file.path)) });
+      violations.push({ path: r.file.path, violations: validateValue(checked, v, validationContextFor(app, settings, r.file.path)) });
     }
     if (makeDense && !has) {
       cs.edits.push({ path: r.file.path, before: r.ordered, after: fmAdd(r.ordered, spec.name, fill ?? null) });
     }
   }
   violations.push(...(await filteredLinkViolations(app, settings, t, columns, spec)));
+  const { acyclicPairs, acyclicViolations } = await import("./acyclic");
+  if (acyclicPairs(columns, t.catalog.ref.full).some((p) => p.column === spec.name || p.inverse === spec.name)) {
+    const afterOf = new Map(cs.edits.map((e) => [e.path, e.after]));
+    const rowsNow = existing.map((r) => ({ path: r.file.path, ordered: afterOf.get(r.file.path) ?? r.ordered }));
+    violations.push(...acyclicViolations(columns, t.catalog.ref.full, rowsNow, { involving: spec.name, wording: "check" }));
+  }
   // the levels other tables' ref_by pick on this column must stay values of it
   const text = cs.texts.find((x) => x.path === t.file.path)!.after; // addSchemaChange wrote it
   const conflicts: OpConflict[] = levelTargetConflicts(parseMetastore(text), t.catalog.ref.full, spec.name).map((message) => ({ path: t.file.path, message }));

@@ -356,7 +356,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "describe_table",
-    "description": "Describe a table (`catalog.schema.table` or a shorter unambiguous name): `qualified`, `name`,\n`catalog`, `schema`, `description`, `aliases`, `layout` (`folder`, `row_folder`: the folder pattern\nof new rows, `archive`), `options` (`partition`, `filename`, `archive`, `exclude`), typed `columns`\nwith label/aliases/description and the dense flag, `untyped_fields`, `row_count`, and when set:\n`tags`, `bases` (the bases it inherits from, in order), `constraints` (its CHECKs, name → where), `row_template`, `history`,\n`autolink_target`, `fields` (their values).\n\nBefore adding a column (e.g. a new metric), read `columns` and match your concept against\n`name`, `label`, `aliases` and `description`; reuse an existing column when it means the same.\n\n`missing_descriptions` (`{table, columns}`), present only when something has no description (a table\ndefined before descriptions were required), names what lacks one: write them with alter_table\n`description` and alter_column `changes.description`, asking the user when the meaning is unclear.",
+    "description": "Describe a table (`catalog.schema.table` or a shorter unambiguous name): `qualified`, `name`,\n`catalog`, `schema`, `description`, `aliases`, `layout` (`folder`, `row_folder`: the folder pattern\nof new rows, `archive`), `options` (`partition`, `filename`, `archive`, `exclude`), typed `columns`\nwith label/aliases/description and the dense flag, `untyped_fields`, `row_count`, and when set:\n`tags`, `bases` (the bases it inherits from, in order), `constraints` (its CHECKs, name → where), `constraint_hints` (their own hints, name → hint), `instructions` (how to fill a row: follow them before you write one), `row_template`, `history`,\n`autolink_target`, `fields` (their values).\n\nBefore adding a column (e.g. a new metric), read `columns` and match your concept against\n`name`, `label`, `aliases` and `description`; reuse an existing column when it means the same.\n\n`missing_descriptions` (`{table, columns}`), present only when something has no description (a table\ndefined before descriptions were required), names what lacks one: write them with alter_table\n`description` and alter_column `changes.description`, asking the user when the meaning is unclear.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -479,6 +479,10 @@ export const OPERATIONS: OperationDef[] = [
               "inverse": {
                 "type": "string"
               },
+              "acyclic": {
+                "type": "boolean",
+                "description": "Link column to its own table whose links never form a cycle (a write that closes one is refused)."
+              },
               "ref_where": {
                 "type": "object",
                 "description": "Link column: the where filter every linked row must match.",
@@ -588,6 +592,17 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "Its CHECK constraints: name → the where every row must match."
         },
+        "constraint_hints": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The hint of each CHECK that has one: name → what to do when a row breaks it."
+        },
+        "instructions": {
+          "type": "string",
+          "description": "How to fill a row of the table (alter_table instructions): follow them before you write one."
+        },
         "row_template": {
           "type": "string",
           "description": "The text of every new row's note."
@@ -621,7 +636,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "create_table",
-    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `acyclic: true` (links to rows of its own table that never loop back, such as tasks blocked by tasks; with `inverse`, the rule holds on both sides), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `instructions`: how to fill a row, for agents (Markdown); describe_table returns them.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -782,6 +797,18 @@ export const OPERATIONS: OperationDef[] = [
           "default": null,
           "description": "Markdown body of new rows; {column} placeholders are filled from the row."
         },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How to fill a row, for agents (Markdown): which columns first, what to ask the user. describe_table returns them."
+        },
         "fields": {
           "anyOf": [
             {
@@ -918,6 +945,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -1328,6 +1359,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -1607,7 +1642,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "add_column",
-    "description": "Add a typed column. Sparse by default (written only on rows that have a value — use for\nmetrics, e.g. `{\"name\": \"metric_mood\", \"type\": \"integer\", \"min\": 1, \"max\": 5, \"label\":\n\"Mood\", \"aliases\": [\"mood\"], \"description\": \"Mood of the day, 1 = bad, 5 = great\"}`).\n`description` is required: what the column holds, for the agents and people who read the schema\n(the engine writes it for `identity` \"uuid\" / \"created\" columns).\n`dense: true` in the spec adds it to every row with its `default`. Call `describe_table` first: never add\na column whose meaning an existing column (name/label/aliases/description) already covers.\nColumn names are permanent identifiers; only `rename_column` changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Add a typed column. Sparse by default (written only on rows that have a value — use for\nmetrics, e.g. `{\"name\": \"metric_mood\", \"type\": \"integer\", \"min\": 1, \"max\": 5, \"label\":\n\"Mood\", \"aliases\": [\"mood\"], \"description\": \"Mood of the day, 1 = bad, 5 = great\"}`).\n`description` is required: what the column holds, for the agents and people who read the schema\n(the engine writes it for `identity` \"uuid\" / \"created\" columns).\n`dense: true` in the spec adds it to every row with its `default`. Call `describe_table` first: never add\na column whose meaning an existing column (name/label/aliases/description) already covers.\nColumn names are permanent identifiers; only `rename_column` changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\nAcyclic links: `acyclic: true` on a link (or list of links) to the table itself refuses every write that closes a cycle, on either side of an `inverse`; refused while existing rows form one (they are listed).\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1727,6 +1762,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -2130,6 +2169,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -2529,6 +2572,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -2808,7 +2855,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "alter_column",
-    "description": "Change a column's attributes (type, min/max/step, values, required, default, label,\naliases, description, note, `ref_where`, `ref_by` (see list_link_targets); `null` removes an attribute, except\n`description`, which changes but never goes (null or \"\" is refused); `dense` true/false). Refused with\nthe list of violating rows when existing values do not satisfy the new definition. A\ndifferent scale means a different column: add a new one instead of rescaling. To rename one\nenum value use `rename_value`. Dropping an enum value that a `ref_by` (of any table) allows as a\ntarget level is refused, naming it.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Change a column's attributes (type, min/max/step, values, required, default, label,\naliases, description, note, `ref_where`, `ref_by` (see list_link_targets), `acyclic` (refused while the rows already form a cycle: they are listed); `null` removes an attribute, except\n`description`, which changes but never goes (null or \"\" is refused); `dense` true/false). Refused with\nthe list of violating rows when existing values do not satisfy the new definition. A\ndifferent scale means a different column: add a new one instead of rescaling. To rename one\nenum value use `rename_value`. Dropping an enum value that a `ref_by` (of any table) allows as a\ntarget level is refused, naming it.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2932,6 +2979,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -3212,7 +3263,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "alter_table",
-    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, fields) rewrites the table entry alone: no row is moved or rewritten. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table is refused while a CHECK that follows\nlinks, or a `ref_where` / `ref_by`, of another table reads it through a link (link targets are not\nrewritten): the conflicts name them. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields) rewrites the table entry alone: no row is moved or rewritten. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table is refused while a CHECK that follows\nlinks, or a `ref_where` / `ref_by`, of another table reads it through a link (link targets are not\nrewritten): the conflicts name them. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3361,6 +3412,18 @@ export const OPERATIONS: OperationDef[] = [
           ],
           "default": null,
           "description": "Markdown body of new rows; \"\" removes it."
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How to fill a row, for agents (Markdown); \"\" removes them."
         },
         "tags": {
           "anyOf": [
@@ -3521,6 +3584,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -3978,6 +4045,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -4378,6 +4449,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -5441,6 +5516,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -5847,6 +5926,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -6126,7 +6209,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "insert_row",
-    "description": "Insert a row (new note). Values are validated against the columns; the note path comes from\nthe table's `path`/`filename` patterns (e.g. an event logged today about last night lands in\nlast night's day folder when you set `occurred_at` to last night). `body` is the note text.\nGenerated / identity columns are computed (do not pass them); CHECK constraints are enforced.\nReturns `migration_id` (undo) and the created path in `planned_creates`.\n`body` links the notes it mentions by name, at their first mention (automatic links; off with\n`autolink: false` or the database's `autolink` setting). `links_added` lists the links made;\n`ambiguous_mentions` lists the mentions left as text with the notes they may name: read those,\nthen link the right one with update_row and `autolink: false`, or leave the text.",
+    "description": "Insert a row (new note). When describe_table gives the table's `instructions`, fill the row as they say. Values are validated against the columns; the note path comes from\nthe table's `path`/`filename` patterns (e.g. an event logged today about last night lands in\nlast night's day folder when you set `occurred_at` to last night). `body` is the note text.\nGenerated / identity columns are computed (do not pass them); CHECK constraints are enforced.\nReturns `migration_id` (undo) and the created path in `planned_creates`.\n`body` links the notes it mentions by name, at their first mention (automatic links; off with\n`autolink: false` or the database's `autolink` setting). `links_added` lists the links made;\n`ambiguous_mentions` lists the mentions left as text with the notes they may name: read those,\nthen link the right one with update_row and `autolink: false`, or leave the text.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -6280,6 +6363,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -6718,6 +6805,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -7232,6 +7323,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -7662,6 +7757,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -8110,6 +8209,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -8570,6 +8673,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -9079,7 +9186,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "check_table",
-    "description": "Validate every row against the table (required, types, ranges, enums, links, unknown\ncolumns, CHECK constraints, those that follow links included, filtered link targets (ref_where / ref_by), stale generated/identity values, missing inverse links, front matter that cannot be read: code `unreadable`, with no column, for a note whose `table` line names the table but whose YAML is broken, which every other read leaves out). A CHECK violation has code `check` and the CHECK's name as `constraint` (every other code names its `column`), as in the `violations` of list_changes. Use it to find rows edited by hand that break the schema. Without `table`, every table is checked: each row then names its `table`, `tables_checked` counts the tables checked, and a table that cannot be checked is listed in `errors` ({table, error}) while the others are. The rows with violations are paged: `limit` (default 500, at most 5000) from `offset`; `total` counts them all. (Hand edits are also checked as they happen: see `violations` in list_changes.)",
+    "description": "Validate every row against the table (required, types, ranges, enums, links, unknown\ncolumns, CHECK constraints, those that follow links included, filtered link targets (ref_where / ref_by), stale generated/identity values, missing inverse links, cycles of hierarchy and acyclic columns, front matter that cannot be read: code `unreadable`, with no column, for a note whose `table` line names the table but whose YAML is broken, which every other read leaves out). A CHECK violation has code `check` and the CHECK's name as `constraint` (every other code names its `column`), as in the `violations` of list_changes. Use it to find rows edited by hand that break the schema. Without `table`, every table is checked: each row then names its `table`, `tables_checked` counts the tables checked, and a table that cannot be checked is listed in `errors` ({table, error}) while the others are. The rows with violations are paged: `limit` (default 500, at most 5000) from `offset`; `total` counts them all. (Hand edits are also checked as they happen: see `violations` in list_changes.)",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -9191,6 +9298,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -9645,6 +9756,10 @@ export const OPERATIONS: OperationDef[] = [
                                 "type": "string",
                                 "description": "The CHECK's name (code check)."
                               },
+                              "hint": {
+                                "type": "string",
+                                "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                              },
                               "code": {
                                 "type": "string",
                                 "enum": [
@@ -10087,6 +10202,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -11170,6 +11289,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -12608,6 +12731,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -13017,6 +13144,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -13484,7 +13615,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "add_constraint",
-    "description": "ALTER TABLE ADD CONSTRAINT `name` CHECK: `check` is a where filter every row must match,\ne.g. `{\"value\": {\"gte\": 1, \"lte\": 5}}`. A condition on a column the row leaves empty passes, like SQL;\ninside `or` / `and` / `not` an empty value is tested as it is (`{\"exists\": true}` there fails).\nA key may follow a link column to the row it names, as in queries: `{\"parent.kind\": \"project\"}`\n(further dots follow further links). An empty link passes at the top level and fails inside `or` / `and` /\n`not`; only the first link of a longer path is skipped when empty (`parent.parent.kind` fails for a row\nwhose parent has no parent). A link to a row that does not exist fails; on a list of links every linked\nrow must match. `not` turns that into a pass: `{\"not\": {\"parent.kind\": \"area\"}}` passes a link to a\nmissing row, so add `\"parent.kind\": {\"exists\": true}` to require a real one. Links resolve as in the\nvault (by path, from the row's note: same-named rows in two folders stay apart); renaming or moving a\nlinked row keeps them (they follow it).\nRefused while existing rows violate it (they are listed); then enforced on every write, by the same rule.\nA write that changes a linked row re-checks the rows that link to it and is refused, listing them, when\nit breaks them, naming the changed row (in a batch, re-link them first: each step is checked on the vault\nthe earlier ones left); the inverse links a write adds, undo_migration and restore_table are checked too.\nrename_column / rename_value follow into CHECKs; drop_column of a column a CHECK reads is refused.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "ALTER TABLE ADD CONSTRAINT `name` CHECK: `check` is a where filter every row must match,\ne.g. `{\"value\": {\"gte\": 1, \"lte\": 5}}`. A condition on a column the row leaves empty passes, like SQL;\ninside `or` / `and` / `not` an empty value is tested as it is (`{\"exists\": true}` there fails).\nA key may follow a link column to the row it names, as in queries: `{\"parent.kind\": \"project\"}`\n(further dots follow further links). An empty link passes at the top level and fails inside `or` / `and` /\n`not`; only the first link of a longer path is skipped when empty (`parent.parent.kind` fails for a row\nwhose parent has no parent). A link to a row that does not exist fails; on a list of links every linked\nrow must match. `not` turns that into a pass: `{\"not\": {\"parent.kind\": \"area\"}}` passes a link to a\nmissing row, so add `\"parent.kind\": {\"exists\": true}` to require a real one. Links resolve as in the\nvault (by path, from the row's note: same-named rows in two folders stay apart); renaming or moving a\nlinked row keeps them (they follow it).\nRefused while existing rows violate it (they are listed); then enforced on every write, by the same rule.\nA write that changes a linked row re-checks the rows that link to it and is refused, listing them, when\nit breaks them, naming the changed row (in a batch, re-link them first: each step is checked on the vault\nthe earlier ones left); the inverse links a write adds, undo_migration and restore_table are checked too.\nrename_column / rename_value follow into CHECKs; drop_column of a column a CHECK reads is refused.\n`hint`: what to do when a row breaks the rule, in your words; a refused write puts it first in its hint, and each violation of the CHECK carries it.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -13497,6 +13628,18 @@ export const OPERATIONS: OperationDef[] = [
         "check": {
           "additionalProperties": true,
           "type": "object"
+        },
+        "hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What a refused write tells the agent when a row breaks this CHECK: how to fix the row. It comes first in the refusal's hint; describe_table lists it in constraint_hints."
         },
         "dry_run": {
           "default": false,
@@ -13607,6 +13750,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -14005,6 +14152,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -14471,6 +14622,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -14864,6 +15019,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",
@@ -15290,6 +15449,10 @@ export const OPERATIONS: OperationDef[] = [
                       "type": "string",
                       "description": "The CHECK's name (code check)."
                     },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
                     "code": {
                       "type": "string",
                       "enum": [
@@ -15701,6 +15864,10 @@ export const OPERATIONS: OperationDef[] = [
                     "constraint": {
                       "type": "string",
                       "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
                     },
                     "code": {
                       "type": "string",

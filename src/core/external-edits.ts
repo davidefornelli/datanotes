@@ -21,6 +21,7 @@ import { compileCheck, LOGICAL_KEYS, type Where } from "./where";
 import { CheckLinks, followsLinks } from "./check-links";
 import { byName, filteredLinkColumns, linkTargetCheck } from "./link-targets";
 import { checkOne, constraintViolations, hierarchyViolations } from "./row-checks";
+import { acyclicViolations } from "./acyclic";
 import { messageOf } from "./message";
 
 /** Codes the checks of hand edits report: the engine fills generated values and inverse links by itself, so those are left out. */
@@ -139,7 +140,7 @@ async function ownViolations(app: App, settings: DatanotesSettings, t: LoadedTab
   const targetChecks: ((row: LoadedRow) => Violation[])[] = [];
   for (const c of filteredLinkColumns(t)) targetChecks.push(await linkTargetCheck(t, settings, links, c));
   const computed = computedColumnNames(t);
-  const whole = t.def.columns.some((c) => (c.unique && !computed.has(c.name)) || c.hierarchy);
+  const whole = t.def.columns.some((c) => (c.unique && !computed.has(c.name)) || c.hierarchy || c.acyclic === true);
   if (whole) await links.prepare(t, null);
   const all = whole ? links.rowsOf(t) : [];
   const own = new Set(rows.map((r) => r.file.path));
@@ -149,6 +150,7 @@ async function ownViolations(app: App, settings: DatanotesSettings, t: LoadedTab
       .map((u) => [u.path, u.violations]),
   );
   const cycles = whole ? await hierarchyViolations(app, settings, t, rows.map((r) => ({ path: r.file.path, ordered: r.ordered })), all) : [];
+  const loops = whole ? acyclicViolations(t.def.columns, t.catalog.ref.full, all.map((r) => ({ path: r.file.path, ordered: r.ordered })), { only: own, wording: "check" }) : [];
   const out = new Map<string, Violation[]>();
   for (const r of rows) {
     const path = r.file.path;
@@ -158,6 +160,7 @@ async function ownViolations(app: App, settings: DatanotesSettings, t: LoadedTab
       ...constraintViolations(t, settings, path, r.ordered, links),
       ...targetChecks.flatMap((check) => check(r)),
       ...cycles.filter((c) => c.path === path).flatMap((c) => c.violations),
+      ...loops.filter((c) => c.path === path).flatMap((c) => c.violations),
     ];
     out.set(path, v.filter((x) => x.code === "check" || !computed.has(x.column!)));
   }

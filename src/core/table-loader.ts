@@ -26,6 +26,7 @@ import {
 import type { OrderedFrontmatter } from "./types";
 import { isEmptyValue, validateValue } from "./validate";
 import { messageOf } from "./message";
+import { guide, type Guidance } from "./hints";
 import { inDatabase, normalizeDatabaseFolder } from "./db-paths";
 
 export class MalformedColumnError extends Error {
@@ -33,8 +34,10 @@ export class MalformedColumnError extends Error {
   constructor(
     readonly index: number,
     message: string,
+    guidance?: Guidance,
   ) {
     super(`columns[${index}]: ${message}`);
+    if (guidance) Object.assign(this, guidance);
   }
 }
 
@@ -68,6 +71,7 @@ export const COLUMN_ATTRS: ReadonlySet<string> = new Set([
   "generated",
   "identity",
   "hierarchy",
+  "acyclic",
   "vocabulary",
   "inverse",
   "ref_where",
@@ -326,6 +330,24 @@ export function parseColumn(
     }
     if (effective !== "link" || !ref) throw new MalformedColumnError(index, `"inverse" needs a link column (or list of links) with "ref"`);
     spec.inverse = entry.inverse.trim();
+  }
+  if (entry.acyclic !== undefined && entry.acyclic !== null) {
+    if (typeof entry.acyclic !== "boolean") throw new MalformedColumnError(index, `"acyclic" must be true or false`, guide("Set acyclic: true to refuse writes that close a cycle, or leave it out.", "acyclic"));
+    if (entry.acyclic && (effective !== "link" || !ref)) {
+      throw new MalformedColumnError(
+        index,
+        `"acyclic" needs a link column (or list of links) with "ref" to its own table`,
+        guide('Use acyclic on a link column with ref: "self", such as tasks blocked by tasks.', "acyclic"),
+      );
+    }
+    if (entry.acyclic && spec.inverse === name) {
+      throw new MalformedColumnError(
+        index,
+        `"acyclic" cannot be set on a column that is its own inverse: every link would close a cycle`,
+        guide("Name another column of the table as the inverse, such as blocks for blocked_by, or drop acyclic.", "acyclic"),
+      );
+    }
+    if (entry.acyclic) spec.acyclic = true;
   }
   if (entry.vocabulary !== undefined && entry.vocabulary !== null) {
     if (typeof entry.vocabulary !== "string" || entry.vocabulary.trim() === "") {

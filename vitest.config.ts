@@ -33,6 +33,7 @@ const FULL = [
   "src/api/results.ts",
   "src/api/tokens.ts",
   "src/core/actor.ts",
+  "src/core/acyclic.ts",
   "src/core/auto-recompute.ts",
   "src/core/autolink.ts",
   "src/core/batch.ts",

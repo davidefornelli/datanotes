@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import * as api from "../src/api/guidance";
 import { OPERATIONS } from "../src/api/catalog";
 import {
+  ACYCLIC_GUIDANCE,
   closestNames,
   CONFLICTS,
   didYouMean,
@@ -17,6 +18,7 @@ import {
   docsUrl,
   editDistance,
   guidanceOf,
+  guidanceOfViolation,
   guide,
   GuidedError,
   nameList,
@@ -198,6 +200,32 @@ describe("refusals", () => {
     expect(g.docs).toBe(docsUrl("enumValues"));
     // min and max give the same hint: it is there once; "check" (the fourth kind) is left out
     expect(g.hint).toBe(`${violationGuidance("enum").hint} ${violationGuidance("min").hint} Then call insert_row again (dry_run: true checks without writing).`);
+  });
+
+  it("own CHECK hints come first, once each, at most three", () => {
+    const rv = (...vs: { code: ViolationCode; hint?: string }[]) => ({ path: "x.md", violations: vs });
+    const g = refusalGuidance({
+      op: "insert_row",
+      violations: [rv({ code: "check", hint: "A" }, { code: "check", hint: "A" }, { code: "enum" }), rv({ code: "check", hint: "B" })],
+    });
+    expect(g.hint).toBe(`A B ${violationGuidance("check").hint} ${violationGuidance("enum").hint} Then call insert_row again (dry_run: true checks without writing).`);
+    expect(g.docs).toBe(docsUrl("check"));
+    const many = refusalGuidance({ op: "insert_row", violations: [rv({ code: "check", hint: "A" }, { code: "check", hint: "B" }, { code: "check", hint: "C" }, { code: "check", hint: "D" })] });
+    expect(many.hint.startsWith(`A B C ${violationGuidance("check").hint}`)).toBe(true);
+    expect(many.hint).not.toContain("D");
+  });
+
+  it("a cycle of an acyclic column has its own guidance, a hierarchy cycle the tree's", () => {
+    expect(guidanceOfViolation({ code: "cycle", message: 'would close a cycle in "x" (A → A)' })).toBe(ACYCLIC_GUIDANCE);
+    expect(guidanceOfViolation({ code: "cycle", message: 'is on a cycle in "x" (A → B → A)' })).toBe(ACYCLIC_GUIDANCE);
+    expect(guidanceOfViolation({ code: "cycle", message: 'would make "A" its own ancestor (A → A)' })).toBe(violationGuidance("cycle"));
+    expect(guidanceOfViolation({ code: "cycle" })).toBe(violationGuidance("cycle"));
+    expect(guidanceOfViolation({ code: "enum", message: 'would close a cycle in "x"' })).toBe(violationGuidance("enum"));
+    expect(ACYCLIC_GUIDANCE.docs).toBe(docsUrl("acyclic"));
+    const rv = (message: string) => ({ path: "x.md", violations: [{ code: "cycle" as const, message }] });
+    const g = refusalGuidance({ op: "update_row", violations: [rv('would make "A" its own ancestor (A → A)'), rv('would close a cycle in "x" (A → A)')] });
+    expect(g.docs).toBe(docsUrl("tree"));
+    expect(g.hint).toBe(`${violationGuidance("cycle").hint} ${ACYCLIC_GUIDANCE.hint} Then call update_row again (dry_run: true checks without writing).`);
   });
 
   it("a conflict says what it usually means; a failed write how to revert it", () => {

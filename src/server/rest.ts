@@ -380,6 +380,7 @@ export function createHandlers(
       if (target !== undefined) options.autolink_target = target;
       const history = optBool(b, "history");
       const template = text(b, "row_template");
+      const instructions = text(b, "instructions");
       return opResponse(
         await createTable(
           app,
@@ -396,6 +397,7 @@ export function createHandlers(
             ...(obj(b, "fields") ? { fields: obj(b, "fields")! } : {}),
             columns: list(b, "columns") as never,
             ...(template !== undefined ? { rowTemplate: template } : {}),
+            ...(instructions !== undefined ? { instructions } : {}),
             ...(obj(b, "tags") ? { tags: obj(b, "tags") as Record<string, string> } : {}),
           },
           runOpts(b),
@@ -413,6 +415,7 @@ export function createHandlers(
       const target = b.autolink_target;
       const description = text(b, "description");
       const template = text(b, "row_template");
+      const instructions = text(b, "instructions");
       const archive = text(b, "archive");
       const partition = text(b, "partition");
       return opResponse(
@@ -433,6 +436,8 @@ export function createHandlers(
             ...(target === "default" ? { autolinkTarget: null } : typeof target === "boolean" ? { autolinkTarget: target } : {}),
             // "" removes the template
             ...(template !== undefined ? { rowTemplate: template === "" ? null : template } : {}),
+            // "" removes the instructions
+            ...(instructions !== undefined ? { instructions: instructions === "" ? null : instructions } : {}),
             ...(obj(b, "tags") ? { tags: obj(b, "tags") as Record<string, string | null> } : {}),
             ...(optBool(b, "clear_tags") === true ? { clearTags: true } : {}),
             ...(archive !== undefined ? { archive } : {}),
@@ -483,7 +488,7 @@ export function createHandlers(
       );
     },
     set_table_bases: async (b) => opResponse(await setTableBases(app, s(), { table: str(b, "table")!, bases: strings(b, "bases")! }, runOpts(b))),
-    add_constraint: async (b) => opResponse(await addConstraint(app, s(), { table: str(b, "table")!, name: str(b, "name")!, check: obj(b, "check")! }, runOpts(b))),
+    add_constraint: async (b) => opResponse(await addConstraint(app, s(), { table: str(b, "table")!, name: str(b, "name")!, check: obj(b, "check")!, ...(text(b, "hint") !== undefined ? { hint: text(b, "hint")! } : {}) }, runOpts(b))),
     drop_constraint: async (b) => opResponse(await dropConstraint(app, s(), { table: str(b, "table")!, name: str(b, "name")! }, runOpts(b))),
     create_view: async (b) =>
       opResponse(

@@ -187,6 +187,28 @@ const chapter: Chapter = {
       ],
     },
     {
+      title: "Keep dependencies free of cycles with `acyclic`",
+      say: [
+        "`acyclic: true` keeps the links of a column free of cycles. It works on a link, or a list of links, to the same table (`ref: self`). Here `watch_after` lists the films to watch first, and `watch_before` is its inverse.",
+        "",
+        "The engine refuses a write that closes a cycle:",
+        "",
+        "- **Through the column**: a film can’t wait for a film that already waits for it",
+        "- **Through the inverse**: `watch_before` adds the matching `watch_after` link, and the engine checks that link too",
+        "- **On existing rows**: `alter_column` refuses `acyclic: true` while rows already form a cycle, and lists them",
+        "",
+        "`hierarchy` refuses cycles too, but takes one parent per row. `acyclic` takes any number of links.",
+      ].join("\n"),
+      steps: [
+        { op: "add_column", args: { table: "film", column: { name: "watch_after", type: "list", items: "link", ref: "self", acyclic: true, description: "Films to watch before this one" } } },
+        { op: "add_column", args: { table: "film", column: { name: "watch_before", type: "list", items: "link", ref: "self", inverse: "watch_after", description: "Films to watch after this one" } }, quiet: true },
+        { op: "update_row", args: { table: "film", path: `${FILM}/Night of the Living Dead.md`, set: { watch_after: ["[[Charade]]"] } }, quiet: true },
+        { op: "update_row", args: { table: "film", path: `${FILM}/Charade.md`, set: { watch_after: ["[[His Girl Friday]]"] } }, quiet: true },
+        { say: "His Girl Friday can’t wait for Night of the Living Dead, which waits for it through Charade:", op: "update_row", args: { table: "film", path: `${FILM}/His Girl Friday.md`, set: { watch_after: ["[[Night of the Living Dead]]"] } }, refused: true },
+        { say: "Setting the inverse closes the same cycle, so the engine refuses it too:", op: "update_row", args: { table: "film", path: `${FILM}/Night of the Living Dead.md`, set: { watch_before: ["[[His Girl Friday]]"] } }, refused: true },
+      ],
+    },
+    {
       title: "Write a CHECK rule that follows links",
       say: [
         "A CHECK constraint is a rule every row must satisfy, and you add one with `add_constraint`. It can follow a link the way a query does: `parent.kind` is the `kind` of the row that `parent` names. Here a genre’s parent must be an era, an era’s parent must be Cinema, and Cinema has no parent.",
@@ -372,7 +394,7 @@ const chapter: Chapter = {
         "",
         "- **Link columns**: each with its `ref`, and `self` kept as written",
         "- **`inverse`**: on one side only",
-        "- **`vocabulary`, `hierarchy` and `ref_where`**: as declared",
+        "- **`vocabulary`, `hierarchy`, `acyclic` and `ref_where`**: as declared",
         "- **`ref_by`**: with the `levels` shortcut kept as written",
         "- **Generated link**: the `on_day` column with its template",
       ].join("\n"),

@@ -5,6 +5,30 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.2.0
+
+Datanotes 3.2.0 keeps the links between rows of one table free of cycles. It also lets a table tell agents how to fill its rows. It only adds to 3.1: no operation, argument or setting goes away.
+
+### Links without cycles
+
+A link column, or a list of links, to its own table takes `acyclic: true`. The engine then refuses a write that makes a row depend on itself through that column. An example is a task blocked by a task it blocks. [Keep dependencies free of cycles with `acyclic`](/guides/database-objects/relations/#keep-dependencies-free-of-cycles-with-acyclic) shows it.
+
+- **Both sides**: with `inverse`, a write to either column is checked. The links the engine adds on the other side count too.
+- **Existing rows**: `add_column` and `alter_column` refuse `acyclic: true` while rows already form a cycle, and list them.
+- **Hand edits**: `check_table` and the change feed report a cycle made outside the engine.
+- **The refusal**: it shows the cycle, such as `would close a cycle in "blocked_by" (A → B → A)`. It has its own hint and docs.
+- **`system.information_schema.columns`**: a new column, `is_acyclic`.
+
+### Tell agents how to fill a table
+
+- **`instructions`**: `create_table` and `alter_table` take Markdown text that says how to fill a row. It can list which columns come first and what to ask the user. `describe_table` returns it, and `instructions: ""` removes it. [Tell agents how to fill a row with `instructions`](/guides/database-objects/tables/#tell-agents-how-to-fill-a-row-with-instructions) shows it.
+- **A hint for each CHECK**: `add_constraint` takes `hint`, what to do when a row breaks the rule. A refused write puts it first in its `hint`, and each violation of that CHECK carries it as `hint`. `describe_table` lists the hints in `constraint_hints`, next to `constraints`.
+- **`system.information_schema`**: `tables` has a new column, `instructions`, and `check_constraints` a new column, `hint`.
+
+### Fixes
+
+- `alter_column` with `ref: "self"` no longer refuses the links a column already holds.
+
 ## 3.1.0
 
 Datanotes 3.1.0 makes the engine fast at scale and adds OpenTelemetry traces. It only adds to 3.0: no operation, argument or setting goes away. One default changes: the transaction log now writes segments. Read [Before you downgrade to 3.0](#before-you-downgrade-to-30) if you may go back.
