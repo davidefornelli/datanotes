@@ -12,6 +12,7 @@ import { docsUrl } from "../src/core/hints";
 import { describeTable } from "../src/core/public-api";
 import { select } from "../src/core/rows";
 import { createHandlers, dispatch } from "../src/server/rest";
+import { constraintHints, tableInstructions } from "../src/core/metastore";
 import { createDbVault, METASTORE, type DbVault } from "./helpers/db-vault";
 import { described } from "./helpers/descriptions";
 
@@ -123,5 +124,23 @@ describe("table instructions", () => {
     await expect(createTable(v.app, v.settings, described({ ...FILM, name: "bad", instructions: 5 as never }) as never)).rejects.toMatchObject(hint);
     await expect(createTable(v.app, v.settings, described({ ...FILM, name: "bad", instructions: 5 as never }) as never)).rejects.toThrow(/"instructions" must be text/);
     await expect(alterTable(v.app, v.settings, { table: "film", instructions: 5 as never })).rejects.toMatchObject(hint);
+  });
+});
+
+describe("constraintHints and tableInstructions read the entry defensively", () => {
+  it("keeps only text hints of CHECKs the table has, trimmed", () => {
+    const constraints = { a: { x: 1 }, b: { x: 2 }, c: { x: 3 } };
+    expect(constraintHints({ constraints, constraint_hints: { a: "  fix a  ", b: "   ", c: 42 as unknown as string, gone: "no CHECK" } })).toEqual({ a: "fix a" });
+  });
+  it("answers no hints without hints, with hints that are not a map, or without CHECKs", () => {
+    expect(constraintHints({})).toEqual({});
+    expect(constraintHints({ constraint_hints: "text" as unknown as Record<string, string> })).toEqual({});
+    expect(constraintHints({ constraint_hints: { a: "fix a" } })).toEqual({});
+  });
+  it("answers the instructions only when they hold text", () => {
+    expect(tableInstructions({ instructions: "Fill the date first." })).toBe("Fill the date first.");
+    expect(tableInstructions({ instructions: "   " })).toBeUndefined();
+    expect(tableInstructions({ instructions: 3 as unknown as string })).toBeUndefined();
+    expect(tableInstructions({})).toBeUndefined();
   });
 });
