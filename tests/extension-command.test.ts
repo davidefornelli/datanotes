@@ -11,6 +11,7 @@ import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DatanotesClient, DatanotesError } from "../src/api/client";
 import { codeDir, extensionsHome, fileSha256, readTokenFile, tokenPath } from "../src/api/extension-files";
+import { entryUrl } from "../src/api/extension-host";
 import type { InstalledExtension } from "../src/api/extension-record";
 import { extensionMain, type ExtensionIo } from "../src/node/extension-command";
 import { runGit } from "../src/node/git-sync";
@@ -342,6 +343,17 @@ describe("check", () => {
     edit(dir);
     return dir;
   };
+
+  // A Windows 8.3 short path (C:\Users\RUNNER~1\..., the TEMP of CI runners) has a `~`: pathToFileURL
+  // writes it as %7E, which vite's loader (under vitest) does not decode, so the entry did not load.
+  it("loads an entry from a folder whose path has a ~ (a Windows 8.3 short name)", async () => {
+    const dir = copy("short~1", () => {});
+    expect(entryUrl(path.join(dir, "lib", "extension.mjs"))).not.toContain("%7E");
+    const ok = await cli(["check", dir]);
+    expect(ok.io.err).toBe("");
+    expect(ok.code).toBe(0);
+    expect(ok.io.out).toBe("ok: books 0.1.0: 2 tools, 2 tables (1 own), 1 views, 1 bases\n");
+  });
 
   it("checks an extension's folder: its manifest, its entry and its docs", async () => {
     const ok = await cli(["check", BOOKS_V1]);

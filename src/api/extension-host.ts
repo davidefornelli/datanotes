@@ -106,6 +106,15 @@ export function sourceLabel(r: InstalledExtension): string {
   return r.source.kind === "git" ? `${r.source.url ?? ""}${r.source.ref ? `#${r.source.ref}` : ""}` : (r.source.path ?? "");
 }
 
+/**
+ * The file URL to import an extension's entry from. `pathToFileURL` writes `~` as `%7E`; Node decodes it,
+ * but other loaders (vite, under vitest) do not, and a Windows 8.3 short path (`C:\Users\RUNNER~1\...`)
+ * then fails to load. `~` is unreserved in a URL, so the literal form names the same file.
+ */
+export function entryUrl(file: string): string {
+  return pathToFileURL(file).href.split("%7E").join("~");
+}
+
 /** The problems of an entry file's default export against the manifest (empty: it fits). */
 export function validateModule(mod: unknown, manifest: ExtensionManifest): string[] {
   if (typeof mod !== "object" || mod === null) return ["the default export is not an object"];
@@ -285,7 +294,7 @@ export async function loadExtensions(o: LoadOptions): Promise<ExtensionLoad> {
     }
     let mod: unknown;
     try {
-      mod = ((await import(/* @vite-ignore */ pathToFileURL(entryFile).href)) as { default?: unknown }).default;
+      mod = ((await import(/* @vite-ignore */ entryUrl(entryFile))) as { default?: unknown }).default;
     } catch (e) {
       skip("entry", `the code of ${r.name} did not load: ${e instanceof Error ? e.message : String(e)}`);
       continue;

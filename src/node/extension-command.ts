@@ -25,12 +25,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { pathToFileURL } from "node:url";
 import { folderArg, readOptions, type Options, type OptionSpec } from "../api/cli-options";
 import { DatanotesClient, DatanotesError, type Transport } from "../api/client";
 import { OPERATIONS } from "../api/catalog";
 import { codeDir, extensionsHome, readTokenFile, removeTokenFile, tokenPath, writeTokenFile } from "../api/extension-files";
-import { sourceLabel, validateModule } from "../api/extension-host";
+import { entryUrl, sourceLabel, validateModule } from "../api/extension-host";
 import { EXT_DOCS, ExtensionError, IDENT, MANIFEST_FILE, type ExtensionManifest } from "../api/extension-manifest";
 import { chooseTables, planChanges, renderPlan, type DescribedTable, type ExtensionPlan, type InstallChoices, type PlanInput, type TablesListing } from "../api/extension-plan";
 import { DATABASE_ID, RECORD_COMMIT, RECORD_NAME, type ExtensionList, type InstalledExtension } from "../api/extension-record";
@@ -669,7 +668,7 @@ async function check(folder: string, d: Deps, json: boolean): Promise<number> {
   const m = c.manifest;
   let mod: unknown;
   try {
-    mod = ((await import(/* @vite-ignore */ pathToFileURL(path.join(dir, ...m.entry.split("/"))).href)) as { default?: unknown }).default;
+    mod = ((await import(/* @vite-ignore */ entryUrl(path.join(dir, ...m.entry.split("/"))))) as { default?: unknown }).default;
   } catch (e) {
     throw new ExtensionError(`the entry did not load: ${messageOf(e)}`, "Run the entry with node to see the error, then build it again.", EXT_DOCS.layout);
   }
