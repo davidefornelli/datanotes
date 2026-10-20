@@ -56,14 +56,17 @@ jobs:
       - run: npm ci
       - run: npm run test:coverage
 
-  # The tests on the headless Node host, the code users run, on Linux, Windows and macOS with every
-  # Node version supported: file watching, renames, locked files, case sensitivity, long paths and
-  # line endings differ between them. On Linux with Node 22 only the files the host changes run
-  # (VAULT_HOST_TESTS_ONLY, vitest.node.config.ts): the others do the same on either host and
-  # already ran in `coverage`. Windows needs Node 24.16.0 or later, or 26.1.0 or later: earlier
-  # versions abort at random (0xC0000409) on TCP connects to 127.0.0.1, which the tests make all the
-  # time (libuv bug). So Windows skips Node 22, and `check-latest` keeps an older Node of the runner
-  # image from being used.
+  # The tests on the headless Node host, the code users run, on Linux, Windows and macOS: file
+  # watching, renames, locked files, case sensitivity, long paths and line endings differ between
+  # them. Every Node version supported runs on Linux, the fastest runner: what changes between Node
+  # versions shows there. Windows and macOS run once, with Node 24 (LTS): their runners are slow and
+  # few (macOS jobs wait in a queue), and a second Node version on them rarely finds anything Linux
+  # does not. macOS runs again, with Node 22, before each release (release.yml, job test-macos).
+  # On Linux with Node 22 only the files the host changes run (VAULT_HOST_TESTS_ONLY,
+  # vitest.node.config.ts): the others do the same on either host and already ran in `coverage`.
+  # Windows needs Node 24.16.0 or later, or 26.1.0 or later: earlier versions abort at random
+  # (0xC0000409) on TCP connects to 127.0.0.1, which the tests make all the time (libuv bug).
+  # `check-latest` keeps an older Node of the runner image from being used.
   # On Linux with Node 22, the test files a push to a pull request adds or changes then run twice
   # more, on both hosts, so three runs in all: a test that passes only sometimes is caught before it
   # is merged. Only the files of this push (since the previous one), not of the whole branch, so a
@@ -74,11 +77,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [22, 24, 26]
-        exclude:
-          - os: windows-latest
-            node: 22
+        include:
+          - { os: ubuntu-latest, node: 22 }
+          - { os: ubuntu-latest, node: 24 }
+          - { os: ubuntu-latest, node: 26 }
+          - { os: windows-latest, node: 24 }
+          - { os: macos-latest, node: 24 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 45 }}
     steps:

@@ -157,7 +157,7 @@ describe("datanotes mcp with an installed extension", { timeout: 60_000 }, () =>
     expect(text(nope).endsWith('Docs: read_docs("extensions/books/tools#finish_book")')).toBe(true);
     const done = await client.callTool({ name: "finish_book", arguments: { title: "Dune" } });
     expect(done.isError, text(done)).toBeFalsy();
-    const events = await changes((es) => es.some((e) => e.kind === "tool_call" && e.call?.tool === "finish_book" && e.call.served_by === "ext-books"), since);
+    const events = await changes((es) => es.some((e) => e.kind === "tool_call" && e.call?.tool === "finish_book" && e.call.served_by === "ext-books") && es.some((e) => e.op === "update_row" && e.table === "work.books.book"), since);
     expect(events.find((e) => e.kind === "tool_call" && e.call?.tool === "finish_book")?.call?.served_by).toBe("ext-books");
     const update = events.find((e) => e.op === "update_row" && e.table === "work.books.book");
     expect(update?.actor).toMatchObject({ auth: "ext-books", harness: "reading-agent via owner", tool: "finish_book" });

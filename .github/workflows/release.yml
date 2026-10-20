@@ -4,8 +4,8 @@
 # failed, and two releases go out in order.
 #
 # Before publishing, the tests run on macOS (the headless Node host: file events, case-insensitive
-# paths), once per release: pull requests test only Linux and Windows (ci.yml). The package ships
-# the docs of its version as Markdown (dist/docs), so the docs are built, and the tests that read
+# paths) with Node 22, once per release: pull requests test macOS with Node 24 only (ci.yml).
+# The package ships the docs of its version as Markdown (dist/docs), so the docs are built, and the tests that read
 # them run, before it is published. A failure blocks the release, and the next run tries again.
 #
 # The tested package is packed once (job package) and published by job publish, which runs in the
