@@ -5,6 +5,33 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.3.0
+
+Datanotes 3.3.0 installs extensions: tables, views, bases and MCP tools from a git repository, pinned to a version. It only adds to 3.2: no operation, argument or setting goes away.
+
+### Extensions
+
+An extension is one git repository with a manifest, `datanotes-extension.json`. The manifest declares tables, CHECKs with hints, table instructions, views, bases, tools and the permissions the tools need. [Install extensions](/administration/extensions/) and [Write an extension](/develop/write-an-extension/) cover both sides.
+
+- **`datanotes extension install`**: fetches a version tag or a commit, prints a plan and asks you to confirm. Branches are refused. A plan lists the tables it creates, adopts or matches, the tools and the token. `--map`, `--create`, `--add`, `--catalog` and `--schema` carry your choices. `--dry-run` writes nothing.
+- **One batch**: the installer writes everything in one batch, so one `undo_migration` undoes it.
+- **Five more commands**:
+  - `update` moves an extension to a newer version.
+  - `rollback` undoes the last install or update.
+  - `remove` removes an extension and keeps its tables.
+  - `list` shows what is installed.
+  - `check` checks an extension's repository, for its authors.
+- **A token for each extension**: `ext-<name>` writes only the extension's tables and never changes the schema. The journal records it as `auth`.
+- **The registry**: the engine keeps the installation records in its store. Three routes serve them: `POST /datanotes/extensions/`, `/datanotes/extensions/record/` and `/datanotes/extensions/delete/`. The last two are for the owner.
+- **Exit codes**: 0 done, 1 error, 2 the plan has problems, 3 confirmation needed.
+
+### For MCP servers
+
+- **`datanotes mcp` loads extensions**: stdio and HTTP add the tools of every installed extension after the engine's tools. A tool that writes is refused to a client token that may not write its tables. A restart loads a new install.
+- **`--no-extensions`**: leaves the extensions out. `DATANOTES_MCP_EXTENSIONS=0` does the same. `--profile read` keeps only their read-only tools.
+- **Docs**: `list_docs`, `read_docs` and `search_docs` serve each extension's docs under `extensions/<name>/`.
+- **`datanotes/extensions`**: a new package subpath. It exports the manifest and module types, `defineExtension`, `ExtensionToolError` and the loader for MCP hosts. [Write an extension](/develop/write-an-extension/#write-the-tools) shows it.
+
 ## 3.2.0
 
 Datanotes 3.2.0 keeps the links between rows of one table free of cycles. It also lets a table tell agents how to fill its rows. It only adds to 3.1: no operation, argument or setting goes away.

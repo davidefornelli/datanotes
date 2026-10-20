@@ -1,0 +1,71 @@
+{
+  "manifest_version": 1,
+  "name": "books",
+  "version": "0.1.0",
+  "description": "A reading list: books, who wrote them, and what you are reading now",
+  "datanotes": ">=3.2.0",
+  "api": 1,
+  "entry": "lib/extension.mjs",
+  "default_schema": "books",
+  "instructions": "Keep the reading list: list_reading shows what is being read, finish_book marks a book read.",
+  "tables": {
+    "person": {
+      "owned": false,
+      "name": "person",
+      "schema": "public",
+      "names": ["person", "people", "author"],
+      "description": "A person: here, the author of a book",
+      "filename": "{name}",
+      "columns": [
+        { "name": "name", "type": "string", "required": true, "description": "The person's full name" }
+      ]
+    },
+    "book": {
+      "owned": true,
+      "name": "book",
+      "description": "A book on the reading list",
+      "filename": "{title}",
+      "columns": [
+        { "name": "title", "type": "string", "required": true, "description": "The book's title, as printed on the cover" },
+        { "name": "author", "type": "link", "ref": "@person", "description": "Who wrote it" },
+        { "name": "status", "type": "enum", "values": ["to_read", "reading", "read"], "default": "to_read", "description": "Where the reader is with it" },
+        { "name": "rating", "type": "integer", "min": 1, "max": 5, "need": "optional", "description": "From 1 to 5, once read" }
+      ],
+      "constraints": [
+        { "name": "rating_only_when_read", "check": { "or": [{ "status": "read" }, { "rating": { "exists": false } }] }, "hint": "Rate a book only once it is read: set status read, or remove rating." }
+      ],
+      "instructions": "How to add a book:\n\n1. `title` as printed on the cover.\n2. `author`: a row of @{person}.\n",
+      "bases": ["shelved"]
+    }
+  },
+  "bases": {
+    "shelved": { "description": "Where a thing sits on a shelf", "columns": [{ "name": "shelf", "type": "string", "description": "The shelf it sits on" }] }
+  },
+  "views": {
+    "vw_reading": { "description": "Books being read now", "query": { "table": "@book", "where": { "status": "reading" } } }
+  },
+  "permissions": { "write": ["book"] },
+  "tools": [
+    {
+      "name": "list_reading",
+      "description": "List the books being read now: title and author.",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "annotations": { "title": "List Reading", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "tables": ["book", "person"],
+      "writes": []
+    },
+    {
+      "name": "finish_book",
+      "description": "Mark a book read, with an optional rating from 1 to 5.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "title": { "type": "string", "description": "The book's title" }, "rating": { "type": "integer", "minimum": 1, "maximum": 5, "description": "From 1 to 5" } },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "annotations": { "title": "Finish Book", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "tables": ["book"],
+      "writes": ["book"]
+    }
+  ]
+}

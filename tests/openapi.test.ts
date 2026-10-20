@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { OPERATIONS } from "../src/api/catalog";
 import { openApiDocument } from "../src/server/openapi";
+import { recordProblems } from "../src/api/extension-record";
 import { DOCS_CSP } from "../src/server/docs-ui";
 import { HttpApiServer, newToken } from "../src/server/http-server";
 import { createHandlers } from "../src/server/rest";
@@ -80,6 +81,48 @@ describe("OpenAPI document", () => {
     expect(Object.keys(r("/datanotes/operations/list_tables/"))).not.toContain("404");
     expect(r("/datanotes/operations/list_tables/")["401"]).toEqual({ $ref: "#/components/responses/Unauthorized" });
     expect(doc.components.schemas.Error).toMatchObject({ required: ["error"], properties: { error: { type: "string" } } });
+  });
+
+  it("documents the extension registry: any token lists, only the owner records and deletes", () => {
+    const r = (p: string) => doc.paths[p]!.post!;
+    for (const p of ["/datanotes/extensions/", "/datanotes/extensions/record/", "/datanotes/extensions/delete/"]) {
+      expect(r(p), p).toBeDefined();
+      expect(r(p).tags, p).toEqual(["extensions"]);
+    }
+    expect(Object.keys(r("/datanotes/extensions/").responses)).not.toContain("403");
+    expect(Object.keys(r("/datanotes/extensions/record/").responses)).toContain("403");
+    expect(Object.keys(r("/datanotes/extensions/delete/").responses)).toContain("403");
+    expect(doc.components.schemas.InstalledExtension).toMatchObject({ required: expect.arrayContaining(["name", "tables", "token"]) });
+  });
+
+  it("requires exactly the record fields the registry checks (R1-3)", () => {
+    const schema = doc.components.schemas.InstalledExtension as { required: string[]; properties: Record<string, unknown> };
+    const record: Record<string, unknown> = {
+      name: "books",
+      version: "0.1.0",
+      description: "A reading list",
+      api: 1,
+      source: { kind: "local", path: "/x/books" },
+      commit: "local-0123456789ab",
+      manifest_sha256: "a".repeat(64),
+      entry_sha256: "b".repeat(64),
+      token: "ext-books",
+      tables: { book: { table: "work.books.book", owned: true } },
+      tools: ["list_reading"],
+      write: ["work.books.book"],
+      migration_id: null,
+      installed_at: "2026-10-20T00:00:00.000Z",
+      updated_at: "2026-10-20T00:00:00.000Z",
+      previous: null,
+    };
+    expect(recordProblems(record)).toEqual([]);
+    expect(Object.keys(schema.properties).sort()).toEqual(Object.keys(record).sort());
+    for (const key of Object.keys(record)) {
+      const without = { ...record };
+      delete without[key];
+      // a field the registry refuses to miss is required in the document, and only those
+      expect(schema.required.includes(key), key).toBe(recordProblems(without).length > 0);
+    }
   });
 
   it("uses each operation's responseSchema and hoists titled schemas into components", () => {

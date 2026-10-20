@@ -9,7 +9,8 @@
  *                                                   Streamable HTTP at /mcp, each agent with its own token
  *
  * Both modes offer every tool except the webhook tools, which `--owner-tools` adds; `--profile`,
- * `--tools` and `--except` choose others (selection.ts). An engine started for a stdio session is
+ * `--tools` and `--except` choose others (selection.ts); the tools of the extensions installed in
+ * the database come after them (extensions.ts) unless `--no-extensions`. An engine started for a stdio session is
  * stopped at its end as `datanotes stop` does (POST /datanotes/stop/), and killed only when it
  * does not stop.
  *
@@ -32,7 +33,8 @@ import { mcpHelp } from "./help";
 import { startHttp } from "./http";
 import { closeExporter, exporterFromEnv, noLog, tracerFromEnv, type Log } from "./log";
 import type { Tracer } from "../api/tracing";
-import { envFlag, selectTools, ToolSelectionError } from "./selection";
+import { ExtensionSet, extensionsEnabled, readOnlyProfile } from "./extensions";
+import { ALL_TOOLS, envFlag, selectTools, ToolSelectionError } from "./selection";
 import { createSession } from "./server";
 import { Toolbox } from "./tools";
 
@@ -67,7 +69,7 @@ const DEFAULT_PORT = "27151";
 export const ENGINE_STOP_TIMEOUT_MS = 35_000;
 
 /** The options that choose the tools (selection.ts), in both modes. */
-const TOOL_OPTIONS = { values: ["profile", "tools", "except"], flags: ["owner-tools"] };
+const TOOL_OPTIONS = { values: ["profile", "tools", "except"], flags: ["owner-tools", "no-extensions"] };
 
 /** The options of `datanotes mcp` (stdio) and `datanotes mcp serve` (Streamable HTTP). */
 export const STDIO_OPTIONS = { values: ["vault", "database", "url", "token-file", "otlp-endpoint", ...TOOL_OPTIONS.values], flags: TOOL_OPTIONS.flags };
@@ -155,6 +157,7 @@ async function stdio(argv: string[], version: string, io: McpIo, log: Log, exit:
   const o = readOptions(argv, STDIO_OPTIONS, "datanotes mcp");
   // the tools first: a wrong name is refused before an engine is started
   const tools = toolsOf(o, io.env);
+  const withExtensions = extensionsEnabled(o, io.env);
   const explicitUrl = o.get("url") !== undefined || o.get("token-file") !== undefined;
   if ((o.get("vault") !== undefined || o.get("database") !== undefined) && explicitUrl) throw new Error("pass --database (or --vault), or --url with --token-file, not both (datanotes mcp --help)");
   // an engine named on the command line wins over the environment's folder: its token is the one meant
@@ -180,7 +183,10 @@ async function stdio(argv: string[], version: string, io: McpIo, log: Log, exit:
     if (!url || !token) throw new Error("pass --database <folder> (or --vault <folder>), or --url <engine> with --token-file <file> (datanotes mcp --help)");
     engine = { url, token };
   }
-  const toolbox = new Toolbox(engine.url, log, openDocs(findDocsDir(io.env)), tools, tracer);
+  const extensions = withExtensions ? new ExtensionSet({ engineUrl: engine.url, log, readOnlyOnly: readOnlyProfile(o, io.env), reserved: ALL_TOOLS, env: io.env, stderr: io.stderr }) : null;
+  const toolbox = new Toolbox(engine.url, log, openDocs(findDocsDir(io.env)), tools, tracer, extensions);
+  // the extensions' tools and instructions are known before the session answers initialize
+  await toolbox.prepare(engine.token);
   const sessionId = randomUUID();
   const session = createSession({ toolbox, instructions: toolbox.instructions(), token: () => engine.token, version, session: sessionId });
   const transport = new StdioServerTransport(io.stdin, io.stdout);
@@ -206,7 +212,10 @@ async function serve(argv: string[], version: string, io: McpIo, log: Log, exit:
   const host = o.get("host") ?? io.env.DATANOTES_MCP_HOST ?? "127.0.0.1";
   const port = Number(o.get("port") ?? io.env.DATANOTES_MCP_PORT ?? DEFAULT_PORT);
   const tools = toolsOf(o, io.env);
-  const srv = await startHttp({ toolbox: new Toolbox(engine, log, openDocs(findDocsDir(io.env)), tools, tracer), host, port, version });
+  const withExtensions = extensionsEnabled(o, io.env);
+  // loaded when the first agent connects, with its token (http.ts); the skip lines are the operator's
+  const extensions = withExtensions ? new ExtensionSet({ engineUrl: engine, log, readOnlyOnly: readOnlyProfile(o, io.env), reserved: ALL_TOOLS, env: io.env, stderr: io.stderr }) : null;
+  const srv = await startHttp({ toolbox: new Toolbox(engine, log, openDocs(findDocsDir(io.env)), tools, tracer, extensions), host, port, version });
   const listen = `http://${host}:${srv.port}/mcp`;
   io.stdout.write(`datanotes mcp ${version}: ${listen} -> ${engine}\n`);
   log("INFO", `datanotes mcp ${version} started (http) at ${listen} -> ${engine}`, { mode: "http", engine, listen, version });

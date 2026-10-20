@@ -9,6 +9,7 @@ import { serviceBuildOptions } from "../scripts/service-build.mjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { localEngine, storeLocation } from "../src/api/local";
 import { docsFixture } from "./helpers/docs-fixture";
+import { installFixture } from "./helpers/extensions";
 import { copyTestVault, freePort, openTestVault, type TestVault } from "./helpers/test-vault";
 import { seedStoreSettings } from "./helpers/store-settings";
 
@@ -110,4 +111,18 @@ describe("datanotes mcp: the built command", () => {
     // asked to stop (POST /datanotes/stop/), not killed: it released its lock on the way out
     expect(fs.existsSync(lock)).toBe(false);
   }, 90_000);
+
+  it("the built command loads an installed extension", async () => {
+    await installFixture(vault.client);
+    const client = new Client({ name: "bundle-agent", version: "1" });
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [bin, "mcp", "--vault", vault.root], cwd: dir, env: ENV, stderr: "ignore" }));
+    try {
+      expect((await client.listTools()).tools.map((t) => t.name)).toContain("list_reading");
+      const r = await client.callTool({ name: "list_reading", arguments: {} });
+      expect(r.isError, text(r)).toBeFalsy();
+      expect(text(r)).toContain("work.books.book");
+    } finally {
+      await client.close();
+    }
+  }, 60_000);
 });

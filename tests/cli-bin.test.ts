@@ -48,4 +48,10 @@ describe("the dnotes command", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('unknown command "frobnicate" (datanotes --help)');
   });
+
+  it("runs extension check on the fixture from the bundle", () => {
+    const r = run("extension", "check", path.join(ROOT, "tests/fixtures/extensions/books/v0.1.0"));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("ok: books 0.1.0: 2 tools, 2 tables (1 own), 1 views, 1 bases\n");
+  });
 });

@@ -480,14 +480,27 @@ class SearchIndex {
   }
 }
 
-/** The docs in a folder (null: there are none, and every call says how to get them). */
+/** A folder of extra pages shown under a prefix of the docs (an installed extension's `docs/`). */
+export interface DocsMount {
+  /** The path its pages appear under: "extensions/tasks". */
+  prefix: string;
+  /** The folder of .md pages. */
+  dir: string;
+}
+
+/** The docs in a folder (null: there are none, and every call says how to get them), and the mounts added to them. */
 export class DocsLibrary {
   private loaded: Map<string, Page> | null = null;
+  /** The keys of the pages that come from mounts: the docs' version leaves them out. */
+  private readonly mounted = new Set<string>();
   private index: SearchIndex | null = null;
   private hash: string | null = null;
   private sectionList: DocsSection[] | null = null;
 
-  constructor(readonly dir: string | null) {}
+  constructor(
+    readonly dir: string | null,
+    readonly mounts: readonly DocsMount[] = [],
+  ) {}
 
   private missing(): DocsError {
     const where = this.dir === null ? "" : ` (${this.dir})`;
@@ -515,6 +528,24 @@ export class DocsLibrary {
       }
     };
     walk(this.dir, "");
+    // a mount's index.md is the page of the prefix, a/index.md the page of prefix/a; a key already taken is skipped
+    const walkMount = (dir: string, rel: string, prefix: string) => {
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (ent.isDirectory()) walkMount(path.join(dir, ent.name), `${rel}${ent.name}/`, prefix);
+        else if (ent.name.endsWith(".md")) {
+          const name = ent.name.slice(0, -3);
+          const folder = rel.slice(0, -1);
+          const tail = name === "index" ? folder : `${rel}${name}`;
+          const key = tail === "" ? prefix : `${prefix}/${tail}`;
+          if (pages.has(key)) continue;
+          pages.set(key, pageOf(key, fs.readFileSync(path.join(dir, ent.name), "utf8").replace(/\r\n/g, "\n")));
+          this.mounted.add(key);
+        }
+      }
+    };
+    for (const m of [...this.mounts].sort((a, b) => (a.prefix < b.prefix ? -1 : 1))) {
+      if (fs.existsSync(m.dir)) walkMount(m.dir, "", m.prefix);
+    }
     this.loaded = pages;
     return pages;
   }
@@ -751,7 +782,9 @@ export class DocsLibrary {
   version(): string {
     if (this.hash === null) {
       const h = createHash("sha256");
-      for (const s of this.sections()) h.update(`${s.path}\u0000${s.text}\u0000`);
+      for (const s of this.sections()) {
+        if (!this.mounted.has(s.path.split("#")[0]!)) h.update(`${s.path}\u0000${s.text}\u0000`);
+      }
       this.hash = h.digest("hex").slice(0, 16);
     }
     return this.hash;
@@ -800,11 +833,12 @@ function excerpt(body: string, terms: ReadonlySet<string>): string {
   return `${start > 0 ? "…" : ""}${cut}${start + 200 < prose.length ? "…" : ""}`;
 }
 
-const libraries = new Map<string | null, DocsLibrary>();
+const libraries = new Map<string, DocsLibrary>();
 
-/** The docs of a folder (default: `findDocsDir()`), loaded once per folder. */
-export function openDocs(dir: string | null = findDocsDir()): DocsLibrary {
-  let lib = libraries.get(dir);
-  if (!lib) libraries.set(dir, (lib = new DocsLibrary(dir)));
+/** The docs of a folder (default: `findDocsDir()`) with its mounts, loaded once per folder and mounts. */
+export function openDocs(dir: string | null = findDocsDir(), mounts: readonly DocsMount[] = []): DocsLibrary {
+  const key = `${dir}\u0000${JSON.stringify(mounts)}`;
+  let lib = libraries.get(key);
+  if (!lib) libraries.set(key, (lib = new DocsLibrary(dir, mounts)));
   return lib;
 }

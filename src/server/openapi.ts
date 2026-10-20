@@ -74,6 +74,7 @@ const NAMES_A_PATH = new Set(["read_note", "list_folder"]);
 const ROUTE_TAGS: { name: string; description: string; match: (route: string) => boolean }[] = [
   { name: "change feed", description: "The change feed as Server-Sent Events, and the tool calls MCP servers report.", match: (r) => /^\/(changes|tool-calls)\b/.test(r) },
   { name: "tokens", description: "Named tokens and their permissions; what MCP servers report about their agents' sessions.", match: (r) => /^\/(tokens|sessions)\//.test(r) },
+  { name: "extensions", description: "The extensions installed in the database: their versions, tables, tools and tokens.", match: (r) => /^\/extensions\//.test(r) },
   { name: "service", description: "Status, stop, this document, the interactive console, the docs.", match: () => true },
 ];
 
@@ -195,6 +196,28 @@ const TOKEN_ROUTES: Record<string, { summary: string; body: Schema; result: Sche
   },
   "/tokens/delete/": { summary: "Revoke a named token (owner only): it stops working at once.", body: { type: "object", required: ["name"], properties: { name: { type: "string" } } }, result: { type: "object", properties: { deleted: { type: "boolean" } } }, writes: true },
   "/tokens/rotate/": { summary: "Give a named token a new value (owner only): the old one stops working.", body: { type: "object", required: ["name"], properties: { name: { type: "string" } } }, result: { type: "object", properties: { token: TOKEN_SECRET } }, writes: true },
+};
+
+const EXTENSION = { $ref: "#/components/schemas/InstalledExtension" };
+
+const EXTENSION_ROUTES: Record<string, { summary: string; body: Schema; result: Schema; writes?: boolean }> = {
+  "/extensions/": {
+    summary: "The extensions installed in the database, and its id (any token).",
+    body: { type: "object" },
+    result: { type: "object", properties: { database_id: { type: ["string", "null"] }, extensions: { type: "array", items: EXTENSION } } },
+  },
+  "/extensions/record/": {
+    summary: "Record an installed extension (owner only): what datanotes extension install writes.",
+    body: EXTENSION,
+    result: { type: "object", properties: { extension: EXTENSION } },
+    writes: true,
+  },
+  "/extensions/delete/": {
+    summary: "Forget an installed extension (owner only): what datanotes extension remove does.",
+    body: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+    result: { type: "object", properties: { deleted: { type: "boolean" } } },
+    writes: true,
+  },
 };
 
 const str = { type: "string" };
@@ -354,6 +377,51 @@ const SCHEMAS: Record<string, Schema> = {
       last_seen: { type: "string", description: "The last request made with it (saved within a minute)." },
     },
   },
+  InstalledExtension: {
+    type: "object",
+    description: "An installed extension as the registry keeps it (datanotes extension install writes it).",
+    required: ["name", "version", "description", "api", "source", "commit", "manifest_sha256", "entry_sha256", "token", "tables", "tools", "write", "migration_id", "installed_at", "updated_at", "previous"],
+    properties: {
+      name: { type: "string", description: "2 to 40 lowercase letters, digits or -, starting with a letter." },
+      version: { type: "string" },
+      description: { type: "string" },
+      api: { type: "integer", description: "The module API version the extension's entry file exports." },
+      source: {
+        type: "object",
+        required: ["kind"],
+        properties: {
+          kind: { type: "string", enum: ["git", "local"] },
+          url: { type: "string", description: "git: the URL as given." },
+          ref: { type: "string", description: "git: the tag or commit id given (or the newest tag chosen)." },
+          path: { type: "string", description: "local: the absolute folder, with / separators." },
+        },
+      },
+      commit: { type: "string", description: "The git commit id (40 hex), or local-<12 hex> for a folder." },
+      manifest_sha256: { type: "string" },
+      entry_sha256: { type: "string" },
+      token: { type: "string", description: "The extension's named token: ext-<name>." },
+      tables: {
+        type: "object",
+        description: "Each role of the manifest, bound to a qualified table.",
+        additionalProperties: {
+          type: "object",
+          required: ["table", "owned"],
+          properties: {
+            table: { type: "string", description: "The qualified table bound to the role." },
+            owned: { type: "boolean", description: "True for a role the extension owns." },
+            columns: { type: "object", additionalProperties: { type: "string" }, description: "Dependency roles: manifest column to the user's column, only where they differ." },
+            absent: { type: "array", items: { type: "string" }, description: "Dependency roles: optional manifest columns the bound table does not have." },
+          },
+        },
+      },
+      tools: { type: "array", items: { type: "string" } },
+      write: { type: "array", items: { type: "string" }, description: "The token's write patterns (qualified table names)." },
+      migration_id: { type: ["string", "null"], description: "The batch that brought the database from `previous` to this record." },
+      installed_at: { type: "string" },
+      updated_at: { type: "string" },
+      previous: { anyOf: [{ $ref: "#/components/schemas/InstalledExtension" }, { type: "null" }], description: "The record before the last install, repair or update; null after a first install." },
+    },
+  },
 };
 
 const ok = { type: "object", properties: { ok: { type: "boolean", const: true } } };
@@ -472,6 +540,10 @@ export function openApiDocument(version: string): Schema {
   for (const d of extra) paths[`${ROUTE_PREFIX}${d.route}`] = postRoute(d);
   for (const [route, r] of Object.entries(TOKEN_ROUTES)) {
     paths[`${ROUTE_PREFIX}${route}`] = postRoute({ route, operationId: `tokens_${route.split("/").filter(Boolean).slice(1).join("_") || "list"}`, summary: r.summary, body: r.body, result: r.result, writes: r.writes ?? false });
+  }
+
+  for (const [route, r] of Object.entries(EXTENSION_ROUTES)) {
+    paths[`${ROUTE_PREFIX}${route}`] = postRoute({ route, operationId: `extensions_${route.split("/").filter(Boolean).slice(1).join("_") || "list"}`, summary: r.summary, body: r.body, result: r.result, writes: r.writes ?? false });
   }
 
   paths[`${ROUTE_PREFIX}/changes/stream`] = {

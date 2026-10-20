@@ -1,4 +1,4 @@
-// `datanotes/client`, `datanotes/local` and `datanotes/mcp`: the API client as a library (ESM and
+// `datanotes/client`, `datanotes/local`, `datanotes/mcp` and `datanotes/extensions`: the API client as a library (ESM and
 // CommonJS, with type declarations from tsconfig.api.json), published next to the `datanotes`
 // command. tsc writes ES module declarations (`.d.ts`, NodeNext); this script copies each to a
 // CommonJS one (`.d.cts`, its relative imports ending in `.cjs`) for `require` consumers. `datanotes/mcp` holds the engine's tool definitions and the docs tools (which read the
@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import esbuild from "esbuild";
 
-for (const [entry, name, platform] of [["src/api/index.ts", "index", "neutral"], ["src/api/local.ts", "local", "node"], ["src/api/mcp.ts", "mcp", "node"]]) {
+for (const [entry, name, platform] of [["src/api/index.ts", "index", "neutral"], ["src/api/local.ts", "local", "node"], ["src/api/mcp.ts", "mcp", "node"], ["src/api/extensions.ts", "extensions", "node"]]) {
   for (const format of ["esm", "cjs"]) {
     await esbuild.build({
       entryPoints: [entry],
@@ -33,4 +33,4 @@ for (const file of fs.readdirSync("dist/api")) {
   fs.writeFileSync(`dist/api/${file.replace(/\.d\.ts$/, ".d.cts")}`, cjs);
   declarations++;
 }
-console.log(`dist/api: index, local, mcp (esm, cjs), ${declarations} declarations (.d.ts, .d.cts)`);
+console.log(`dist/api: index, local, mcp, extensions (esm, cjs), ${declarations} declarations (.d.ts, .d.cts)`);

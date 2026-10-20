@@ -147,6 +147,17 @@ npx -y datanotes mcp serve --except undo_migration --owner-tools
 
 You can't pass `--profile` and `--tools` together. An unknown tool name stops the command, and the error names the closest tool. A call to a tool the server doesn't offer fails as an unknown tool. The engine still checks the token on every call, so a [named token](#give-each-agent-its-own-token) limits the agent too.
 
+## Tools of extensions
+
+An [installed extension](/administration/extensions/) adds its own tools. `datanotes mcp` offers them after the engine's tools, in stdio and in `serve`. The docs tools serve its docs under `extensions/<name>/`.
+
+- **After an install**: restart the MCP server, or the client that started it. A running server does not see a new extension.
+- **`--no-extensions`**: leaves the extension tools out. `DATANOTES_MCP_EXTENSIONS=0` does the same.
+- **`--profile read`**: keeps only the extensions' tools that read.
+- **`--tools` and `--except`**: name engine and docs tools only.
+
+The engine still checks the token on every call. A tool that writes also needs a client token that may write its tables.
+
 ## Give each agent its own token
 
 A named token limits what an agent can do, and the journal records its name. It writes only the tables you allow in `write`, changes the schema only with `ddl`, and undoes changes only with `maintain`. Create one with the owner’s token:

@@ -67,6 +67,10 @@ A UUID at the top of `metastore.yaml`, as `id`, that names the database. The eng
 
 The process that runs a vault as a database, `datanotes serve`. It checks and journals every write and serves the HTTP API. See [Run the engine as a service](/administration/run-the-service/).
 
+## Extension
+
+A git repository that adds tables, views, bases, MCP tools and docs to a database. `datanotes extension install` pins and installs it. See [Install extensions](/administration/extensions/).
+
 ## Front matter
 
 The YAML block at the top of a note, between two `---` lines. Each key of a row’s front matter holds the value of one column. See [How it works](/start/how-it-works/).
@@ -114,6 +118,10 @@ A call the engine runs, such as `create_table`, `insert_row` or `select_rows`. E
 ## Owner token
 
 The token that can do everything, generated at the engine’s first start and kept in its settings file. See [Tokens and permissions](/guides/security/tokens/).
+
+## Role (extension)
+
+The short name an extension's manifest gives a table, such as `book`. The installer binds each role to a table of your database. See [Declare the tables](/develop/write-an-extension/#declare-the-tables).
 
 ## Row
 

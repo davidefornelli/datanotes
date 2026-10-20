@@ -13,6 +13,11 @@ Usage:
   datanotes store backup --database <folder>      show or set the store's git backup (--remote <url>, --off)
   datanotes store restore --from <url> --database <folder>   restore the store from its git backup
   datanotes store convert-log --to <files|segments> --database <folder>   rewrite the transaction log in that format
+  datanotes extension install <source> --database <folder>   install an extension: plan, confirm, write
+                                               (a git URL with #<tag>, owner/repo@<tag>, or a folder)
+  datanotes extension update | rollback | remove <name> --database <folder>   change an installed one
+  datanotes extension list --database <folder>    the installed extensions
+  datanotes extension check <folder>             check an extension's repository (for its authors)
   Every command takes --vault <folder> instead of --database for a vault holding the database.
 ${MCP_USAGE}
   datanotes --version | --help
@@ -92,6 +97,26 @@ Options of store:
   The data home holds one store per database: %LOCALAPPDATA%\\Datanotes (Windows),
   ~/Library/Application Support/Datanotes (macOS), $XDG_DATA_HOME/datanotes or
   ~/.local/share/datanotes (Linux); DATANOTES_DATA_HOME moves it.
+
+Options of extension (every command but check works through the engine running on the database):
+  --database <folder>         the database folder (or DATANOTES_DATABASE; --vault <folder> for a vault)
+  --store <folder>            the engine's store, when serve was given one (or DATANOTES_STORE)
+  --settings <file>           settings file with the owner's token (or DATANOTES_SETTINGS;
+                              default settings.json in the store)
+  --url <url>                 an engine at an address (or DATANOTES_URL), with
+  --token-file <file>         a file holding the owner's token (or DATANOTES_TOKEN_FILE)
+  --map <list>                install, update: role=catalog.schema.table or role.column=column
+  --create <roles>            install, update: create these tables the extension depends on
+  --add <list>                install, update: add these role.column columns to matched tables
+  --catalog <name>            install: the catalog of the tables and views it creates
+  --schema <name>             install: the schema of the tables and views it creates
+  --to <ref>                  update: the version tag or commit to move to (default: the newest tag)
+  --from <source>             update: another source, such as the folder you develop in
+  --dry-run                   install, update: print the plan and write nothing
+  --yes                       write without asking (only once the user approved the plan)
+  --json                      print one JSON object (the plan or the result) and never ask
+  Lists (--map, --create, --add) are comma-separated. Exit codes: 0 done; 1 error; 2 the plan has
+  problems (nothing written); 3 confirmation needed (run again with --yes once the user approved)
 
 ${MCP_OPTIONS}
 

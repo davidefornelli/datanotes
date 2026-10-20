@@ -65,6 +65,18 @@ The owner creates a named token with `POST /datanotes/tokens/create/`, and the e
 
 A named token can’t create webhooks, manage tokens or read the engine’s status, and without `maintain` it can’t undo.
 
+### Extensions
+
+An extension adds tables and Model Context Protocol (MCP) tools from a git repository. Its code is trusted code that runs inside the MCP server's process, not in a sandbox. Install only extensions you trust, and read the plan first.
+
+- **Pinned code**: the installer takes a version tag or a full commit id, and refuses a branch. It fetches the tag itself, even when a branch has the same name. It records the commit and the SHA-256 hashes of the manifest and the entry file. The server refuses cached code that differs.
+- **No install scripts**: the installer runs no script, no build and no `npm install`. The entry file may import only Node built-ins. The installer reads the imports in the file. Code that builds a module name at run time escapes this check.
+- **One token for each extension**: `ext-<name>` writes only the tables the manifest lists. It cannot change the schema or undo. The installer changes the schema with the owner's token, after you confirm the plan.
+- **An invoker check**: before a tool that writes runs, the server checks the calling agent's token. That token must be able to write the tool's tables. A read-only client cannot write through an extension.
+- **The secret stays on one machine**: the token file sits under the data home with mode 0600. The registry in the engine's store holds no secret.
+
+Known limits: extension code is not isolated from the MCP server's process. Its token reads every table until read patterns ship. Migrations are declarative and run no code. [Install extensions](https://datanotes.dev/administration/extensions/) has the details.
+
 ### Who made each write
 
 The engine journals every write with its actor. The client sends the agent’s name, model and session, so they’re self-reported. The server sets the credential, `auth` (`owner`, or the named token’s name), and no client can claim another one.

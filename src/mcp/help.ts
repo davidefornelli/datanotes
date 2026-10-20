@@ -27,6 +27,10 @@ Tools of mcp (both modes; default: every tool except create_webhook and delete_w
   --owner-tools               also offer create_webhook and delete_webhook
                               (or DATANOTES_MCP_OWNER_TOOLS=1)
 
+Extensions of mcp (both modes): the tools of the extensions installed in the database (datanotes
+extension install) come after the engine's tools; --profile read keeps only their read-only tools
+  --no-extensions             offer no extension tools (or DATANOTES_MCP_EXTENSIONS=0)
+
 Logs of mcp (both modes):
   --otlp-endpoint <url>       export logs over OTLP/HTTP, e.g. http://127.0.0.1:4318 (or the standard
                               OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_HEADERS, OTEL_SERVICE_NAME)

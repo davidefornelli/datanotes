@@ -10,10 +10,12 @@
 
 import { DatanotesClient, DatanotesError, type ActorInfo, type RecordedToolCall, type ToolCallRecord } from "../api/client";
 import { openDocs, type DocsLibrary } from "../api/docs";
+import type { ExtensionToolDefinition, LoadedExtension } from "../api/extension-host";
 import { callDocsTool, callProblem, docsTools, ENGINE_INSTRUCTIONS, engineTools, isDocsTool, offlineDocs, toolContent, type EngineTool, type EngineToolFilter, type ToolContent } from "../api/mcp";
 import { cutToolCall, redactToolCall } from "../api/redact";
 import { estimateTokens } from "../api/tokens";
 import { parseTraceparent, type TraceContext, type Tracer, type TraceSpan } from "../api/tracing";
+import type { ExtensionSet } from "./extensions";
 import { noLog, type Log } from "./log";
 
 /** The engine's operations, for one engine, and the docs tools. */
@@ -31,6 +33,8 @@ export class Toolbox {
     only?: readonly string[],
     /** Traces (log.ts tracerFromEnv): a SERVER span per tool call, a CLIENT span per request to the engine. */
     readonly tracer: Tracer | null = null,
+    /** The extensions installed in the database (extensions.ts): their tools come after these; null: none. */
+    readonly extensions: ExtensionSet | null = null,
   ) {
     this.filter = only ? { only } : {};
     this.tools = [...engineTools(), ...docsTools()].filter((t) => !only || only.includes(t.name));
@@ -61,17 +65,24 @@ export class Toolbox {
 
   /** What the server tells agents at `initialize`. */
   instructions(): string {
-    return ENGINE_INSTRUCTIONS;
+    return ENGINE_INSTRUCTIONS + (this.extensions?.instructions() ?? "");
   }
 
-  list(): EngineTool[] {
-    return this.tools;
+  /** Load the extensions, once, with a token the engine accepts (before a session's `initialize` is answered). Never throws. */
+  async prepare(token: string): Promise<void> {
+    await this.extensions?.prepare(token);
+  }
+
+  list(): (EngineTool | ExtensionToolDefinition)[] {
+    return [...this.tools, ...(this.extensions?.tools() ?? [])];
   }
 
   /** Run a tool for an agent, report the call to the engine and log it (argument names only). */
   async call(token: string, name: string, args: Record<string, unknown>, actor: ActorInfo, trace?: CallTrace): Promise<ToolContent> {
     const span = this.toolSpan(name, actor, trace);
     try {
+      const ext = this.extensions?.owner(name);
+      if (ext) return await this.extensionCall(ext, token, name, args, actor, span);
       return await (isDocsTool(name, this.filter) ? this.readDocs(token, name, args, actor, span) : this.engineCall(token, name, args, actor, span));
     } finally {
       span.end();
@@ -122,6 +133,51 @@ export class Toolbox {
     return content;
   }
 
+  /**
+   * A tool of an extension: run by the extension's host (extension-host.ts), which checks the
+   * arguments and the client's write permission and calls the engine with the extension's own
+   * token. Reported and logged as an engine call, with the client's token and `served_by` the
+   * extension's.
+   */
+  private async extensionCall(ext: LoadedExtension, token: string, name: string, args: Record<string, unknown>, actor: ActorInfo, span: ToolSpan): Promise<ToolContent> {
+    const started = Date.now();
+    let ok: boolean;
+    let value: unknown;
+    let thrown: unknown = undefined;
+    try {
+      ({ ok, value } = await ext.call(name, args, { actor, clientToken: token }));
+    } catch (e) {
+      // the host answers refusals and failures; a throw is a bug of the host
+      ok = false;
+      value = e instanceof Error ? e.message : String(e);
+      thrown = e;
+    }
+    const unexpected = thrown !== undefined;
+    const durationMs = Date.now() - started;
+    const content = offlineDocs(toolContent(ok, value));
+    const returned = content.content.map((c) => c.text).join("\n");
+    const resultTokens = estimateTokens(returned);
+    if (unexpected) span.recordException(thrown);
+    else if (!ok) span.setAttribute("error.type", "refused");
+    span.setAttributes({ "datanotes.result_chars": returned.length, "datanotes.result_tokens": resultTokens });
+    const recorded = redactToolCall(name, args, value);
+    void this.report(token, { tool: name, args: recorded.args, ok, duration_ms: durationMs, value: recorded.value, served_by: ext.servedBy, ...(actor.session ? { session: actor.session } : {}), result_chars: returned.length, result_tokens: resultTokens }, { ...actor, tool: name });
+    this.log(ok ? "INFO" : unexpected ? "ERROR" : "WARN", `tool ${name}: ${ok ? "ok" : "failed"} (${durationMs} ms)`, {
+      tool: name,
+      ok,
+      duration_ms: durationMs,
+      result_chars: returned.length,
+      result_tokens: resultTokens,
+      harness: actor.harness,
+      harness_version: actor.harness_version,
+      session: actor.session,
+      arg_names: Object.keys(args).join(","),
+      served_by: ext.servedBy,
+      error: ok ? undefined : returned.slice(0, 300),
+    }, span.context);
+    return content;
+  }
+
   /** The engine takes a call's value cut, with its summary: it said so when it recorded a call. */
   private takesSummary = false;
 
@@ -146,7 +202,7 @@ export class Toolbox {
    */
   private async readDocs(token: string, name: string, args: Record<string, unknown>, actor: ActorInfo, span: ToolSpan): Promise<ToolContent> {
     const started = Date.now();
-    const content = offlineDocs(await callDocsTool(name, args, { docs: this.docs, client: this.client(token, span.context), actor: { ...actor, tool: name } }));
+    const content = offlineDocs(await callDocsTool(name, args, { docs: this.docsLibrary(), client: this.client(token, span.context), actor: { ...actor, tool: name } }));
     const ok = !content.isError;
     if (!ok) span.setAttribute("error.type", "refused");
     const returned = content.content.map((c) => c.text).join("\n");
@@ -164,6 +220,11 @@ export class Toolbox {
       error: ok ? undefined : returned.slice(0, 300),
     }, span.context);
     return content;
+  }
+
+  /** The package's docs, with the loaded extensions' pages under extensions/<name>. */
+  private docsLibrary(): DocsLibrary {
+    return this.extensions && this.extensions.mounts().length > 0 ? openDocs(this.docs.dir, this.extensions.mounts()) : this.docs;
   }
 }
 
