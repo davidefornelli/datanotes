@@ -1,7 +1,7 @@
 // The npm package as its users get it: packs it (`npm pack`, without the prepack build: run
 // `npm run build:service` first) and checks the tarball three ways.
 //
-//   1. @arethetypeswrong/cli: every entry point (`datanotes`, `/client`, `/local`, `/mcp`) resolves
+//   1. @arethetypeswrong/cli: every entry point (`datanotes`, `/client`, `/local`, `/mcp`, `/extensions`) resolves
 //      to the right types for `import` and `require` under node16/nodenext and bundler. Profile
 //      `node16`: the legacy `node10` resolution ignores `exports`, so it never finds a subpath.
 //   2. publint --strict: package.json fields, `exports` and the files they point to.
@@ -86,12 +86,14 @@ import { DatanotesClient, estimateTokens, OPERATIONS, type ClientOptions } from 
 import * as main from "datanotes";
 import { engineTools, type EngineTool } from "datanotes/mcp";
 import { readDatabaseId } from "datanotes/local";
+import { defineExtension, ExtensionToolError, parseManifest, type ExtensionContext } from "datanotes/extensions";
 
 const options: ClientOptions = { url: "http://127.0.0.1:1", token: "t" };
 const client: DatanotesClient = new DatanotesClient(options);
 const tokens: number = estimateTokens("some text");
 const tools: EngineTool[] = engineTools();
 const id: string | null = readDatabaseId("id: x");
+const ext = defineExtension({ api: 1, handlers: { async hello(_a, ctx: ExtensionContext) { return ctx.extension.name; } } });
 
 // Each line below is an error only while the types are real: as \`any\` they would compile.
 // @ts-expect-error estimateTokens takes a string
@@ -104,8 +106,12 @@ new DatanotesClient({ token: "t" });
 const notText: string = engineTools();
 // @ts-expect-error readDatabaseId takes a string
 readDatabaseId(1);
+// @ts-expect-error api is 1
+defineExtension({ api: 2, handlers: {} });
+// @ts-expect-error parseManifest takes a string
+parseManifest(1);
 
-export const used = [client, tokens, tools, id, notText, OPERATIONS.length];
+export const used = [client, tokens, tools, id, notText, OPERATIONS.length, ext, ExtensionToolError];
 `;
   const modes = [
     ["nodenext, ES module", "module", { module: "nodenext", moduleResolution: "nodenext" }],

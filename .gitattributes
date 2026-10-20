@@ -3,3 +3,5 @@
 # The test vault is compared byte for byte with what the engine writes (LF): a Windows checkout
 # must not turn its notes into CRLF.
 test-vault/** text eol=lf
+# The fixture extensions are read byte for byte: LF on every checkout.
+tests/fixtures/extensions/** text eol=lf

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTOR_HEADER, DatanotesClient, DatanotesError, type HttpRequest, type HttpResponse, type Transport } from "../src/api/client";
+import { ACTOR_HEADER, DatanotesClient, DatanotesError, trimTrailingSlashes, type HttpRequest, type HttpResponse, type Transport } from "../src/api/client";
 import { localDocs } from "../src/api/guidance";
 import { guidedTextOf } from "./helpers/guidance";
 
@@ -233,5 +233,19 @@ describe("ping", () => {
     expect(f.sent).toEqual([{ url: `${ENGINE}/`, method: "GET", headers: {} }]);
     expect(await new DatanotesClient({ url: ENGINE, token: TOKEN, transport: fake(() => ({ status: 503, text: "" })).transport }).ping()).toBe(false);
     expect(await new DatanotesClient({ url: ENGINE, token: TOKEN, transport: fake(() => new Error("ECONNRESET")).transport }).ping()).toBe(false);
+  });
+});
+
+describe("trimTrailingSlashes", () => {
+  it("removes every trailing slash and nothing else", () => {
+    expect(["http://x/", "http://x///", "http://x", "", "///", "http://x//y/"].map(trimTrailingSlashes)).toEqual(["http://x", "http://x", "http://x", "", "", "http://x//y"]);
+    expect(new DatanotesClient({ url: "http://x///", token: TOKEN }).url).toBe("http://x");
+  });
+
+  it("is linear: 100000 slashes followed by a character take under 50 ms", () => {
+    const s = "/".repeat(100000) + "x";
+    const t0 = performance.now();
+    expect(trimTrailingSlashes(s)).toBe(s);
+    expect(performance.now() - t0).toBeLessThan(50);
   });
 });

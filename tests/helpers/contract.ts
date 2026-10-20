@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { OPERATIONS } from "../../src/api/catalog";
 import { STORE_OPTIONS } from "../../src/node/store-command";
+import { EXTENSION_OPTIONS } from "../../src/node/extension-command";
 import type { OptionSpec } from "../../src/api/cli-options";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
 import { VIOLATION_GUIDANCE } from "../../src/core/hints";
@@ -94,6 +95,7 @@ export function contractLines(): string[] {
     ["status", STATUS_OPTIONS],
     ["stop", STOP_OPTIONS],
     ...Object.entries(STORE_OPTIONS).map(([sub, spec]) => [`store ${sub}`, spec] as [string, OptionSpec]),
+    ...Object.entries(EXTENSION_OPTIONS).map(([sub, spec]) => [`extension ${sub}`, spec] as [string, OptionSpec]),
     ["mcp", STDIO_OPTIONS],
     ["mcp serve", MCP_SERVE_OPTIONS],
   ];

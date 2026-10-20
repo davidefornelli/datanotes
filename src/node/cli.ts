@@ -5,6 +5,7 @@
  *   datanotes status --vault <folder> [--json]            the running engine's health (exit 0 / 1 / 2 / 3)
  *   datanotes stop --vault <folder> [--timeout-s 60]      a graceful stop of the running engine (exit 0 / 1 / 2 / 3)
  *   datanotes store path | new-id --vault <folder>       where the store is; a new id for a copied database
+ *   datanotes extension install | update | rollback | remove | list | check   extensions (src/node/extension-command.ts)
  *   datanotes mcp [--vault <folder> | --url <url> | serve] the MCP server for agents (src/mcp)
  *
  * Without a command, options alone mean `serve` (how the service has always been started). The MCP
@@ -37,6 +38,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (command === "status") return void (process.exitCode = await status(rest));
   if (command === "stop") return void (process.exitCode = await stop(rest));
   if (command === "store") return void (process.exitCode = await store(rest));
+  if (command === "extension") {
+    // loaded only for this command, like mcp
+    const { extensionMain } = await import("./extension-command");
+    return void (process.exitCode = await extensionMain(rest));
+  }
   if (command === "mcp") {
     // loaded only for this command: `serve` does not pay for the MCP SDK at start
     const { mcp } = await import("../mcp/command");

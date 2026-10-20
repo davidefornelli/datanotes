@@ -152,7 +152,7 @@ describe("datanotes mcp: help and errors", () => {
     // an option it does not know is refused with the closest one, never ignored
     const typo = fakeIo();
     expect(await run(["--valt", vault.root], typo)).toBeNull();
-    expect(typo.err()).toBe('datanotes mcp: unknown option --valt\nDid you mean "--vault"? datanotes mcp takes: --vault, --database, --url, --token-file, --otlp-endpoint, --profile, --tools, --except, --owner-tools (datanotes mcp --help).\n');
+    expect(typo.err()).toBe('datanotes mcp: unknown option --valt\nDid you mean "--vault"? datanotes mcp takes: --vault, --database, --url, --token-file, --otlp-endpoint, --profile, --tools, --except, --owner-tools, --no-extensions (datanotes mcp --help).\n');
     const both = fakeIo();
     await run(["--vault", vault.root, "--url", engineUrl], both);
     expect(both.err()).toContain("pass --database (or --vault), or --url with --token-file, not both");

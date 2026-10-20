@@ -168,6 +168,8 @@ export async function startHttp(o: HttpOptions): Promise<{ port: number; close()
       transport.onclose = () => {
         if (transport.sessionId) drop(transport.sessionId, "transport closed");
       };
+      // the extensions load with the first token that reaches the engine; their instructions join the session's
+      await o.toolbox.prepare(token);
       const session = createSession({ toolbox: o.toolbox, instructions: o.toolbox.instructions(), token: (t) => t as string, version: o.version }); // every request carries its token (req.auth)
       await session.connect(transport);
       await transport.handleRequest(req, res, body);

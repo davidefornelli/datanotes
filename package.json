@@ -1,6 +1,6 @@
 {
   "name": "datanotes",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "mcpName": "io.github.davidefornelli/datanotes",
   "description": "The engine of your second brain: Markdown notes as database tables, for you and your agents.",
   "keywords": [
@@ -70,6 +70,16 @@
       "require": {
         "types": "./dist/api/mcp.d.cts",
         "default": "./dist/api/mcp.cjs"
+      }
+    },
+    "./extensions": {
+      "import": {
+        "types": "./dist/api/extensions.d.ts",
+        "default": "./dist/api/extensions.js"
+      },
+      "require": {
+        "types": "./dist/api/extensions.d.cts",
+        "default": "./dist/api/extensions.cjs"
       }
     },
     "./package.json": "./package.json"

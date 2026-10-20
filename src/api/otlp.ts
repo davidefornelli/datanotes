@@ -11,6 +11,7 @@
  * `otlpFromEnv` and `otlpTracesFromEnv`.
  */
 
+import { trimTrailingSlashes } from "./client.js";
 import type { SpanKind, SpanRecord, SpanStatusCode, TraceContext } from "./tracing.js";
 
 export type Severity = "DEBUG" | "INFO" | "WARN" | "ERROR";
@@ -197,7 +198,7 @@ abstract class OtlpBatcher<T> {
   flush(): Promise<void> {
     if (this.buffer.length === 0) return this.inflight;
     const send = this.o.send ?? fetchSend;
-    const url = `${this.o.endpoint.replace(/\/+$/, "")}${this.path}`;
+    const url = `${trimTrailingSlashes(this.o.endpoint)}${this.path}`;
     const protobuf = (this.o.protocol ?? "http/protobuf") === "http/protobuf";
     const headers = { "Content-Type": protobuf ? "application/x-protobuf" : "application/json", ...(this.o.headers ?? {}) };
     while (this.buffer.length > 0) {

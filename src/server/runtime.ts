@@ -46,6 +46,7 @@ import { externalRename } from "../core/hand-moves";
 import { WebhookDispatcher } from "./webhooks";
 import { engineStatus, type HostStatus } from "./status";
 import { TokenRegistry, tokenNameOf } from "./tokens";
+import { ExtensionRegistry } from "./extensions";
 import { OperationScheduler } from "./scheduler";
 import { ReadCache } from "./read-cache";
 import { openApiDocument } from "./openapi";
@@ -100,6 +101,8 @@ export class EngineRuntime {
   readonly api: DatanotesPublicApi;
   /** Named tokens and their permissions. */
   readonly tokens: TokenRegistry;
+  /** The extensions installed in the database: their records. */
+  readonly extensions: ExtensionRegistry;
   /** Models agents reported (start_session), kept across HTTP server restarts. */
   readonly identities = new SessionIdentities();
   /** Last start error of the HTTP server (shown in the settings). */
@@ -155,6 +158,7 @@ export class EngineRuntime {
     });
     this.api = createPublicApi(app, o.getSettings, o.saveSettings, this.semantic, () => this.feed, () => this.webhooks);
     this.tokens = new TokenRegistry({ app, getSettings: o.getSettings });
+    this.extensions = new ExtensionRegistry({ app, getSettings: o.getSettings });
     this.scheduler = new OperationScheduler(() => {
       const s = o.getSettings();
       return { enabled: s.writePriority, maxReadWaitMs: s.writePriorityMaxWaitMs };
@@ -227,6 +231,7 @@ export class EngineRuntime {
     return {
       ...base,
       ...this.tokens.handlers(),
+      ...this.extensions.handlers(),
       // an MCP server tells the engine the model behind an agent's session (later calls carry it)
       "/sessions/identify/": async (body) => {
         const session = typeof body.session === "string" ? body.session.trim() : "";
@@ -873,6 +878,7 @@ export class EngineRuntime {
     this.webhooks = null;
     await hooks?.stop();
     await this.tokens.stop();
+    await this.extensions.stop();
     await this.httpServer?.stop();
     this.httpServer = null;
     this.httpServerPort = null;

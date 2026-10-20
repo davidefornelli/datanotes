@@ -3238,8 +3238,61 @@ argument vacuum_table.retain_from_version optional
 argument vacuum_table.retain_from_version: integer
 argument vacuum_table.retain_from_version: null
 argument vacuum_table.table: string
+command extension check --json
+command extension install --add <value>
+command extension install --catalog <value>
+command extension install --create <value>
+command extension install --database <value>
+command extension install --dry-run
+command extension install --json
+command extension install --map <value>
+command extension install --schema <value>
+command extension install --settings <value>
+command extension install --store <value>
+command extension install --token-file <value>
+command extension install --url <value>
+command extension install --vault <value>
+command extension install --yes
+command extension list --database <value>
+command extension list --json
+command extension list --settings <value>
+command extension list --store <value>
+command extension list --token-file <value>
+command extension list --url <value>
+command extension list --vault <value>
+command extension remove --database <value>
+command extension remove --json
+command extension remove --settings <value>
+command extension remove --store <value>
+command extension remove --token-file <value>
+command extension remove --url <value>
+command extension remove --vault <value>
+command extension remove --yes
+command extension rollback --database <value>
+command extension rollback --json
+command extension rollback --settings <value>
+command extension rollback --store <value>
+command extension rollback --token-file <value>
+command extension rollback --url <value>
+command extension rollback --vault <value>
+command extension rollback --yes
+command extension update --add <value>
+command extension update --create <value>
+command extension update --database <value>
+command extension update --dry-run
+command extension update --from <value>
+command extension update --json
+command extension update --map <value>
+command extension update --settings <value>
+command extension update --store <value>
+command extension update --to <value>
+command extension update --token-file <value>
+command extension update --url <value>
+command extension update --vault <value>
+command extension update --yes
 command mcp --database <value>
 command mcp --except <value>
+command mcp --no-extensions
 command mcp --otlp-endpoint <value>
 command mcp --owner-tools
 command mcp --profile <value>
@@ -3249,6 +3302,7 @@ command mcp --url <value>
 command mcp --vault <value>
 command mcp serve --except <value>
 command mcp serve --host <value>
+command mcp serve --no-extensions
 command mcp serve --otlp-endpoint <value>
 command mcp serve --owner-tools
 command mcp serve --port <value>
@@ -3331,6 +3385,7 @@ environment DATANOTES_GIT_SYNC
 environment DATANOTES_HOST
 environment DATANOTES_INDEX_CHECK
 environment DATANOTES_MCP_EXCEPT
+environment DATANOTES_MCP_EXTENSIONS
 environment DATANOTES_MCP_HOST
 environment DATANOTES_MCP_OWNER_TOOLS
 environment DATANOTES_MCP_PORT
@@ -3410,6 +3465,9 @@ route GET /datanotes/docs
 route GET /datanotes/manual/
 route GET /datanotes/manual/{page}.md
 route GET /datanotes/openapi.json
+route POST /datanotes/extensions/
+route POST /datanotes/extensions/delete/
+route POST /datanotes/extensions/record/
 route POST /datanotes/manual/search/
 route POST /datanotes/openapi/
 route POST /datanotes/operations/add_column/

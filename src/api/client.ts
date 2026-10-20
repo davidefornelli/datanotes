@@ -148,12 +148,19 @@ function parse(text: string): unknown {
   }
 }
 
+/** `s` without its trailing "/" characters. A loop, not `/\/+$/`: that regex is quadratic on a long run of "/" not at the end. */
+export function trimTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return end === s.length ? s : s.slice(0, end);
+}
+
 export class DatanotesClient {
   readonly url: string;
   private readonly send: Transport;
 
   constructor(private readonly o: ClientOptions) {
-    this.url = o.url.replace(/\/+$/, "");
+    this.url = trimTrailingSlashes(o.url);
     this.send = o.transport ?? fetchTransport;
   }
 

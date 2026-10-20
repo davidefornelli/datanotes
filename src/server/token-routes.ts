@@ -30,9 +30,9 @@ export const OWNER_OPERATIONS: ReadonlySet<string> = new Set(["create_webhook", 
 
 /**
  * Routes besides the operations a token may always call: its own registry entry, the API's
- * description, and what an MCP server reports (the agent's model, its tool calls, the docs search).
+ * description, the installed extensions, and what an MCP server reports (the agent's model, its tool calls, the docs search).
  */
-export const READ_ROUTES = new Set(["/manual/search/", "/tokens/me/", "/tokens/update/", "/openapi/", "/openapi.json/", "/sessions/identify/", "/tool-calls/record/"]);
+export const READ_ROUTES = new Set(["/manual/search/", "/tokens/me/", "/tokens/update/", "/extensions/", "/openapi/", "/openapi.json/", "/sessions/identify/", "/tool-calls/record/"]);
 
 /** Administration of the engine and its status: only with the owner's token, never a named one (even with `maintain`). */
-export const OWNER_ADMIN_ROUTES = new Set(["/tokens/", "/tokens/create/", "/tokens/update/", "/tokens/delete/", "/tokens/rotate/", "/status/", "/stop/"]);
+export const OWNER_ADMIN_ROUTES = new Set(["/tokens/", "/tokens/create/", "/tokens/update/", "/tokens/delete/", "/tokens/rotate/", "/extensions/record/", "/extensions/delete/", "/status/", "/stop/"]);

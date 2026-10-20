@@ -42,6 +42,10 @@ npm run check:package   # the npm package's types (attw, publint, a nodenext con
   operations of `src/api/catalog.ts` (through `src/api/mcp.ts`). A client of the HTTP API: it imports only
   `src/api` and the MCP SDK, never the engine.
 
+The extension files live in two places: `src/api/extension-*.ts` (manifest, SDK, record, plan, host and
+files: no engine imports) and `src/node/extension-*.ts` (the `datanotes extension` commands and the
+fetching of code). The engine stores the installation records and never runs extension code.
+
 The MCP server lives here too, in `src/mcp/` (`datanotes mcp`): it imports only `src/api` and the MCP
 SDK, which is a devDependency bundled into `dist/datanotes.cjs`, and reaches the engine over HTTP like
 any other client.
@@ -145,6 +149,10 @@ docs paths below are under `guides/` unless they name another folder):
 | The engine cannot listen: a port in use or reserved, an address of another machine; a bad `--port` | `listenError` (`http-server.ts`), `parsePort` (`service.ts`) | exit 1 of `datanotes serve` | another `--port`, `--port 0`, an address of this machine | `administration/run-the-service.md#choose-the-port` |
 | A request while the engine stops; a bad `--timeout-s` of `datanotes stop`; `GET /stop/` | `http-server.ts`, `stop.ts` | 503, exit 1, 405 | wait for the stop, then start the engine again; POST | `administration/run-the-service.md#stop-the-engine` |
 | Store backup: a database without an id, a file over 95 MB to push | `store-backup.ts`, `store-command.ts` | `store_backup.hint` of the status, exit 1 | start the engine once; make the file smaller and start the repository again | `guides/history/back-up.md#…` |
+| Extension manifest | `validateManifest` (`src/api/extension-manifest.ts`) | exit 1 of `datanotes extension check` and `install` | `<path>: <problem>` for each problem, with the closest real key or column type | `develop/write-an-extension.md#write-the-manifest` |
+| Extension install plan | `planChanges` (`src/api/extension-plan.ts`) | exit 2 of `datanotes extension install` and `update` | each problem's own (`PlanProblem.hint`): the option that solves it | `administration/extensions.md#...` (`EXT_DOCS`) |
+| Extension tool refused | `ExtensionToolError`, `LoadedExtension.call` (`src/api/extension-host.ts`) | tool error | the extension's own hint | `read_docs("extensions/<name>/...")` |
+| Extension skipped | `loadExtensions` (`src/api/extension-host.ts`) | a line on stderr and a WARN log | the reason, and what to run | `administration/extensions.md#when-the-mcp-server-skips-an-extension` |
 | Unexpected error | `errorResponse` | 500 | none: not a mistake of the caller | none |
 
 Hand edits that break a rule are not errors: `check_table` and the change feed report them, and an
