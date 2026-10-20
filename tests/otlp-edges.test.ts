@@ -31,6 +31,14 @@ describe("OTLP exporter: the default transport (fetch)", () => {
     expect([x.sent, x.dropped]).toEqual([1, 0]);
   });
 
+  it("strips every trailing slash of the endpoint", async () => {
+    const urls: string[] = [];
+    const x = new OtlpLogExporter({ endpoint: "http://c:4318///", serviceName: "svc", flushMs: 0, send: async (u) => void urls.push(u) });
+    x.log("INFO", "hi");
+    await x.flush();
+    expect(urls).toEqual(["http://c:4318/v1/logs"]);
+  });
+
   it("counts a batch the collector refuses (HTTP 5xx) as dropped, without throwing", async () => {
     collector(503);
     const x = new OtlpLogExporter({ endpoint: "https://otel.example.com", serviceName: "datanotes", flushMs: 0 });
