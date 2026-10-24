@@ -288,11 +288,11 @@ describe("CHECKs that follow links: renames, missing tables, inverse edits, undo
     expect(batch.ok, JSON.stringify(batch.steps.map((s) => s.error ?? s.result?.violations))).toBe(true);
   });
 
-  it("renaming or dropping a table a CHECK reads through a link is refused; a missing ref table never fails unrelated writes (B2)", async () => {
+  it("renaming a table a CHECK reads through a link rewrites the link's ref, dropping it is refused; a missing ref table never fails unrelated writes (B2)", async () => {
     const v = await people();
-    const rename = await alterTable(v.app, v.settings, { table: "person", name: "people" });
-    expect(rename.ok).toBe(false);
-    expect(rename.conflicts.map((c) => c.message)).toEqual([expect.stringMatching(/^CHECK active_attendees of main\.work\.meeting reads main\.work\.person through a link/)]);
+    const rename = await alterTable(v.app, v.settings, { table: "person", name: "people" }, { dryRun: true });
+    expect([rename.ok, rename.conflicts]).toEqual([true, []]);
+    expect(rename.schema_references).toEqual([{ table: "main.work.meeting", column: "attendees", key: "ref", from: "main.work.person", to: "main.work.people" }]);
     const drop = await dropTable(v.app, v.settings, { table: "person", mode: "archive" });
     expect(drop.conflicts.map((c) => c.message)).toContainEqual(expect.stringMatching(/^CHECK active_attendees of main\.work\.meeting reads main\.work\.person/));
     expect((await insertRow(v.app, v.settings, { table: "meeting", values: { title: "Kickoff", attendees: [who("Cy")] } })).ok).toBe(true);

@@ -134,9 +134,10 @@ export function linkReaders(model: Metastore): LinkReader[] {
 }
 
 /**
- * Refusals of a rename or drop of table `full`: the link-following CHECKs and filtered link columns
- * of other tables that read it. A link column's `ref` is not rewritten when its table is renamed
- * or dropped, so they would stop working: they are named, to be dropped or changed first.
+ * Refusals of a drop of table `full`: the link-following CHECKs and filtered link columns of other
+ * tables that read it. Their link columns would point at no table, so they would stop working: they
+ * are named, to be dropped or changed first. (alter_table no longer asks: a rename or a move
+ * rewrites the `ref` of those link columns, and the rules, which name columns, follow it.)
  */
 export function readersBlocking(model: Metastore, full: string, verb: "rename" | "drop"): { message: string }[] {
   return linkReaders(model)

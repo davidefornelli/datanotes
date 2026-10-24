@@ -110,6 +110,27 @@ export interface PlannedNoteChange {
   body?: boolean;
 }
 
+/**
+ * A reference to a table in another definition: a column's `ref` or `vocabulary` (of a table or a
+ * base), or a table a view's query reads (`key`: `table`, `union[1].table`, `join.table`).
+ */
+export interface SchemaReference {
+  /** The table whose column names it (full name). */
+  table?: string;
+  /** The base whose column names it. */
+  base?: string;
+  /** The view whose query names it (full name). */
+  view?: string;
+  /** The column of the table or base. */
+  column?: string;
+  /** Where the name is: `ref` or `vocabulary` of the column, or a key of the view's query. */
+  key: string;
+  /** The name as written before. */
+  from: string;
+  /** The name written in its place. */
+  to: string;
+}
+
 export interface OpResult {
   ok: boolean;
   op: string;
@@ -141,6 +162,11 @@ export interface OpResult {
   links_added?: LinkAdded[];
   /** Mentions in that text left unlinked: the agent reads the candidates and links the right one. */
   ambiguous_mentions?: LinkAmbiguous[];
+  /**
+   * alter_table that moves or renames a table: the references to it in other definitions that the
+   * move rewrites (or, on a dry run, would). Present when there is one.
+   */
+  schema_references?: SchemaReference[];
   /** Query lines rewritten (or to be rewritten on a dry run) by `rename_value`. */
   /** Occurrences `rename_value` did not change because it cannot be sure they refer to the table. */
 }

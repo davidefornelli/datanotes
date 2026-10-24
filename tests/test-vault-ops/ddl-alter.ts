@@ -9,7 +9,7 @@ const TASK_DIR = "datanotes/work/planning/task";
 
 export const scenarios: Scenario[] = [
   {
-    name: "alter_table: tags, description, aliases, template, fields, archive, history; folders and names, refused when a CHECK of another table reads it; undo",
+    name: "alter_table: tags, description, aliases, template, fields, archive, history; folders and names, followed by the views and the links of other tables that name it; undo",
     ops: ["alter_table", "undo_migration"],
     async run(t) {
       const before = t.files();
@@ -47,14 +47,22 @@ export const scenarios: Scenario[] = [
       expect(t.exists(`${TASK_DIR}/doing - Pick a query engine.md`)).toBe(true);
       expect(pattern.files_moved).toBe(7);
 
-      // a new name and a new schema: rows move; a table read through a link by a CHECK cannot
+      // a new name and a new schema: rows move, and the views that read the table follow it
       const moved = await alter({ table: "task", name: "todo", schema: "ops" });
       expect(t.exists("datanotes/work/ops/todo/doing - Pick a query engine.md")).toBe(true);
       expect(t.read("datanotes/work/ops/todo/doing - Pick a query engine.md")).toMatch(/^---\ntable: work\.ops\.todo\n/);
       expect((await t.ok<Rows>("select_rows", { table: "work.ops.todo" })).total).toBe(7);
-      void moved;
-      const refused = await t.refused("alter_table", { table: "project", name: "initiative" });
-      expect(refused).toContain("CHECK not_on_an_area of work.ops.todo reads work.planning.project through a link: drop or change it before you rename the table (link targets are not rewritten)");
+      expect((moved as WriteResult & { schema_references: unknown[] }).schema_references).toEqual([
+        { view: "work.planning.vw_open_tasks", key: "table", from: "work.planning.task", to: "work.ops.todo" },
+        { view: "work.planning.vw_project_tasks", key: "table", from: "work.planning.task", to: "work.ops.todo" },
+      ]);
+      expect((await t.ok<Rows>("select_rows", { table: "vw_open_tasks" })).total).toBe(5);
+      // a table read through a link by a CHECK of another table: its links follow, the CHECK still holds
+      const renamed = await alter({ table: "project", name: "initiative" });
+      expect((renamed as WriteResult & { schema_references: unknown[] }).schema_references).toContainEqual({ table: "work.ops.todo", column: "project", key: "ref", from: "work.planning.project", to: "work.planning.initiative" });
+      expect((await t.ok<{ violations: unknown[] }>("check_table", { table: "work.ops.todo" })).violations).toEqual([]);
+      expect(await t.refused("insert_row", { table: "work.ops.todo", values: { title: "Plan the year", project: "[[Engineering]]" } })).toContain("not_on_an_area");
+      expect((await t.ok<Rows>("select_rows", { table: "vw_engineering" })).total).toBe(5);
       await undoBackTo(t, before, ...ids);
     },
   },

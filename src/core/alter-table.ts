@@ -7,8 +7,27 @@ import type { App, TFile } from "./host";
 import { emptyChangeSet, type ChangeSet } from "./changeset";
 import { transactionLogDir, listVersions } from "./transaction-log";
 import { storeList } from "./store";
-import { readersBlocking } from "./link-paths";
-import { cachedMetastore, catalogTablePath, loadMetastore, metastorePath, orderedToEntry, refOf, rowTableFull, setTableEntries, tableTags, withTableTags, type CatalogRef } from "./metastore";
+import {
+  cachedMetastore,
+  catalogTablePath,
+  catalogTables,
+  catalogViews,
+  loadMetastore,
+  metastorePath,
+  orderedToEntry,
+  parseMetastore,
+  refOf,
+  resolveCatalogRef,
+  rowTableFull,
+  setBaseEntry,
+  setTableEntries,
+  setViewEntry,
+  tableTags,
+  withTableTags,
+  type CatalogRef,
+  type CatalogTableEntry,
+  type Metastore,
+} from "./metastore";
 import {
   finish,
   serializeOptions,
@@ -24,6 +43,7 @@ import {
   type OpConflict,
   type OpResult,
   type RunOptions,
+  type SchemaReference,
 } from "./engine";
 import { fmDelete, fmGet, fmSet, readOrderedFromMarkdown } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
@@ -59,6 +79,71 @@ function archivedRowFiles(app: App, settings: DatanotesSettings, t: LoadedTable)
 }
 
 
+/** The table a view's query names (`table`, a union branch's, a join's), on `model`; null when it names none. */
+function viewTable(model: Metastore, name: string): string | null {
+  try {
+    return resolveCatalogRef(model, name)?.full ?? null;
+  } catch {
+    return null; // ambiguous: it names no one table
+  }
+}
+
+/**
+ * The references to table `from` in the other definitions of the metastore, rewritten to `to`
+ * (the table moved or renamed): the `ref` and `vocabulary` of the columns of other tables and of
+ * the bases, and the tables of the views' queries (`table`, `union[].table`, `join.table`).
+ * `text` is the metastore as the move writes it (the table under its new name); `model` is the
+ * metastore as it is. A view that names the table so that the name still finds it (`food`, after a
+ * move to another schema) is left as written. CHECKs and link filters (`ref_where` / `ref_by`)
+ * name columns, never tables: they follow the rewritten `ref`.
+ */
+function movedReferences(text: string, model: Metastore, from: string, to: string): { text: string; references: SchemaReference[] } {
+  const references: SchemaReference[] = [];
+  const moved = (c: Record<string, unknown>, owner: { table: string } | { base: string }) => {
+    let out = c;
+    for (const key of ["ref", "vocabulary"] as const) {
+      if (c[key] !== from) continue;
+      out = { ...out, [key]: to };
+      references.push({ ...owner, column: String(c.name), key, from, to });
+    }
+    return out;
+  };
+  let after = text;
+  for (const [name, base] of Object.entries(model.bases)) {
+    const columns = base.columns.map((c) => moved(c, { base: name }));
+    if (columns.some((c, i) => c !== base.columns[i])) after = setBaseEntry(after, name, { ...base, columns });
+  }
+  const tables: [CatalogRef, CatalogTableEntry][] = [];
+  for (const { ref, entry } of catalogTables(model)) {
+    if (ref.full === from) continue; // the moved table: the move writes its entry
+    const columns = entry.columns.map((c) => moved(c, { table: ref.full }));
+    if (columns.some((c, i) => c !== entry.columns[i])) tables.push([ref, { ...entry, columns }]);
+  }
+  after = setTableEntries(after, tables);
+  let next: Metastore;
+  try {
+    next = parseMetastore(after);
+  } catch {
+    return { text: after, references }; // the new name is a view's: a conflict refuses the move
+  }
+  for (const { ref, view } of catalogViews(model)) {
+    const q = view.query;
+    const renamed = (name: unknown, key: string): unknown => {
+      if (typeof name !== "string" || viewTable(model, name) !== from || viewTable(next, name) === to) return name;
+      references.push({ view: ref.full, key, from: name, to });
+      return to;
+    };
+    const query: Record<string, unknown> = { ...q };
+    if (q.table !== undefined) query.table = renamed(q.table, "table");
+    if (Array.isArray(q.union)) {
+      query.union = q.union.map((b: unknown, i) => (b && typeof b === "object" ? { ...(b as object), table: renamed((b as { table?: unknown }).table, `union[${i}].table`) } : b));
+    }
+    if (q.join && typeof q.join === "object" && !Array.isArray(q.join)) query.join = { ...(q.join as object), table: renamed((q.join as { table?: unknown }).table, "join.table") };
+    if (JSON.stringify(query) !== JSON.stringify(q)) after = setViewEntry(after, ref, { ...view, query });
+  }
+  return { text: after, references };
+}
+
 /** Move a table and its rows (ALTER TABLE): its entry in `metastore.yaml` goes to `dest`, every row to its new computed path. */
 async function relocateTable(
   app: App,
@@ -90,6 +175,7 @@ async function relocateTable(
   let member: (ordered: OrderedFrontmatter) => OrderedFrontmatter;
   const taken = new Set<string>();
   let cs: ChangeSet;
+  let references: SchemaReference[] = [];
   {
     const ref = dest.catalogRef;
     options = parseTableOptions([{ ...merged, name: ref.table }]);
@@ -101,9 +187,6 @@ async function relocateTable(
     const sch = model.catalogs[ref.catalog]?.schemas[ref.schema];
     if (ref.full !== t.catalog.ref.full && (sch?.tables[ref.table] || sch?.views[ref.table])) {
       conflicts.push({ path: catalogTablePath(settings, ref.full), message: `${ref.full} already exists` });
-    }
-    if (ref.full !== t.catalog.ref.full) {
-      for (const r of readersBlocking(model, t.catalog.ref.full, "rename")) conflicts.push({ path: catalogTablePath(settings, t.catalog.ref.full), ...r });
     }
     let schemaOrdered = fmSet(t.ordered.filter(([k]) => !membership.has(k)), TABLE_KEY, serializeOptions(options));
     for (const [k, v] of Object.entries(fields)) schemaOrdered = v === null ? fmDelete(schemaOrdered, k) : fmSet(schemaOrdered, k, v);
@@ -122,8 +205,12 @@ async function relocateTable(
     if (instructions === null || (typeof instructions === "string" && instructions.trim() === "")) delete entry.instructions;
     else if (typeof instructions === "string") entry.instructions = instructions;
     // a move: the old entry removed and the new one set, in one edit of the text
-    const after = setTableEntries(text, [...(t.catalog.ref.full !== ref.full ? [[t.catalog.ref, null] as const] : []), [ref, tags === undefined ? entry : withTableTags(entry, tags)] as const]);
     const from = t.catalog.ref.full;
+    // a vocabulary of the table itself follows its new name, as its links to itself do (ownColumns)
+    if (from !== ref.full) entry.columns = entry.columns.map((c) => (c.vocabulary === from ? { ...c, vocabulary: ref.full } : c));
+    let after = setTableEntries(text, [...(from !== ref.full ? [[t.catalog.ref, null] as const] : []), [ref, tags === undefined ? entry : withTableTags(entry, tags)] as const]);
+    // what names the table in other definitions follows it too, as the links in the notes do
+    if (from !== ref.full) ({ text: after, references } = movedReferences(after, model, from, ref.full));
     cs = emptyChangeSet("alter_table", from === ref.full ? `alter table ${from}` : `move table ${from} to ${ref.full}`, catalogTablePath(settings, ref.full));
     if (after !== text) cs.texts.push({ path: metastorePath(settings), before: text, after });
     // The transaction log follows the table to its new name.
@@ -215,7 +302,8 @@ async function relocateTable(
     const to = claim(`${newArchive}/${basenameOf(f.path)}`, f.path);
     relink({ path: f.path, ordered }, to);
   }
-  return finish(app, settings, cs, conflicts, [], opts);
+  const result = await finish(app, settings, cs, conflicts, [], opts);
+  return references.length > 0 ? { ...result, schema_references: references } : result;
 }
 
 // --- alter_table ---

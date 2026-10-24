@@ -236,15 +236,16 @@ describe("filtered link targets: renames, same names, missing tables, schema cha
     expect(opts.rows.map((r) => r.path)).toEqual([`${D}/a/Dan.md`]);
   });
 
-  it("a ref_where reading a table refuses its rename; a ref that is not a table only refuses the rows written (B2)", async () => {
+  it("a ref_where reading a table follows its rename; a ref that is not a table only refuses the rows written (B2)", async () => {
     const v = await projects();
     await createTable(v.app, v.settings, described({
       schema: "work", name: "task", options: { filename: "{name}" },
       columns: [{ name: "name", type: "string", required: true }, { name: "project", type: "link", ref: "main.work.project", ref_where: { kind: "project" } }],
     }));
     expect((await insertRow(v.app, v.settings, { table: "task", values: { name: "Plan", project: ref("Site") } })).ok).toBe(true);
-    const rename = await alterTable(v.app, v.settings, { table: "project", name: "initiative" });
-    expect(rename.conflicts.map((c) => c.message)).toEqual([expect.stringMatching(/^project \(ref_where \/ ref_by\) of main\.work\.task reads main\.work\.project through a link/)]);
+    const rename = await alterTable(v.app, v.settings, { table: "project", name: "initiative" }, { dryRun: true });
+    expect([rename.ok, rename.conflicts]).toEqual([true, []]);
+    expect(rename.schema_references).toEqual([{ table: "main.work.task", column: "project", key: "ref", from: "main.work.project", to: "main.work.initiative" }]);
     v.write(METASTORE, v.read(METASTORE).replace("ref: main.work.project", "ref: main.work.nobody"));
     expect((await insertRow(v.app, v.settings, { table: "project", values: { name: "Lab", kind: "project", parent: ref("Home") } })).ok).toBe(true);
     const write = await updateRow(v.app, v.settings, { table: "task", path: "Datanotes/main/work/task/Plan.md", set: { name: "Plan" } });
