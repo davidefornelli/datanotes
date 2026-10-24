@@ -5,6 +5,21 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.4.1
+
+Datanotes 3.4.1 closes three gaps in token permissions. It only adds to 3.4: no operation, argument or setting goes away. One fix can refuse a write that 3.4.0 allowed, so check your tokens before you update.
+
+### Fixes
+
+- **Writes into other tables need `write`**: a row write can change rows of tables it doesn't name, through `on_referenced: "set_null"`, inverse links or `align_relations`. A named token now needs `write` on those tables too. Otherwise the engine refuses the whole write with 403, and nothing is written. The refusal names the table, unless the token may not read it. [A write into another table needs write too](/guides/security/tokens/#a-write-into-another-table-needs-write-too) explains it.
+- **A session belongs to one token**: the first token that sends a session id to `sessions/identify/` or `tool-calls/record/` owns it. Another named token gets 403 for that session, and nothing is stored. The owner may use any session. [A session belongs to one token](/guides/security/who-did-what/#a-session-belongs-to-one-token) explains it.
+- **Counts follow `read`**: for a token with limited `read`, `file_backlink_count` counts only links from notes it may read. `describe_semantic_index` counts only those notes in `files`, `passages` and `pending`.
+
+### Before you update
+
+- **Token `write`**: an integration that relies on those side effects gets 403 after the update. Add the other table to the token's `write`, and to its `read` when `read` is limited.
+- **Session ids**: give each token its own session ids. `datanotes mcp` already does: it makes a random id for each session.
+
 ## 3.4.0
 
 Datanotes 3.4.0 brings three additions:

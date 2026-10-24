@@ -55,3 +55,10 @@ export const OWNER_ADMIN_ROUTES = new Set(["/tokens/", "/tokens/create/", "/toke
  */
 export const READ_SCOPE_UNSUPPORTED = "read permissions need Node's AsyncLocalStorage";
 export const READ_SCOPE_UNSUPPORTED_HINT = guide(`This token has "read" patterns, which this runtime cannot enforce: run the engine on Node (datanotes serve), or have the owner pass "read": null to tokens/update/ for this token.`, "tokenRead");
+
+/**
+ * The refusal (503) of a row write by a token with limited "write" on a runtime that cannot carry
+ * its write scope (no AsyncLocalStorage): the rows the write changes in other tables could not be checked.
+ */
+export const WRITE_SCOPE_UNSUPPORTED = "write permissions need Node's AsyncLocalStorage";
+export const WRITE_SCOPE_UNSUPPORTED_HINT = guide(`This token's "write" patterns limit the tables its writes may change, which this runtime cannot enforce: run the engine on Node (datanotes serve), or write with a token whose "write" is ["*"].`, "tokenWrite");

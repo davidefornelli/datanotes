@@ -99,6 +99,10 @@ const STATUS_TEXT: Record<number, string> = {
 const READ_DENIED_TEXT =
   "A named token whose `read` patterns do not cover the table, view or note the request names (such as `token cook may not read personal.health.weight`). Sets it did not name (listings, bases, search, the graph, the change feed) are filtered instead.";
 
+/** 403 of the routes an MCP server reports its agents on (runtime.ts `sessionTaken`). */
+const SESSION_TAKEN_TEXT =
+  "The `session` belongs to another named token: the first token to report a session owns it (compared on its first 16 characters), and only that token and the owner may report it again. Nothing is stored.";
+
 const ERRORS = {
   400: { description: STATUS_TEXT[400], content: json(ref("Error")) },
   401: { $ref: "#/components/responses/Unauthorized" },
@@ -124,6 +128,8 @@ interface RouteDoc {
   extra?: Schema;
   /** When the route may answer 503: why. */
   unavailable?: string;
+  /** When a route open to every token may still answer 403: why. */
+  forbidden?: string;
 }
 
 /** A `POST /datanotes/<route>` operation with the responses it can really give. */
@@ -133,6 +139,7 @@ function postRoute(d: RouteDoc): Schema {
   const read = op !== undefined ? READ_OPERATIONS.has(op) : READ_ROUTES.has(d.route) && d.route !== "/tokens/update/";
   if (!read) responses["403"] = ERRORS[403];
   else if (op !== undefined) responses["403"] = ERRORS.readDenied;
+  if (d.forbidden) responses["403"] = { description: d.forbidden, content: json(ref("Error")) };
   if (d.namesTable) responses["404"] = ERRORS[404];
   const refused = op !== undefined ? refusedStatus(op) : undefined;
   if (refused === 409) {
@@ -491,6 +498,7 @@ export function openApiDocument(version: string): Schema {
       route: "/sessions/identify/",
       operationId: "identify_session",
       summary: "Tell the engine the model and harness behind an agent session (what an MCP server reports): later requests carrying that session in `X-Datanotes-Actor` are journaled with it. Any token may call it.",
+      forbidden: SESSION_TAKEN_TEXT,
       body: { type: "object", required: ["session"], properties: { session: { type: "string" }, model: { type: "string" }, harness: { type: "string" } } },
       bodyRequired: true,
       result: ok,
@@ -499,6 +507,7 @@ export function openApiDocument(version: string): Schema {
       route: "/tool-calls/record/",
       operationId: "record_tool_call",
       summary: "Record an agent's tool call in the change feed (`tool_call` events): what an MCP server reports after each call, its own tools included (`served_by`). Any token may call it.",
+      forbidden: SESSION_TAKEN_TEXT,
       body: {
         type: "object",
         required: ["tool"],

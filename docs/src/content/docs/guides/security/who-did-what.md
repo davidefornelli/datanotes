@@ -37,6 +37,14 @@ Tool calls appear on the change feed as events with `kind: "tool_call"`, sent on
 
 A large result costs less to report when the program cuts it first. The engine answers `takes_summary: true` when it accepts a cut call. Then send the value cut at 1,000 characters, and the result’s `summary` next to it. The event is the same as for the whole call. `datanotes mcp` does this after its first report.
 
+### A session belongs to one token
+
+The first token that reports a session owns it. Both routes count as a report. After that, only that token and the owner can report the session. Another named token gets a 403 error, and the engine stores nothing. So no token can rename another agent’s model or add tool calls to its session.
+
+Give each agent session its own id, such as a new UUID. The engine compares the first 16 characters of the id, so make them unique. When one program serves agents with several tokens, give each token its own sessions.
+
+The engine keeps the owners of the last 2,000 sessions in memory, and forgets them when it restarts.
+
 ## Read who did what
 
 Three operations read the record:

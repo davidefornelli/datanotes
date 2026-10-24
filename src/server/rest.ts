@@ -54,6 +54,7 @@ import { argumentsOf, checkArguments, toolDocs } from "../api/guidance";
 import { operationRoute } from "../api/requests";
 import { currentActor } from "../core/actor";
 import { currentReadScope, READ_DENIED_GUIDANCE, ReadDeniedError, tableReadable } from "../core/read-scope";
+import { WriteDeniedError } from "../core/write-scope";
 import { pathHidden } from "../core/changeset-checks";
 import { READ_OPERATIONS } from "./token-routes";
 import { operationClass, type OperationScheduler } from "./scheduler";
@@ -273,7 +274,7 @@ export function errorResponse(e: unknown, op?: string, route?: string): HandlerR
   if (e instanceof MigrationNotFoundError) return { status: 404, json: body(guide("list_migrations lists the journal ids (migration_id) of the writes, newest first.", "undo")) };
   if (e instanceof VaultPathNotFoundError) return { status: 404, json: body(guide("list_folder lists a folder, search_notes finds notes by their words.", "readNote")) };
   if (e instanceof ReadDeniedError) return { status: 403, json: body(READ_DENIED_GUIDANCE) };
-  if (e instanceof Forbidden) return { status: 403, json: body(FORBIDDEN_HINT) };
+  if (e instanceof Forbidden || e instanceof WriteDeniedError) return { status: 403, json: body(FORBIDDEN_HINT) };
   if (e instanceof AmbiguousCatalogRefError) {
     return { status: 409, json: { ...body(guide(`Name the table in full (catalog.schema.table): ${e.candidates.join(" or ")}.`, "catalogs")), tables: e.candidates } };
   }
@@ -731,6 +732,8 @@ export function createHandlers(
     batch: async (b) => {
       const operations = list(b, "operations")!;
       if (operations.length === 0) throw new BadRequest(`"operations" must be a non-empty list`);
+      // the steps refused because they change rows of a table the token may not write (403)
+      const denied = new Set<number>();
       const steps = operations.map((raw, i) => {
         const { op, ...args } = raw as Body;
         if (typeof op !== "string") throw new BadRequest(`operation ${i} needs "op"`);
@@ -746,7 +749,10 @@ export function createHandlers(
           op,
           run: async (dryRun: boolean): Promise<OpResult> => {
             // an error is answered as the operation answers it: its message, with its guidance
-            const res = await ops[op]!({ ...args, dry_run: dryRun }).catch((e: unknown) => errorResponse(e, op));
+            const res = await ops[op]!({ ...args, dry_run: dryRun }).catch((e: unknown) => {
+              if (e instanceof WriteDeniedError) denied.add(i);
+              return errorResponse(e, op);
+            });
             // a write's result (done, refused, failed) has its "op"; an error is the step's error
             if ("op" in (res.json as object)) return res.json as OpResult;
             throw stepFailure(res.json);
@@ -759,9 +765,16 @@ export function createHandlers(
       });
       // a step that failed partway (not refused) makes the batch a failure: 503 once all is rolled back
       const failedStep = r.failed_at !== undefined && (r.steps[r.failed_at]?.result?.failed.length ?? 0) > 0;
-      const status = r.ok ? 200 : r.rolled_back === false ? 500 : writeStatus(failedStep, true);
+      // a step refused for a table the token may not write: the batch is refused as that write is (403)
+      const forbidden = r.failed_at !== undefined ? (denied.has(r.failed_at) ? r.failed_at : undefined) : [...denied].sort((a, b) => a - b)[0];
+      const status = r.ok ? 200 : r.rolled_back === false ? 500 : forbidden !== undefined ? 403 : writeStatus(failedStep, true);
       // each step's result is redacted already (opResponse); what the rollback reports is too
       const answer = redactBatchRollback(r, app, s());
+      if (status === 403) {
+        // as the guard refuses a step: "operation <i>: <why>", with the step's hint and docs
+        const step = answer.steps[forbidden!]!;
+        return { status, json: { ...answer, error: `operation ${forbidden}: ${step.error}`, hint: step.hint, docs: step.docs } };
+      }
       return { status, json: answer.ok ? answer : { ...answer, ...batchGuidance(answer) } };
     },
 

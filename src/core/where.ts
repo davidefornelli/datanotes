@@ -15,7 +15,7 @@ import { isEmptyValue, isValidDate, isValidDatetime, parseWikilink } from "./val
 import { basenameOf } from "./path-templates";
 import { hasThisTokens } from "./this-tokens";
 import { guide, unknownColumn, unknownOperator, type Guidance } from "./hints";
-import { assertTableReadable } from "./read-scope";
+import { assertTableReadable, currentReadScope, pathReadable } from "./read-scope";
 
 const LOGICAL_HINT = guide(`"and" and "or" take a list of where objects, "not" one: {"or": [{"status": "watched"}, {"rating": {"gte": 4}}]}.`, "logical");
 
@@ -222,19 +222,32 @@ export function readableKeys(t: LoadedTable, settings: DatanotesSettings): Set<s
 
 export type RowGetter = (r: LoadedRow, col: string) => unknown;
 
-/** Reads a row's value, `path` and the file columns included. Backlinks need `app`. */
+/**
+ * Reads a row's value, `path` and the file columns included. Backlinks need `app`; under a read
+ * scope (read-scope.ts) they count only the notes the token may read.
+ */
 export function rowGetter(app: App | null, t: LoadedTable, settings: DatanotesSettings, tz = ""): RowGetter {
   const real = knownKeys(t, settings);
   let inlinks: Map<string, number> | null = null;
+  const scope = currentReadScope();
+  /** Whether a note linking to a row counts: always without a scope; else once per note, remembered. */
+  const seen = new Map<string, boolean>();
+  const counts = (src: string): boolean => {
+    if (!scope) return true;
+    let ok = seen.get(src);
+    if (ok === undefined) seen.set(src, (ok = pathReadable(app!, settings, src, scope)));
+    return ok;
+  };
   const backlinks = (path: string): number | null => {
     if (!app) return null;
     // a host that keeps backlinks counts them for one note (no pass over every link)
     const kept = app.metadataCache.backlinksOf;
-    if (kept) return Object.keys(kept.call(app.metadataCache, path)).filter((src) => src !== path).length;
+    if (kept) return Object.keys(kept.call(app.metadataCache, path)).filter((src) => src !== path && counts(src)).length;
     if (!inlinks) {
       inlinks = new Map();
       const resolved = app.metadataCache.resolvedLinks;
       for (const [src, dests] of Object.entries(resolved)) {
+        if (!counts(src)) continue;
         for (const d of Object.keys(dests)) if (d !== src) inlinks.set(d, (inlinks.get(d) ?? 0) + 1);
       }
     }

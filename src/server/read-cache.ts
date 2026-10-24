@@ -15,7 +15,8 @@
  *   folder is deleted or renamed (the host tells nothing of the folders inside it);
  * - the graph operations read the rows of every table and the links between notes: those tables'
  *   versions and the version of the links; a `select_rows` that reads `file_backlink_count`
- *   reads its tables and the links;
+ *   reads its tables and the links (under a token's read scope, every table: only the notes of
+ *   the tables it may read count);
  * - a dotted key in a filter (`{"project.status": …}`): the tables its link columns lead to; one
  *   that cannot be followed from the metastore: the whole vault;
  * - every other cached read (links followed, `within`, a search, a base) may read any note: the
@@ -45,6 +46,7 @@ import { cachedMetastore, catalogTables, loadMetastore, metastorePath, rowTableF
 import { queryTables, refOf } from "../core/query-tables";
 import type { DatanotesSettings } from "../core/settings";
 import { contentHash } from "../core/file-cache";
+import { currentReadScope } from "../core/read-scope";
 import { vaultIndex } from "../core/vault-index";
 
 /** Reads whose answers are kept: their answer depends on the vault and the metastore only. */
@@ -250,7 +252,7 @@ export class ReadCache {
     const settings = this.getSettings();
     // the metastore the operation will read (it is read again when its file changed on disk)
     const model = (await loadMetastore(this.app, settings).catch(() => null))?.model ?? null;
-    const deps = readDeps(op, body, model);
+    const deps = readDeps(op, body, model, currentReadScope() !== null);
     if (!deps) return null;
     if (!this.looseKnown) this.indexLoose(settings);
     if (deps.links && !this.linkPrints) this.printLinks();
@@ -419,8 +421,8 @@ function settingsKey(s: DatanotesSettings): string {
   return JSON.stringify(s, (k, v: unknown) => (SECRET_SETTINGS.has(k) ? undefined : v));
 }
 
-/** What a read depends on, or null when its answer must not be kept. */
-export function readDeps(op: string, body: Record<string, unknown>, model: Metastore | null): Deps | null {
+/** What a read depends on, or null when its answer must not be kept. `restricted`: the caller has a read scope. */
+export function readDeps(op: string, body: Record<string, unknown>, model: Metastore | null, restricted = false): Deps | null {
   if (!CACHED_READS.has(op)) return null;
   const text = JSON.stringify(body);
   if (text.includes("{now")) return null;
@@ -431,7 +433,12 @@ export function readDeps(op: string, body: Record<string, unknown>, model: Metas
     const found = new Set<string>();
     const r = queryTables(body, model, found, 0);
     if (r.now || r.store) return null;
-    if (!r.vault) return { tables: [...found].sort(), today: today || r.today, ...(r.links ? { links: true } : {}) };
+    if (!r.vault) {
+      // under a read scope, backlinks count only the notes of readable tables: a linking note that
+      // joins or leaves a table changes the count, so every table's rows count
+      const tables = r.links && restricted ? catalogTables(model).map(({ ref }) => ref.full) : [...found];
+      return { tables: tables.sort(), today: today || r.today, ...(r.links ? { links: true } : {}) };
+    }
     // a read of the whole vault may run any view (`within` a view's rows): the time of every view counts
     const views = viewTimes(model);
     if (views.now) return null;

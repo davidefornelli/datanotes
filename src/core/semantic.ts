@@ -547,17 +547,28 @@ export class SemanticIndex {
     return v;
   }
 
+  /** The index's counts; under a read scope (read-scope.ts), of the notes the token may read only. */
   status(): SemanticStatus {
     const s = this.getSettings();
+    const scope = currentReadScope();
+    const readable = (path: string) => !scope || pathReadable(this.app, s, path, scope);
+    let files = 0;
     let passages = 0;
-    for (const f of this.files.values()) passages += f.passages.length;
+    for (const [path, f] of this.files) {
+      if (!readable(path)) continue;
+      files++;
+      passages += f.passages.length;
+    }
+    let pending = 0;
+    if (scope) for (const path of this.pending) pending += readable(path) ? 1 : 0;
+    else pending = this.pending.size;
     return {
       enabled: s.semanticEnabled,
       provider: s.semanticProvider,
       model: s.semanticModel,
-      files: this.files.size,
+      files,
       passages,
-      pending: this.pending.size,
+      pending,
       running: this.running !== null,
       ...(this.lastSync ? { last_sync: this.lastSync } : {}),
       ...(this.lastError ? { last_error: this.lastError } : {}),

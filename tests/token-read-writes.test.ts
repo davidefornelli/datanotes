@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 import { runWithReadScope, type ReadScope } from "../src/core/read-scope";
-import { adoptRows } from "../src/core/rows";
+import { adoptRows, deleteRows, insertRow, mergeRows, updateRows } from "../src/core/rows";
 import type { OpResult } from "../src/core/engine";
 import { redactWriteAnswer, type HandlerResponse } from "../src/server/rest";
 import { expectNoLeak, MEALS, PANTRY, rowsOf, setupReadTokens, WEIGHT, type ReadSetup } from "./helpers/read-tokens";
@@ -21,6 +21,11 @@ const SALT = "Datanotes/personal/food/pantry/salt.md";
 
 type Answer = Record<string, unknown> & { planned_edits: { path: string }[]; conflicts: { path: string; message: string }[]; violations: { path: string; violations: Record<string, unknown>[] }[] };
 const json = (r: HandlerResponse) => r.json as Answer;
+
+/** A write in the engine, in cook's read scope (no write scope: the guard's refusal left out), its answer as cook gets it. */
+async function asCook(s: ReadSetup, write: () => Promise<OpResult>): Promise<Answer> {
+  return runWithReadScope(COOK, async () => redactWriteAnswer(await write(), s.v.app, s.v.settings) as unknown as Answer);
+}
 
 /** Must have worked. */
 async function owner(s: ReadSetup, op: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -69,24 +74,24 @@ describe("write answers of a restricted token: inverse-link edits", () => {
     expect(rowsOf(await s.op("owner", "select_rows", { table: PANTRY, where: { item: "milk" } }))[0]).toMatchObject({ for_weight: "[[Morning weigh-in]]" });
   });
 
+  // a write by cook that edits a weight row is refused now (tests/token-write-scope.test.ts); the
+  // answer of such a write, made in cook's read scope, still leaves out what it may not read
   it("drops the inverse-link edit of the weight row from the answer, dry run or not; the owner reads it written", async () => {
     const s = await setupReadTokens();
     await withInverse(s);
     const args = { table: PANTRY, values: { item: "milk", weighed: "[[Morning weigh-in]]" } };
-    const dry = await s.op("cook", "insert_row", { ...args, dry_run: true });
-    expect(dry.status).toBe(200);
-    expect(json(dry)).toMatchObject({ ok: true, dry_run: true, notes_changed: 0, planned_edits: [], planned_creates: [MILK] });
-    expectNothingOfHealth(dry);
     // the owner's dry run shows the edit
     const full = await s.op("owner", "insert_row", { ...args, dry_run: true });
     expect(json(full).planned_edits).toEqual([{ path: s.paths.heavy, set: { bought: ["[[milk]]"] }, remove: [] }]);
-    // legacy reads everything (no "read"): its answer is the owner's
-    expect(stable(await s.op("legacy", "insert_row", { ...args, dry_run: true }))).toEqual(stable(full));
+    // cook may not write the weight row: refused, dry run or not
+    for (const dry_run of [true, false]) expect((await s.op("cook", "insert_row", { ...args, dry_run })).status).toBe(403);
 
-    const r = await s.op("cook", "insert_row", args);
-    expect(r.status).toBe(200);
-    expect(json(r)).toMatchObject({ ok: true, dry_run: false, files_created: 1, planned_edits: [], planned_creates: [MILK] });
-    expectNothingOfHealth(r);
+    const dry = await asCook(s, () => insertRow(s.v.app, s.v.settings, args, { dryRun: true }));
+    expect(dry).toMatchObject({ ok: true, dry_run: true, notes_changed: 0, planned_edits: [], planned_creates: [MILK] });
+    expectNothingOfHealth({ status: 200, json: dry });
+    const r = await asCook(s, () => insertRow(s.v.app, s.v.settings, args));
+    expect(r).toMatchObject({ ok: true, dry_run: false, files_created: 1, planned_edits: [], planned_creates: [MILK] });
+    expectNothingOfHealth({ status: 200, json: r });
     // D10: the write is the same, the weight row got its inverse link
     expect(rowsOf(await s.op("owner", "select_rows", { table: WEIGHT, where: { label: "Morning weigh-in" } }))[0]).toMatchObject({ bought: ["[[milk]]"] });
   });
@@ -94,14 +99,12 @@ describe("write answers of a restricted token: inverse-link edits", () => {
   it("update_rows and merge_rows: the inverse edits of weight rows are dropped, the pantry edits stay", async () => {
     const s = await setupReadTokens();
     await withInverse(s);
-    const u = await s.op("cook", "update_rows", { table: PANTRY, where: { item: "flour" }, set: { weighed: "[[Morning weigh-in]]" } });
-    expect(u.status).toBe(200);
-    expect(json(u).planned_edits.map((e) => e.path)).toEqual([s.paths.flour]);
-    expectNothingOfHealth(u);
-    const m = await s.op("cook", "merge_rows", { table: PANTRY, on: ["item"], rows: [{ item: "eggs", weighed: "[[Morning weigh-in]]" }] });
-    expect(m.status).toBe(200);
-    expect(json(m).planned_edits.map((e) => e.path)).toEqual([s.paths.eggs]);
-    expectNothingOfHealth(m);
+    const u = await asCook(s, () => updateRows(s.v.app, s.v.settings, { table: PANTRY, where: { item: "flour" }, set: { weighed: "[[Morning weigh-in]]" } }));
+    expect(u.planned_edits.map((e) => e.path)).toEqual([s.paths.flour]);
+    expectNothingOfHealth({ status: 200, json: u });
+    const m = await asCook(s, () => mergeRows(s.v.app, s.v.settings, { table: PANTRY, on: ["item"], rows: [{ item: "eggs", weighed: "[[Morning weigh-in]]" }] }));
+    expect(m.planned_edits.map((e) => e.path)).toEqual([s.paths.eggs]);
+    expectNothingOfHealth({ status: 200, json: m });
     expect(rowsOf(await s.op("owner", "select_rows", { table: WEIGHT, where: { label: "Morning weigh-in" } }))[0]!.bought).toEqual(["[[flour]]", "[[eggs]]"]);
   });
 });
@@ -191,15 +194,16 @@ describe("write answers of a restricted token: deleting rows others link to", ()
     const s = await setupReadTokens();
     await withStaple(s);
     const args = { table: PANTRY, where: { item: "salt" }, on_referenced: "set_null" };
-    const dry = await s.op("cook", "delete_rows", { ...args, dry_run: true });
-    expect(dry.status).toBe(200);
-    expect(json(dry)).toMatchObject({ ok: true, planned_edits: [], planned_moves: [{ from: SALT, to: "Datanotes/personal/food/pantry/_archive/salt.md" }] });
-    expectNothingOfHealth(dry);
+    const input = { table: PANTRY, where: { item: "salt" }, onReferenced: "set_null" as const };
+    // cook may not write the weight row: refused over HTTP (tests/token-write-scope.test.ts)
+    expect((await s.op("cook", "delete_rows", args)).status).toBe(403);
+    const dry = await asCook(s, () => deleteRows(s.v.app, s.v.settings, input, { dryRun: true }));
+    expect(dry).toMatchObject({ ok: true, planned_edits: [], planned_moves: [{ from: SALT, to: "Datanotes/personal/food/pantry/_archive/salt.md" }] });
+    expectNothingOfHealth({ status: 200, json: dry });
     expect(json(await s.op("owner", "delete_rows", { ...args, dry_run: true })).planned_edits.map((e) => e.path)).toEqual([s.paths.light]);
-    const r = await s.op("cook", "delete_rows", args);
-    expect(r.status).toBe(200);
-    expect(json(r)).toMatchObject({ ok: true, files_moved: 1, planned_edits: [] });
-    expectNothingOfHealth(r);
+    const r = await asCook(s, () => deleteRows(s.v.app, s.v.settings, input));
+    expect(r).toMatchObject({ ok: true, files_moved: 1, planned_edits: [] });
+    expectNothingOfHealth({ status: 200, json: r });
     expect(rowsOf(await s.op("owner", "select_rows", { table: WEIGHT, where: { label: "Morning weigh-in" } }))[0]!.staple).toBe("[[eggs]]");
     expect(rowsOf(await s.op("owner", "select_rows", { table: WEIGHT, where: { kg: 79 } }))[0]!.staple ?? null).toBeNull();
   });
@@ -248,8 +252,9 @@ describe("write answers of a restricted token: batch", () => {
     await withInverse(s);
     await withStaple(s);
     await owner(s, "add_constraint", { table: WEIGHT, name: "staple_stocked", check: { "staple.qty": { gt: 0 } } });
+    // cook may not write weight rows (an inverse link would): milk links to a weigh-in with no inverse
     const operations = [
-      { op: "insert_row", table: PANTRY, values: { item: "milk", weighed: "[[Morning weigh-in]]" } },
+      { op: "insert_row", table: PANTRY, values: { item: "milk", for_weight: "[[Morning weigh-in]]" } },
       { op: "update_row", table: PANTRY, path: s.paths.eggs, set: { qty: 0 } },
     ];
     for (const dry_run of [true, false]) {

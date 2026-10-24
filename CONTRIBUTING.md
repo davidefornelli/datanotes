@@ -142,6 +142,8 @@ docs paths below are under `guides/` unless they name another folder):
 | Batch: an operation refused or unknown | `batch.ts`, `rest.ts` | 422, 400 | each step's own; fix and resend the whole batch | `read-and-write/batch.md#group-several-writes-with-batch` |
 | Token permission | `tokens.ts`, `Forbidden` | 403 | the permissions and who changes them | `security/tokens.md#choose-what-a-token-can-do` |
 | Token read permission (`token <name> may not read <table>`, `... the note <path>`) | `read-scope.ts` (`ReadDeniedError`), `tokens.ts` | 403 | the read patterns and who changes them | `security/tokens.md#limit-what-a-token-can-read` |
+| Token write permission on the rows a write changes in other tables (`token <name> may not write <table>: this write changes rows of it`; a table the token may not read stays unnamed) | `write-scope.ts` (`WriteDeniedError`), `finish` (`engine.ts`) | 403 | the table to add to `write`, with `tokens/update/` | `security/tokens.md#a-write-into-another-table-needs-write-too` |
+| An agent session of another token (`session "<id>" belongs to another token`) | `sessionTaken` (`runtime.ts`), `SessionIdentities.claim` | 403 | use your own session id | `security/who-did-what.md#a-session-belongs-to-one-token` |
 | Token missing or wrong | `http-server.ts`, `DatanotesError` (`auth`), `src/mcp/http.ts` | 401 | which token, as a bearer token | `develop/http-api.md#authenticate-your-requests` |
 | Unknown route, method or body | `http-server.ts` | 404, 405, 400 | the routes in `openapi.json`, the closest route | `develop/http-api.md#call-the-engines-routes` |
 | Note or folder not found | `http-server.ts`, `read_note` | 404 | vault paths; `list_folder` | `search/text.md#read-a-note` |
