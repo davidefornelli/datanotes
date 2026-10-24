@@ -92,7 +92,7 @@ Five options carry your choices. They apply to `install` and, except the last tw
 | `--catalog` | Sets the catalog of created tables and views. | `--catalog work` |
 | `--schema` | Sets the schema of created owned tables and views. | `--schema reading` |
 
-Each option takes a comma-separated list. `--map role=catalog.schema.table` binds a table. `--map role.column=column` maps a column. A column of the extension's own table keeps the extension's name: you cannot map it.
+Each option takes a comma-separated list. `--map role=catalog.schema.table` binds a table. `--map role.column=column` maps a column of a table the extension depends on. The views, CHECKs and link filters of the extension then read your column, through links too. A column of the extension's own table keeps the extension's name: you cannot map it.
 
 The plan ends with a message for the AI agent that runs the install:
 
@@ -104,6 +104,7 @@ An agent never guesses. It shows the plan, asks the user, and runs the command a
 - `ambiguous_dependency`: several tables could be the role. Pass `--map` or `--create`.
 - `missing_column`: the matched table lacks a column. Map another column, or add it with `--add`.
 - `column_differs`: a column exists with another type or rule. Map another column or table.
+- `column_map_unsupported`: the extension names a mapped column where the installer cannot rewrite it, such as the outer clauses of a `union` view. Rename your column to the extension's name and leave the mapping out.
 - `table_exists`: a table the extension would create exists already. Use it with `--map`, or pick another catalog.
 - `tool_name_taken`: a tool name is already an operation or a tool of another extension.
 - `token_exists`: a token named `ext-<name>` exists already.
