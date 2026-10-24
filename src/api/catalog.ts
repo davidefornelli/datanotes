@@ -250,7 +250,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "list_tables",
-    "description": "List every table: `name`, `catalog`, `schema`, `qualified` (`personal.metrics.mood` — use it\nwherever a table is expected; `metrics.mood` or `mood` also work when unambiguous), `path` and,\nwhen declared, `description`, `aliases` (other words for what it records) and `tags`. Tables are\ndefined in `metastore.yaml` (catalog → schema → table): read it freely, but it is read-only for\nagents and changes only through the schema operations (create_table, add_column, …). Returns `{tables, views}`: `views` lists the stored views (same fields, no\npath): select them like tables. `system.information_schema` is read with `select_rows`.\n\nCall this first to find the table for what the user reports (match their words against\nname, description and aliases), and before creating tables or columns so you reuse existing\nones instead of creating duplicates.",
+    "description": "List every table: `name`, `catalog`, `schema`, `qualified` (`personal.metrics.mood` — use it\nwherever a table is expected; `metrics.mood` or `mood` also work when unambiguous), `path` and,\nwhen declared, `description`, `aliases` (other words for what it records) and `tags`. Tables are\ndefined in `metastore.yaml` (catalog → schema → table): read it freely, but it is read-only for\nagents and changes only through the schema operations (create_table, add_column, …). Returns `{tables, views}`: `views` lists the stored views (same fields, no\npath): select them like tables. `system.information_schema` is read with `select_rows`.\nA token with `read` patterns sees only the tables and views it may read.\n\nCall this first to find the table for what the user reports (match their words against\nname, description and aliases), and before creating tables or columns so you reuse existing\nones instead of creating duplicates.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},
@@ -515,7 +515,7 @@ export const OPERATIONS: OperationDef[] = [
               },
               "generated": {
                 "type": "string",
-                "description": "Expression of a generated column."
+                "description": "Expression of a generated column: a column, `date(col)±N`, a template like `{name} {surname}`, `link(<template>)`, or an aggregate of a json list of objects like `count(feeds, side = \"left\")` or `sum(feeds.min)`."
               },
               "dense": {
                 "type": "boolean",
@@ -636,7 +636,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "create_table",
-    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `acyclic: true` (links to rows of its own table that never loop back, such as tasks blocked by tasks; with `inverse`, the rule holds on both sides), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `instructions`: how to fill a row, for agents (Markdown); describe_table returns them.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `acyclic: true` (links to rows of its own table that never loop back, such as tasks blocked by tasks; with `inverse`, the rule holds on both sides), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `instructions`: how to fill a row, for agents (Markdown); describe_table returns them.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nGenerated aggregates of a json column holding a list of objects (integer or number columns; avg: number): `count(feeds)`, `count(feeds.min)` (the items with a min), `sum(feeds.min)`, `avg(…)`, `min(…)`, `max(…)`, with an optional filter on one field: `count(feeds, side = \"left\")`, `sum(feeds.min, min > 0)` (=, !=, <, <=, >, >=; \"text\", a number, true or false). Recomputed on every write; no list: count and sum 0, avg/min/max empty; a field that is not a number: empty.\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1730,7 +1730,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "add_column",
-    "description": "Add a typed column. Sparse by default (written only on rows that have a value — use for\nmetrics, e.g. `{\"name\": \"metric_mood\", \"type\": \"integer\", \"min\": 1, \"max\": 5, \"label\":\n\"Mood\", \"aliases\": [\"mood\"], \"description\": \"Mood of the day, 1 = bad, 5 = great\"}`).\n`description` is required: what the column holds, for the agents and people who read the schema\n(the engine writes it for `identity` \"uuid\" / \"created\" columns).\n`dense: true` in the spec adds it to every row with its `default`. Call `describe_table` first: never add\na column whose meaning an existing column (name/label/aliases/description) already covers.\nColumn names are permanent identifiers; only `rename_column` changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\nAcyclic links: `acyclic: true` on a link (or list of links) to the table itself refuses every write that closes a cycle, on either side of an `inverse`; refused while existing rows form one (they are listed).\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Add a typed column. Sparse by default (written only on rows that have a value — use for\nmetrics, e.g. `{\"name\": \"metric_mood\", \"type\": \"integer\", \"min\": 1, \"max\": 5, \"label\":\n\"Mood\", \"aliases\": [\"mood\"], \"description\": \"Mood of the day, 1 = bad, 5 = great\"}`).\n`description` is required: what the column holds, for the agents and people who read the schema\n(the engine writes it for `identity` \"uuid\" / \"created\" columns).\n`dense: true` in the spec adds it to every row with its `default`. Call `describe_table` first: never add\na column whose meaning an existing column (name/label/aliases/description) already covers.\nColumn names are permanent identifiers; only `rename_column` changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nGenerated aggregates of a json column holding a list of objects (integer or number columns; avg: number): `count(feeds)`, `count(feeds.min)` (the items with a min), `sum(feeds.min)`, `avg(…)`, `min(…)`, `max(…)`, with an optional filter on one field: `count(feeds, side = \"left\")`, `sum(feeds.min, min > 0)` (=, !=, <, <=, >, >=; \"text\", a number, true or false). Recomputed on every write; no list: count and sum 0, avg/min/max empty; a field that is not a number: empty.\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\nAcyclic links: `acyclic: true` on a link (or list of links) to the table itself refuses every write that closes a cycle, on either side of an `inverse`; refused while existing rows form one (they are listed).\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -5129,7 +5129,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "describe_database",
-    "description": "Describe the database: its folder (`root`), `metastore` (`metastore.yaml`: read it freely,\nbut it is read-only for agents and changes only through the schema operations), configuration\n(default catalog and schema, row partition and file-name formats, archive folder, time zone,\nhistory, automatic links),\njournal folder, `bases` (shared column sets and the tables using them), `catalogs` → `schemas` → `tables` (with `row_count`, `tags`, and `unreadable_count` when some rows' front matter cannot be read) and `views`;\ncatalogs and schemas show their `comment` (set with `comment_on`). A table or base defined before\ndescriptions were required has `missing_descriptions`: what lacks one, for alter_table / alter_column\n(define_base for a base) to fill, so every table and column says what it holds.",
+    "description": "Describe the database: its folder (`root`), `metastore` (`metastore.yaml`: read it freely,\nbut it is read-only for agents and changes only through the schema operations), configuration\n(default catalog and schema, row partition and file-name formats, archive folder, time zone,\nhistory, automatic links),\njournal folder, `bases` (shared column sets and the tables using them), `catalogs` → `schemas` → `tables` (with `row_count`, `tags`, and `unreadable_count` when some rows' front matter cannot be read) and `views`;\ncatalogs and schemas show their `comment` (set with `comment_on`). A table or base defined before\ndescriptions were required has `missing_descriptions`: what lacks one, for alter_table / alter_column\n(define_base for a base) to fill, so every table and column says what it holds.\nA token with `read` patterns sees only the tables, views and bases it may read.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},
@@ -11694,6 +11694,141 @@ export const OPERATIONS: OperationDef[] = [
     }
   },
   {
+    "name": "search",
+    "description": "Search the notes by their words and, when semantic search is on, by their meaning:\n`{query, results: [{path, table?, score, heading, snippet, matched_by}], meaning}`, one result per\nnote, best first. It always works: with semantic search off it ranks by words alone (BM25:\nrare words count more; a word in the note's name or properties counts more), with it on it fuses\nboth rankings (Reciprocal Rank Fusion), so a note found only by its words or only by its meaning\nis still there. `matched_by` says which (`words`, `meaning`); `meaning` is `on`, `off` or `failed`\n(the embedding provider failed: words only, `meaning_error` says why). Query syntax as search_docs:\n`\"a phrase\"` and `+word` must appear, `-word` must not (both rankings); words in any language,\ncase and accents ignored, no stemming. Filters: `tables` (qualified or short names), `folder`,\n`min_score` (the meaning ranking's cosine floor). `limit`: default 10, max 100. Then read_note /\nselect_rows for the details.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "type": "integer"
+        },
+        "tables": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "title": "Search",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "responseSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "table": {
+                "type": "string",
+                "description": "Qualified table of a row note."
+              },
+              "score": {
+                "type": "number",
+                "description": "BM25 when ranked by words alone; the Reciprocal Rank Fusion score when fused."
+              },
+              "heading": {
+                "type": "string",
+                "description": "Heading above the match (empty before the first heading)."
+              },
+              "snippet": {
+                "type": "string",
+                "description": "About 200 characters around the first match, or the best passage by meaning."
+              },
+              "matched_by": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "words",
+                    "meaning"
+                  ]
+                },
+                "description": "The rankings the note is in."
+              }
+            },
+            "required": [
+              "path",
+              "score",
+              "heading",
+              "snippet",
+              "matched_by"
+            ]
+          },
+          "description": "One result per note, best first."
+        },
+        "meaning": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off",
+            "failed"
+          ],
+          "description": "on: words and meaning fused; off: semantic search is off, words only; failed: the embedding provider failed, words only."
+        },
+        "meaning_error": {
+          "type": "string",
+          "description": "Why the meaning ranking failed (with meaning: failed)."
+        }
+      },
+      "required": [
+        "query",
+        "results",
+        "meaning"
+      ]
+    }
+  },
+  {
     "name": "describe_semantic_index",
     "description": "The semantic search index: `enabled`, `provider`, `model`, `files`, `passages`, `pending`,\n`running`, `last_sync`, `last_error`. sync_semantic_index brings it up to date.",
     "inputSchema": {
@@ -17834,6 +17969,7 @@ export const OPERATION_KIND: Readonly<Record<string, OperationKind>> = {
   list_folder: "queries",
   search_notes: "queries",
   semantic_search: "queries",
+  search: "queries",
   graph_neighbors: "queries",
   graph_traverse: "queries",
   graph_path: "queries",

@@ -28,6 +28,8 @@ import { bulkWrite } from "./vault-settle";
 import { missingDescriptions, type MissingDescriptions } from "./descriptions";
 import { databaseEntries, inDatabase, normalizeDatabaseFolder } from "./db-paths";
 import { unreadableRows } from "./unreadable";
+import { currentReadScope, tableReadable } from "./read-scope";
+import { viewReadable } from "./table-registry";
 
 export class DatabaseConfigError extends GuidedError {
   override readonly name = "DatabaseConfigError";
@@ -206,21 +208,22 @@ export async function describeDatabase(app: App, settings: DatanotesSettings): P
   const config = await readDatabaseConfig(app, settings);
   const ms = await loadMetastore(app, settings);
   const catalogs: DatabaseDescription["catalogs"] = [];
+  // under a read scope: only the tables and views the token may read (as list_tables), and the
+  // schemas, catalogs and bases left with something to show
+  const scope = currentReadScope();
+  const readable = (full: string) => tableReadable(full, scope);
   if (ms) {
-    const byTable = new Map(catalogTables(ms.model).map((x) => [x.ref.full, catalogLoadedTable(settings, ms, x.ref)]));
+    const byTable = new Map(catalogTables(ms.model).filter((x) => readable(x.ref.full)).map((x) => [x.ref.full, catalogLoadedTable(settings, ms, x.ref)]));
     // the rows of every table in one pass over the notes, not one pass per table
     const rowFiles = catalogRowFilesOf(app, settings, [...byTable].map(([full, t]) => ({ full, def: t.def })));
     const unreadable = new Map<string, number>();
     for (const u of await unreadableRows(app, settings, ms.model)) unreadable.set(u.table, (unreadable.get(u.table) ?? 0) + 1);
     for (const [catalog, cat] of Object.entries(ms.model.catalogs)) {
-      catalogs.push({
-        catalog,
-        ...(cat.description ? { description: cat.description } : {}),
-        ...(catalog === config.default_catalog ? { default: true as const } : {}),
-        schemas: Object.entries(cat.schemas).map(([schema, sch]) => ({
+      const schemas = Object.entries(cat.schemas)
+        .map(([schema, sch]) => ({
           schema,
           ...(sch.description ? { description: sch.description } : {}),
-          tables: Object.entries(sch.tables).map(([name, entry]) => {
+          tables: Object.entries(sch.tables).filter(([name]) => readable(`${catalog}.${schema}.${name}`)).map(([name, entry]) => {
             const full = `${catalog}.${schema}.${name}`;
             const t = byTable.get(full)!;
             const tags = tableTags(entry);
@@ -235,15 +238,32 @@ export async function describeDatabase(app: App, settings: DatanotesSettings): P
               ...(unreadable.has(full) ? { unreadable_count: unreadable.get(full)! } : {}),
             };
           }),
-          views: Object.entries(sch.views).map(([name, v]) => ({
-            name,
-            qualified: `${catalog}.${schema}.${name}`,
-            ...(v.description ? { description: v.description } : {}),
-          })),
-        })),
+          views: Object.entries(sch.views)
+            .filter(([name]) => viewReadable(ms.model, `${catalog}.${schema}.${name}`, scope))
+            .map(([name, v]) => ({
+              name,
+              qualified: `${catalog}.${schema}.${name}`,
+              ...(v.description ? { description: v.description } : {}),
+            })),
+        }))
+        .filter((x) => !scope || x.tables.length > 0 || x.views.length > 0);
+      if (scope && schemas.length === 0) continue;
+      catalogs.push({
+        catalog,
+        ...(cat.description ? { description: cat.description } : {}),
+        ...(catalog === config.default_catalog ? { default: true as const } : {}),
+        schemas,
       });
     }
   }
+  // the tables that extend each base, directly or through a base that extends it
+  const extending = (name: string, seen = new Set<string>()): string[] => {
+    if (!ms || seen.has(name)) return [];
+    seen.add(name);
+    const direct = catalogTables(ms.model).filter(({ entry }) => ((entry.bases as string[] | undefined) ?? []).includes(name)).map(({ ref }) => ref.full);
+    const via = Object.entries(ms.model.bases).filter(([, b]) => (b.bases ?? []).includes(name)).flatMap(([n]) => extending(n, seen));
+    return [...direct, ...via];
+  };
   return {
     root,
     metastore: metastorePath(settings),
@@ -251,17 +271,21 @@ export async function describeDatabase(app: App, settings: DatanotesSettings): P
     config,
     catalogs,
     bases: ms
-      ? Object.entries(ms.model.bases).map(([name, b]) => {
-          const missing = missingDescriptions(b.description, b.columns);
-          return {
-            name,
-            ...(b.description ? { description: b.description } : {}),
-            ...(b.bases ? { bases: b.bases } : {}),
-            columns: b.columns.map((c) => String(c.name)),
-            tables: catalogTables(ms.model).filter(({ entry }) => ((entry.bases as string[] | undefined) ?? []).includes(name)).map(({ ref }) => ref.full),
-            ...(missing ? { missing_descriptions: { base: missing.table, columns: missing.columns } } : {}),
-          };
-        })
+      ? Object.entries(ms.model.bases)
+          .filter(([name]) => !scope || extending(name).some(readable))
+          .map(([name, b]) => {
+            const missing = missingDescriptions(b.description, b.columns);
+            return {
+              name,
+              ...(b.description ? { description: b.description } : {}),
+              ...(b.bases ? { bases: b.bases } : {}),
+              columns: b.columns.map((c) => String(c.name)),
+              tables: catalogTables(ms.model)
+                .filter(({ ref, entry }) => ((entry.bases as string[] | undefined) ?? []).includes(name) && readable(ref.full))
+                .map(({ ref }) => ref.full),
+              ...(missing ? { missing_descriptions: { base: missing.table, columns: missing.columns } } : {}),
+            };
+          })
       : [],
   };
 }

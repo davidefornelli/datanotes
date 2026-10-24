@@ -38,6 +38,7 @@ import { externalRename, HandMoveRepairs, rowMovesSince, saveRowPaths, type Hand
 import { catalogLayout, parseTableOptions } from "./table-loader";
 import { TABLE_KEY } from "./types-table";
 import type { DatanotesSettings } from "./settings";
+import { currentReadScope, pathReadable, tableReadable, type ReadScope } from "./read-scope";
 import { storeAppend, storeFlush, storeList, storePath, storeRead, storeRemove } from "./store";
 import { vaultIndex } from "./vault-index";
 import { telemetry } from "./telemetry";
@@ -354,6 +355,41 @@ function matches(ev: ChangeEvent, q: ChangeQuery): boolean {
   if (q.columns && q.columns.length > 0 && ev.op === "update" && !Object.keys(ev.changes ?? {}).some((c) => q.columns!.includes(c))) return false;
   if (q.excludeActor && ev.actor?.harness === q.excludeActor) return false;
   return true;
+}
+
+/** The full name of an event's table (an older event may hold the name it was written with), or null. */
+function eventTable(app: App, settings: DatanotesSettings, table: string | null): string | null {
+  if (table === null) return null;
+  const model = cachedMetastore(app, settings);
+  return (model ? rowTableFull(model, table) : null) ?? table;
+}
+
+/**
+ * The event as a read scope sees it, or null when it may not see it at all (no scope: the event
+ * as it is). A row event shows when its table is readable, without the violations and the hand
+ * moves (`cause`) of notes the scope may not read; a `metastore` change about no table, never; a
+ * tool call, only to the token that made it (`actor.auth`): an agent never reads another's results.
+ * Delivery runs outside the request that asked for it, so the scope is always passed in.
+ */
+export function eventForScope(ev: ChangeEvent, scope: ReadScope | null, app: App, settings: DatanotesSettings): ChangeEvent | null {
+  if (scope === null) return ev;
+  if (ev.op === "tool_call") return ev.actor?.auth === scope.token ? ev : null;
+  const table = eventTable(app, settings, ev.table);
+  if (table === null || !tableReadable(table, scope)) return null;
+  // the row's own violations stay (a deleted row's path is gone from the vault)
+  const shown = (path: string) => path === ev.path || path === ev.oldPath || pathReadable(app, settings, path, scope);
+  const violations = ev.violations?.filter((v) => shown(v.path));
+  const cause = ev.cause?.filter((c) => pathReadable(app, settings, c.path, scope));
+  const cut = violations !== undefined && violations.length < ev.violations!.length;
+  if (!cut && cause?.length === ev.cause?.length) return ev;
+  // what the scope may not read is left out, and so is how many violations there were in all
+  const { violationsTotal, ...rest } = ev;
+  return { ...rest, ...(violations !== undefined ? { violations } : {}), ...(!cut && violationsTotal !== undefined ? { violationsTotal } : {}), ...(cause !== undefined ? { cause } : {}) };
+}
+
+/** May this read scope (null: none) see the event? See {@link eventForScope}. */
+export function eventVisible(ev: ChangeEvent, scope: ReadScope | null, app: App, settings: DatanotesSettings): boolean {
+  return eventForScope(ev, scope, app, settings) !== null;
 }
 
 /** How many rows' states the start computes before it lets the engine answer a request. */
@@ -1112,9 +1148,14 @@ export class ChangeFeed {
    */
   private fileMaxSeq = new Map<string, number>();
 
-  /** Events after `since` that match the query. */
-  async read(q: ChangeQuery = {}): Promise<ChangePage> {
+  /**
+   * Events after `since` that match the query, as the read scope sees them ({@link eventForScope}:
+   * by default the scope of the request that reads; delivery that runs on its own passes its own).
+   */
+  async read(q: ChangeQuery = {}, scope: ReadScope | null = currentReadScope()): Promise<ChangePage> {
     const since = q.since ?? 0;
+    const s = this.getSettings();
+    const visible = (ev: ChangeEvent) => eventForScope(ev, scope, this.app, s);
     const limit = Math.min(Math.max(q.limit ?? 500, 1), 5000);
     let source: ChangeEvent[];
     // the buffer is in sequence order: the events after `since` start where a binary search says
@@ -1138,7 +1179,7 @@ export class ChangeFeed {
           if (ev.seq > max) max = ev.seq;
           if (ev.seq <= since) continue;
           source.push(ev);
-          if (plain && matches(ev, q)) matched++;
+          if (plain && matches(ev, q) && (scope === null || visible(ev) !== null)) matched++;
         }
         if (events.length > 0) this.fileMaxSeq.set(f, max);
         if (plain && matched >= limit) break;
@@ -1157,7 +1198,10 @@ export class ChangeFeed {
     for (let i = 0; i < source.length; i++) {
       const ev = source[i]!;
       last = ev.seq;
-      if (kept[i] && rowMatches(ev)) events.push(ev);
+      if (kept[i] && rowMatches(ev)) {
+        const shown = visible(ev);
+        if (shown) events.push(shown);
+      }
       if (events.length >= limit) break;
     }
     if (events.length < limit) last = Math.max(last, Math.min(this.seq, source.length ? source[source.length - 1]!.seq : since));
@@ -1216,10 +1260,10 @@ export class ChangeFeed {
   }
 
   /** Like `read`, but waits up to `waitMs` for a matching event when there is none yet (long poll). */
-  async wait(q: ChangeQuery, waitMs: number): Promise<ChangePage> {
+  async wait(q: ChangeQuery, waitMs: number, scope: ReadScope | null = currentReadScope()): Promise<ChangePage> {
     const started = Date.now();
     const deadline = started + Math.min(Math.max(waitMs, 0), 60_000);
-    let page = await this.read(q);
+    let page = await this.read(q, scope);
     let since = page.last;
     while (page.events.length === 0 && Date.now() < deadline && this.waitsEnded < started) {
       await new Promise<void>((resolve) => {
@@ -1232,7 +1276,7 @@ export class ChangeFeed {
         }
         this.waiters.add(done);
       });
-      page = await this.read({ ...q, since });
+      page = await this.read({ ...q, since }, scope);
       since = page.last;
     }
     return page;

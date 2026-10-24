@@ -160,7 +160,14 @@ The engine still checks the token on every call. A tool that writes also needs a
 
 ## Give each agent its own token
 
-A named token limits what an agent can do, and the journal records its name. It writes only the tables you allow in `write`, changes the schema only with `ddl`, and undoes changes only with `maintain`. Create one with the owner’s token:
+A named token limits what an agent can do, and the journal records its name. It has these limits:
+
+- **Reads**: only the tables you allow in `read`; without `read`, every table
+- **Writes**: only the tables you allow in `write`
+- **Schema changes**: only with `ddl`
+- **Undo**: only with `maintain`
+
+Create one with the owner’s token. This one reads and writes every table, changes the schema and may undo:
 
 ```bash
 curl -s http://127.0.0.1:27150/datanotes/tokens/create/ \
@@ -169,7 +176,7 @@ curl -s http://127.0.0.1:27150/datanotes/tokens/create/ \
   -d '{"name": "claude", "write": ["*"], "ddl": true, "maintain": true}'
 ```
 
-The answer contains the token, and shows it only once. [Tokens](/guides/security/tokens/) describes every permission.
+The answer contains the token, and shows it only once. [Tokens](/guides/security/tokens/) describes every permission. To keep an agent to some tables, give it `read` patterns, as [Limit what a token can read](/guides/security/tokens/#limit-what-a-token-can-read) shows.
 
 ## Agents and prompt injection
 
@@ -177,7 +184,7 @@ An agent reads text it didn't write: your notes, web pages, emails and the answe
 
 - **Offer only the tools it needs.** Use `--profile read` for an agent that reads, and `--tools` for a narrow one.
 - **Keep the webhook tools for yourself.** They are off by default. Add `--owner-tools` only for an agent you ask to create a webhook.
-- **Give it a named token.** A [named token](#give-each-agent-its-own-token) writes only the tables you allow, and never creates webhooks.
+- **Give it a named token.** A [named token](#give-each-agent-its-own-token) reads and writes only the tables you allow. It never creates webhooks.
 - **Confirm what leaves the database.** Ask your MCP client to confirm tool calls that write or send data.
 - **Check what it changed.** [See which agent made a change](#see-which-agent-made-a-change), and undo it with `undo_migration`.
 

@@ -71,4 +71,4 @@ A 2xx answer moves the webhook on. Any other answer is retried with backoff, fro
 
 ## Choose the feed or a webhook
 
-A named token can read the feed, while only the owner creates webhooks. So a program with its own token long-polls or streams the feed, as [Build an app on Datanotes](/develop/build-an-app/) does, and a service the owner sets up receives a webhook.
+A named token can read the feed, while only the owner creates webhooks. So a program with its own token long-polls or streams the feed, as [Build an app on Datanotes](/develop/build-an-app/) does, and a service the owner sets up receives a webhook. A token with `read` patterns sees only the events of its readable tables, and only its own tool calls.

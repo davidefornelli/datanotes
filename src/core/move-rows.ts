@@ -33,6 +33,7 @@ import { compileWhere, knownKeys, resolveWithin, type Where } from "./where";
 import { constraintViolations, hierarchyViolations } from "./row-checks";
 import { linkedCheckViolations } from "./changeset-checks";
 import { messageOf } from "./message";
+import { tableReadable } from "./read-scope";
 import { linkTargetOf, modelColumns } from "./link-paths";
 
 // --- move_rows / adopt_rows ---
@@ -290,7 +291,8 @@ async function adoptRowsImpl(app: App, settings: DatanotesSettings, input: Adopt
       new Set([settings.tableKey]),
     );
     const owner = model ? rowTableFull(model, fmGet(ordered, settings.tableKey)) : null;
-    if (owner) conflicts.push({ path: p, message: `already a row of ${owner}: use move_rows` });
+    // under a read scope, a table it may not read is not named (src/core/read-scope.ts)
+    if (owner) conflicts.push({ path: p, message: `already a row of ${tableReadable(owner) ? owner : "another table"}: use move_rows` });
     notes.push({ path: p, ordered });
   }
   const cs = emptyChangeSet("adopt_rows", `adopt ${notes.length} notes into ${dst.def.name}`, dst.def.schemaPath);

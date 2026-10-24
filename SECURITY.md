@@ -58,12 +58,14 @@ The owner token is `httpServerToken` in the settings file. It can do everything:
 
 The owner creates a named token with `POST /datanotes/tokens/create/`, and the engine stores only its hash, in `tokens.json` in its store, outside the vault. A named token has these permissions:
 
-- **Read**: everything
+- **Read**: only the tables in its `read` patterns; without `read`, every table
 - **Write rows**: only the tables in its `write` patterns
 - **Change the schema**: only with `ddl`
 - **Maintain**: with `maintain`, it may also undo, restore, vacuum, configure the database and rebuild the semantic index; use it for an agent’s own token
 
 A named token can’t create webhooks, manage tokens or read the engine’s status, and without `maintain` it can’t undo.
+
+With `read` patterns, a token reads only the tables they match. It never reads the notes outside tables. Listings, search, the graph and the change feed leave out the rest. A query that names another table gets 403. A token always reads what it writes, and a token with `ddl` or `maintain` reads every table. Listings hide the other tables’ names. A refusal repeats a name the caller gave, so a guessed name isn’t secret. [Limit what a token can read](https://datanotes.dev/guides/security/tokens/#limit-what-a-token-can-read) lists the rules and the known gaps.
 
 ### Extensions
 
@@ -75,7 +77,7 @@ An extension adds tables and Model Context Protocol (MCP) tools from a git repos
 - **An invoker check**: before a tool that writes runs, the server checks the calling agent's token. That token must be able to write the tool's tables. A read-only client cannot write through an extension.
 - **The secret stays on one machine**: the token file sits under the data home with mode 0600. The registry in the engine's store holds no secret.
 
-Known limits: extension code is not isolated from the MCP server's process. Its token reads every table until read patterns ship. Migrations are declarative and run no code. [Install extensions](https://datanotes.dev/administration/extensions/) has the details.
+Known limits: extension code is not isolated from the MCP server's process. The installer gives its token no `read`, so it reads every table. The owner may limit it with `read` patterns that cover the tables it writes. Migrations are declarative and run no code. [Install extensions](https://datanotes.dev/administration/extensions/) has the details.
 
 ### Who made each write
 
@@ -103,7 +105,7 @@ An agent reads your notes, and a note can hold text written to manipulate it: a 
 
 Limit what each agent can do:
 
-- **Give it a named token**: grant only the tables it writes, and leave out `ddl` and `maintain` unless it needs them
+- **Give it a named token**: grant only the tables it reads and writes, and leave out `ddl` and `maintain` unless it needs them
 - **Give it only the tools it needs**: start the MCP server with `datanotes mcp --profile`, `--tools` or `--except`
 - **Keep the webhook tools off**: they’re off by default, because a webhook sends change events to any URL
 

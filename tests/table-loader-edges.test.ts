@@ -179,9 +179,9 @@ describe("parseColumn options", () => {
 
 describe("generated columns of a table", () => {
   it("refuses an expression that does not parse, with the expression's own message", () => {
-    expect(refusal(() => project([{ name: "amount", type: "number" }, { name: "total", type: "number", generated: "sum(amount, tip)" }]))).toEqual([
+    expect(refusal(() => project([{ name: "amount", type: "number" }, { name: "total", type: "number", generated: "amount + tip" }]))).toEqual([
       MalformedColumnError,
-      `columns[1]: "sum(amount, tip)" is not a generated expression: use a column, date(column)±N or a template like "{name} {surname}"`,
+      `columns[1]: "amount + tip" is not a generated expression: use a column, date(column)±N or a template like "{name} {surname}"`,
     ]);
   });
 

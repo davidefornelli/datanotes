@@ -155,13 +155,14 @@ const chapter: Chapter = {
     {
       title: "Compute a column from other columns",
       say: [
-        "The engine computes a `generated` column from other columns on every write, and you can’t set it yourself. The expression takes one of three forms:",
+        "The engine computes a `generated` column from other columns on every write, and you can’t set it yourself. The expression takes one of four forms:",
         "",
         "- **A column name**: the value of that column",
         "- **`date(col)`**: the date of `col`, with an optional day shift",
         "- **A template**: text with `{col}` and `{col:FORMAT}` placeholders",
+        "- **An aggregate**: a count or a total of the items of a `json` list, shown in the next section",
         "",
-        "`min(…)`, `max(…)` and `coalesce(…)` pick among several columns.",
+        "In a template, `min(…)`, `max(…)` and `coalesce(…)` pick among several columns.",
       ].join("\n"),
       steps: [
         {
@@ -183,6 +184,69 @@ const chapter: Chapter = {
         { say: "The engine refuses a value for a generated column:", op: "insert_row", args: { table: "watch", values: { film: "His Girl Friday", occurred_at: "2026-10-04T21:30", day: "2026-10-01" } }, refused: true },
       ],
       after: "`time_column` names each row’s file after that date-time: here, the time the viewing started. The name follows the database’s `filename` format, `YYYY-MM-DD[T]HHmm` by default.",
+    },
+    {
+      title: "Count and total the items of a json list",
+      say: [
+        "A `generated` column can count the items of a `json` list of objects. It can also total one field of them. The engine recomputes it on every write of the row, so a total never falls behind its list. These functions read the list:",
+        "",
+        "- **`count(films)`**: the number of items",
+        "- **`count(films.minutes)`**: the items that have a `minutes` value",
+        "- **`sum(films.minutes)`**: the total of the field",
+        "- **`avg(…)`, `min(…)`, `max(…)`**: the average, the smallest and the largest value",
+        "",
+        "A filter after a comma keeps only some items: `count(films, rewatch = true)`. It compares one field with `\"text\"`, a number, `true` or `false`. It uses `=`, `!=`, `<`, `<=`, `>` or `>=`, and the four orderings compare numbers. `!=` keeps every item that `=` leaves out, items without the field included.",
+      ].join("\n"),
+      steps: [
+        {
+          op: "create_table",
+          args: {
+            name: "marathon",
+            description: "Nights when I watch several films in a row",
+            columns: [
+              { name: "night", type: "date", required: true, description: "The night of the marathon" },
+              { name: "films", type: "json", description: "The films of the night: title, minutes and rewatch" },
+              { name: "film_count", type: "integer", generated: "count(films)", description: "How many films I watched" },
+              { name: "rewatches", type: "integer", generated: "count(films, rewatch = true)", description: "Films I had seen before" },
+              { name: "total_min", type: "integer", generated: "sum(films.minutes)", description: "Minutes of film in the night" },
+              { name: "longest_min", type: "integer", generated: "max(films.minutes)", description: "Running time of the longest film" },
+              { name: "avg_min", type: "number", generated: "avg(films.minutes, rewatch != true)", description: "Average running time of the new films" },
+            ],
+            filename: "{night}",
+          },
+        },
+        {
+          op: "insert_row",
+          args: {
+            table: "marathon",
+            values: {
+              night: "2026-10-31",
+              films: [
+                { title: "Nosferatu", minutes: 94, rewatch: true },
+                { title: "Vampyr", minutes: 73 },
+                { title: "Frankenstein", minutes: 70 },
+              ],
+            },
+          },
+          showFile: "datanotes/main/public/marathon/2026-10-31.md",
+          check: (v) => !v.ok && "the marathon row expected",
+        },
+        {
+          say: "The type of the column must fit the result. `count` makes a whole number, and `avg` needs a `number` column. An aggregate of a column that isn’t `json` is refused too:",
+          op: "add_column",
+          args: { table: "marathon", column: { name: "nights", type: "integer", generated: "count(night)", description: "Not a list" } },
+          refused: true,
+        },
+      ],
+      after: [
+        "Values the engine can’t total leave the column empty instead of storing a wrong number:",
+        "",
+        "- **No list, or an empty one**: `count` and `sum` are 0, and `avg`, `min` and `max` are empty",
+        "- **An item without the field**: the engine leaves it out",
+        "- **A field that isn’t a number**: the total is empty, as when the column isn’t a list",
+        "",
+        "An `integer` column refuses a write whose total isn’t whole. After a hand edit of the list, `check_table` reports the stale totals and `recompute_columns` fixes them.",
+      ].join("\n"),
     },
     {
       title: "Let the engine fill identity columns",

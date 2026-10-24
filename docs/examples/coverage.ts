@@ -27,7 +27,7 @@ import { parse } from "yaml";
 import { OPERATIONS } from "../../src/api/catalog";
 import { UNION_BRANCH_KEYS, UNION_QUERY_KEYS, VIEW_QUERY_KEYS } from "../../src/core/catalog-ops";
 import { DEFAULT_DATABASE_CONFIG } from "../../src/core/database";
-import { isLinkExpression, isTemplateExpression } from "../../src/core/generated";
+import { isLinkExpression, isTemplateExpression, parseAggregate } from "../../src/core/generated";
 import { columnToEntry } from "../../src/core/metastore";
 import { COLUMN_ATTRS, TABLE_ATTRS } from "../../src/core/table-loader";
 import { THIS_INNER, THIS_NOTE_FIELDS, THIS_WHOLE } from "../../src/core/this-tokens";
@@ -87,7 +87,11 @@ const ENTRIES: [string, string][] = [
   ["BaseEntry", "base"],
 ];
 
-const generatedKind = (expr: string) => (isLinkExpression(expr) ? "link(…)" : isTemplateExpression(expr) ? "template" : "expression");
+function generatedKind(expr: string): string {
+  if (isLinkExpression(expr)) return "link(…)";
+  if (isTemplateExpression(expr)) return "template";
+  return parseAggregate(expr) ? "aggregate" : "expression";
+}
 
 /** What a `{this.*}` token reads: a field every note has, or one of its properties (shifted). */
 function tokenKind(field: string, shift: boolean): string {
@@ -120,7 +124,7 @@ export function optionVocabulary(root: string): Vocabulary {
   for (const t of [...SCALAR_COLUMN_TYPES, "list"]) file.push(`column.type: ${t}`);
   for (const k of literals(tableTypes.get("ColumnSpec"), "identity")) file.push(`column.identity: ${k}`);
   file.push(`column.default: ${DEFAULT_TODAY}`, `column.default: ${DEFAULT_NOW}`, "column.ref: self");
-  for (const k of ["link(…)", "template", "expression"]) file.push(`column.generated: ${k}`);
+  for (const k of ["link(…)", "template", "aggregate", "expression"]) file.push(`column.generated: ${k}`);
   for (const k of VIEW_QUERY_KEYS) file.push(`view.query.${k}`);
   // Next to `union` the keys apply to every branch or to the stacked rows: only views have them.
   for (const k of UNION_QUERY_KEYS) if (k !== "union") file.push(`view.query.union + ${k}`);

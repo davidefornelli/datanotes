@@ -55,6 +55,7 @@ import type { DatanotesSettings } from "./settings";
 import { tableNotFound } from "./table-registry";
 import { guide, type Guidance } from "./hints";
 import { phase } from "./tracing";
+import { assertTableReadable } from "./read-scope";
 
 /** A table without a transaction log: how to turn it on. */
 export const HISTORY_OFF = (full: string) => guide(`Turn history on for it with alter_table("${full}", history: true), or for every table with configure_database(history: true); versions are kept from then on.`, "history");
@@ -182,6 +183,7 @@ async function newestHistory(app: App, settings: DatanotesSettings, full: string
 
 export async function describeHistory(app: App, settings: DatanotesSettings, input: DescribeHistoryInput): Promise<HistoryDescription> {
   const ref = await historyTableName(app, settings, input.table);
+  assertTableReadable(ref.full);
   const limit = input.limit ?? 50;
   if (input.since === undefined) return { table: ref.full, history: await newestHistory(app, settings, ref.full, limit) };
   const from = sinceMs(input.since);
@@ -392,6 +394,7 @@ export async function tableChanges(
   input: TableChangesInput,
 ): Promise<{ table: string; changes: TableChange[] }> {
   const ref = await historyTableName(app, settings, input.table);
+  assertTableReadable(ref.full);
   const versions = await listVersions(app, settings, ref.full);
   if (versions.length === 0) throw new OperationInputError(`${ref.full} has no history`, HISTORY_OFF(ref.full));
   const latest = versions[versions.length - 1]!;

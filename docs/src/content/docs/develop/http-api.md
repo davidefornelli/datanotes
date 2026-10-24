@@ -62,7 +62,7 @@ Errors come back as JSON `{"error": "…", "hint": "…", "docs": "…"}`: what 
 
 - **400**: bad input
 - **401**: missing or wrong token
-- **403**: a named token beyond its permissions
+- **403**: a named token beyond its permissions, such as a table outside its `read` or `write` patterns
 - **404**: unknown table, view, migration or note
 - **409**: ambiguous table name
 - **500**: an unexpected error, or a write that failed partway and couldn’t be [rolled back](/guides/history/journal-and-undo/#the-engine-rolls-back-a-write-it-cannot-finish)

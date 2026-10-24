@@ -17,6 +17,7 @@ import { basenameOf } from "./path-templates";
 import { compileWhere, rowGetter, type Where } from "./where";
 import { CheckLinks, refLinkColumn, tableIn, type MetastoreState } from "./check-links";
 import { guide, guidanceOf } from "./hints";
+import { assertTableReadable, currentReadScope, tableReadable } from "./read-scope";
 
 // --- Filtered link targets (ref_where / ref_by) ---
 
@@ -99,12 +100,18 @@ async function linkTargetRule(t: LoadedTable, settings: DatanotesSettings, links
     }
     const out: Violation[] = [];
     const shown = () => {
+      // under a read scope that may not read the linked table (or a table its filter reads), the
+      // valid targets are not named: they are rows the token may not read (Postgres CVE-2014-8161)
+      const scope = currentReadScope();
+      if (scope && [target.catalog.ref.full, ...links.reads(target, c.ref_where)].some((full) => !tableReadable(full, scope))) {
+        return `the link must name a row of ${c.name}'s target table`;
+      }
       const ok = targets(d).filter((p) => p !== row.file.path).map(basenameOf);
-      return ok.length === 0 ? "none" : `${ok.slice(0, VALID_TARGETS_SHOWN).join(", ")}${ok.length > VALID_TARGETS_SHOWN ? ` (+${ok.length - VALID_TARGETS_SHOWN} more)` : ""}`;
+      return `valid: ${ok.length === 0 ? "none" : `${ok.slice(0, VALID_TARGETS_SHOWN).join(", ")}${ok.length > VALID_TARGETS_SHOWN ? ` (+${ok.length - VALID_TARGETS_SHOWN} more)` : ""}`}`;
     };
     const missing = given.filter((_, i) => paths[i] == null || !rows.has(paths[i]!)).map((x) => `[[${basenameOf(parseWikilink(x) ?? String(x))}]]`);
     if (missing.length > 0) {
-      out.push({ column: c.name, code: "broken_link", message: `${missing.join(", ")} ${missing.length > 1 ? "are not rows" : "is not a row"} of ${target.catalog.ref.full}; valid: ${shown()}`, value: v });
+      out.push({ column: c.name, code: "broken_link", message: `${missing.join(", ")} ${missing.length > 1 ? "are not rows" : "is not a row"} of ${target.catalog.ref.full}; ${shown()}`, value: v });
     }
     if (paths.includes(row.file.path)) {
       out.push({ column: c.name, code: "ref", message: `${list ? `${c.name} cannot hold` : `a ${c.name} cannot be`} the row itself`, value: v });
@@ -115,7 +122,7 @@ async function linkTargetRule(t: LoadedTable, settings: DatanotesSettings, links
     });
     if (bad.length > 0) {
       const what = list ? `${bad.length > 1 ? "are not valid targets" : "is not a valid target"} in ${c.name}` : `is not a valid ${c.name}`;
-      out.push({ column: c.name, code: "ref", message: `${bad.map((p) => `[[${basenameOf(p)}]]`).join(", ")} ${what}${of} (needs ${needs(d)}); valid: ${shown()}`, value: v });
+      out.push({ column: c.name, code: "ref", message: `${bad.map((p) => `[[${basenameOf(p)}]]`).join(", ")} ${what}${of} (needs ${needs(d)}); ${shown()}`, value: v });
     }
     return out;
   };
@@ -287,6 +294,7 @@ function findRow(rows: readonly LoadedRow[], ref: string, table: string): Loaded
 
 async function linkOptionsImpl(app: App, settings: DatanotesSettings, input: LinkOptionsInput): Promise<LinkOptionsResult> {
   const t = await loadTable(app, settings, input.table);
+  assertTableReadable(t.catalog.ref.full);
   const c = refLinkColumn(t, input.column);
   if (!c) {
     const links = t.def.columns.filter((x) => refLinkColumn(t, x.name)).map((x) => x.name);
@@ -306,6 +314,11 @@ async function linkOptionsImpl(app: App, settings: DatanotesSettings, input: Lin
   const given = input.row !== undefined && input.row !== null && String(input.row).trim() !== "";
   // the table's own rows are read only for the row asked about (or when the column links to the table itself)
   const rule = await linkTargetRule(t, settings, links, c, given);
+  // the targets are rows of the linked table, picked by a filter that may read other tables: the
+  // token must read them all
+  if (currentReadScope()) {
+    for (const full of [rule.target.catalog.ref.full, ...links.reads(rule.target, c.ref_where)]) assertTableReadable(full);
+  }
   let ordered: OrderedFrontmatter = [];
   let self: string | undefined;
   if (given) {

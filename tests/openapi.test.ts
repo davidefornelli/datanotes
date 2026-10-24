@@ -68,16 +68,23 @@ describe("OpenAPI document", () => {
       expect(ops.some((o) => o.op.operationId === t.name || ((o.op as { "x-mcp-tools"?: string[] })["x-mcp-tools"] ?? []).includes(t.name)), t.name).toBe(true);
     }
     const r = (p: string, m = "post") => doc.paths[p]![m]!.responses;
-    // a refused write: 422 with the operation's result; one failed and rolled back: 503; undo: 409; reads are never refused
+    // a refused write: 422 with the operation's result; one failed and rolled back: 503; undo: 409
     expect(Object.keys(r("/datanotes/operations/insert_row/"))).toEqual(["200", "400", "401", "403", "404", "409", "422", "500", "503"]);
     expect(Object.keys(r("/datanotes/operations/undo_migration/"))).toContain("409");
     expect(Object.keys(r("/datanotes/operations/undo_migration/"))).not.toContain("422");
     expect(Object.keys(r("/datanotes/operations/select_rows/"))).not.toContain("422");
     expect(Object.keys(r("/datanotes/operations/select_rows/"))).not.toContain("503");
     expect(Object.keys(r("/datanotes/operations/undo_migration/"))).not.toContain("503");
-    // apps may read: no 403 on reads; the owner's routes may answer 403
-    expect(Object.keys(r("/datanotes/operations/select_rows/"))).not.toContain("403");
+    // a read may answer 403 (a table outside the token's `read` patterns), with its own description; the owner's routes too
+    expect(Object.keys(r("/datanotes/operations/select_rows/"))).toEqual(["200", "400", "401", "403", "404", "409", "500"]);
+    expect((r("/datanotes/operations/select_rows/")["403"] as { description: string }).description).toContain("`read` patterns");
+    expect((r("/datanotes/operations/insert_row/")["403"] as { description: string }).description).not.toContain("`read` patterns");
     expect(Object.keys(r("/datanotes/tokens/create/"))).toContain("403");
+    // read patterns: on every entry, on create, and nullable on update
+    expect(doc.components.schemas.Token).toMatchObject({ required: expect.arrayContaining(["read", "write"]), properties: { read: { type: "array", items: { type: "string" } } } });
+    const body = (p: string) => ((doc.paths[p]!.post! as { requestBody?: unknown }).requestBody as { content: { "application/json": { schema: { properties: Record<string, unknown> } } } }).content["application/json"].schema.properties;
+    expect(body("/datanotes/tokens/create/").read).toMatchObject({ type: "array", items: { type: "string" } });
+    expect(body("/datanotes/tokens/update/").read).toMatchObject({ type: ["array", "null"], items: { type: "string" } });
     expect(Object.keys(r("/datanotes/operations/list_tables/"))).not.toContain("404");
     expect(r("/datanotes/operations/list_tables/")["401"]).toEqual({ $ref: "#/components/responses/Unauthorized" });
     expect(doc.components.schemas.Error).toMatchObject({ required: ["error"], properties: { error: { type: "string" } } });

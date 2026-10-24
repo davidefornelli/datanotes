@@ -45,7 +45,7 @@ import { ChangeFeed } from "../core/change-feed";
 import { externalRename } from "../core/hand-moves";
 import { WebhookDispatcher } from "./webhooks";
 import { engineStatus, type HostStatus } from "./status";
-import { TokenRegistry, tokenNameOf } from "./tokens";
+import { scopeOf, TokenRegistry, tokenNameOf } from "./tokens";
 import { ExtensionRegistry } from "./extensions";
 import { OperationScheduler } from "./scheduler";
 import { ReadCache } from "./read-cache";
@@ -476,6 +476,11 @@ export class EngineRuntime {
       ...(this.o.httpHost ? { host: this.o.httpHost } : {}),
       changeFeed: () => this.feed,
       tokens: this.tokens,
+      // the change stream's events, as the token may read them (a token gone since: nothing)
+      readScopeOf: (name) => {
+        const t = this.tokens.get(name);
+        return t ? scopeOf(t) : { token: name, patterns: [] };
+      },
       dispatch: guarded,
       ...(this.o.docs ? { docs: this.o.docs } : {}),
       compression: () => this.o.getSettings().httpCompression,
@@ -534,7 +539,7 @@ export class EngineRuntime {
     const name = tokenNameOf(currentActor());
     if (!name) return "owner";
     const t = this.tokens.get(name);
-    return JSON.stringify([name, t?.write ?? null, t?.ddl ?? null, t?.maintain ?? null, t?.autolink ?? null]);
+    return JSON.stringify([name, t?.write ?? null, t?.ddl ?? null, t?.maintain ?? null, t?.autolink ?? null, t?.read ?? null]);
   }
 
   /** Follow the vault (call once the vault is indexed: Obsidian's layout-ready, or after opening). */

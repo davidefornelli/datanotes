@@ -34,6 +34,11 @@ import { openApiDocument } from "./openapi";
 import { messageOf } from "../core/message";
 import { closestNames, guide, GuidedError, type Guidance } from "../core/hints";
 import { DocsError, openDocs, type DocsLibrary } from "../api/docs";
+import { READ_SCOPE_SUPPORTED, type ReadScope } from "../core/read-scope";
+// the stream refuses a restricted token where no read scope can be carried as the permission guard does
+// (tokens.ts imports this module too: the two constants are read only when a request arrives)
+import { READ_SCOPE_UNSUPPORTED, READ_SCOPE_UNSUPPORTED_HINT } from "./token-routes";
+
 
 /** Why the server cannot listen on its address, and how to fix it; `code` is the system's (`EADDRINUSE`...). */
 export class ListenError extends GuidedError {
@@ -131,6 +136,13 @@ export interface HttpServerOptions {
   identities?: SessionIdentities;
   /** The change feed, for `GET /datanotes/changes/stream` (Server-Sent Events). */
   changeFeed?: () => ChangeFeed | null;
+  /**
+   * The read scope of a named token, by name (the runtime: `tokens.ts` `scopeOf`): the change
+   * stream, answered outside the permission guard, sends it only the events it may read.
+   */
+  readScopeOf?: (tokenName: string) => ReadScope | null;
+  /** Whether a read scope can be enforced (default: READ_SCOPE_SUPPORTED); a test seam. */
+  readScopeSupported?: boolean;
   /** Named tokens: they are accepted too (see `tokens.ts`). */
   tokens?: { authenticate(token: string): Promise<{ name: string } | null> };
   /** Runs a route handler (default: `rest.ts` dispatch; the runtime passes one that checks the tokens' permissions). */
@@ -456,7 +468,7 @@ export class HttpApiServer {
     });
 
     if (method === "GET" && (path === `${ROUTE_PREFIX}/changes/stream` || path === `${ROUTE_PREFIX}/changes/stream/`)) {
-      await this.stream(req, res, url);
+      await this.stream(req, res, url, named ? (this.opts.readScopeOf?.(named.name) ?? null) : null);
       return;
     }
 
@@ -523,7 +535,12 @@ export class HttpApiServer {
    * `where`: JSON).
    * A comment line every 25 s keeps proxies from closing the connection.
    */
-  private async stream(req: NodeReq, res: NodeRes, url: URL): Promise<void> {
+  private async stream(req: NodeReq, res: NodeRes, url: URL, scope: ReadScope | null): Promise<void> {
+    // fail closed, as the permission guard does: a restricted token never gets an unfiltered feed
+    if (scope && !(this.opts.readScopeSupported ?? READ_SCOPE_SUPPORTED)) {
+      send(res, 503, { error: READ_SCOPE_UNSUPPORTED, ...READ_SCOPE_UNSUPPORTED_HINT });
+      return;
+    }
     const feed = this.opts.changeFeed?.();
     if (!feed || !res.write) {
       send(res, 503, { error: "the change feed is not available", ...guide("The change feed runs while the engine follows the vault (datanotes serve); list_changes reads it.", "changeFeed") });
@@ -559,7 +576,8 @@ export class HttpApiServer {
     res.write(`: datanotes change feed from ${cursor}\n\n`);
     try {
       while (open && this.server && !this.draining) {
-        const page = await feed.wait({ ...q, since: cursor, limit: 500 }, 20_000);
+        // the token's scope, passed in: the stream runs outside the guard that sets one
+        const page = await feed.wait({ ...q, since: cursor, limit: 500 }, 20_000, scope);
         if (!open) break;
         if (page.gap) res.write(`event: gap\ndata: {"since":${cursor}}\n\n`);
         for (const ev of page.events) res.write(`id: ${ev.seq}\ndata: ${JSON.stringify(wireEvent(ev))}\n\n`);

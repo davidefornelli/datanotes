@@ -25,6 +25,7 @@ import {
   type RunOptions,
 } from "../core/engine";
 import { settleVault } from "../core/vault-settle";
+import { searchVault } from "../core/note-search";
 import { holdsStaleWrite, runWrite } from "../core/write-check";
 import { QueryInputError } from "../core/query";
 import { adoptRows, alignRelations, alterTable, checkTable, deleteRows, insertRow, linkOptions, mergeRows, moveRows, recomputeColumns, select, updateRow, updateRows } from "../core/rows";
@@ -42,7 +43,7 @@ import { telemetry, type AttrValue } from "../core/telemetry";
 import { activeSpan, discardTrace, phase, withSpan, type Span } from "../core/tracing";
 import { createPublicApi, describeTable, listTablesAndViews, type DatanotesPublicApi } from "../core/public-api";
 import { inferTable } from "../core/infer";
-import { runBatch } from "../core/batch";
+import { runBatch, type BatchResult } from "../core/batch";
 import { EmbeddingError } from "../core/embeddings";
 import type { SemanticIndex } from "../core/semantic";
 import { opOfKind, wirePage } from "../core/change-feed";
@@ -52,6 +53,8 @@ import { didYouMean, guide, GuidedError, guidanceOf, refusalGuidance, undoGuidan
 import { argumentsOf, checkArguments, toolDocs } from "../api/guidance";
 import { operationRoute } from "../api/requests";
 import { currentActor } from "../core/actor";
+import { currentReadScope, READ_DENIED_GUIDANCE, ReadDeniedError, tableReadable } from "../core/read-scope";
+import { pathHidden } from "../core/changeset-checks";
 import { READ_OPERATIONS } from "./token-routes";
 import { operationClass, type OperationScheduler } from "./scheduler";
 import type { CachedAnswer, CacheTicket, ReadCache } from "./read-cache";
@@ -87,7 +90,7 @@ export class Forbidden extends GuidedError {
 
 /** What a named token may not do: how to get the permission. */
 export const FORBIDDEN_HINT = guide(
-  "Named tokens read everything; writes need a matching \"write\" pattern, schema changes \"ddl\": true, maintenance \"maintain\": true. Ask the owner to update the token (tokens/update/), or use a token that has the permission.",
+  "Named tokens read the tables their \"read\" patterns name (every table without \"read\"); writes need a matching \"write\" pattern, schema changes \"ddl\": true, maintenance \"maintain\": true. Ask the owner to update the token (tokens/update/), or use a token that has the permission.",
   "tokens",
 );
 
@@ -101,7 +104,7 @@ export function operationOf(route: string): string | undefined {
 function argumentsGuidance(op: string | undefined, route: string | undefined): Guidance {
   if (op) return { hint: `Check the arguments of ${op}: ${argumentsOf(op)}.`, docs: toolDocs(op) };
   if (route?.startsWith("/tokens/")) {
-    return guide(`The token routes take {"name"} and, to create or update one, "description" (text), "write" (table patterns), "ddl" and "maintain" (true or false), "autolink" (true or false: the default of its writes for automatic links).`, "manageTokens");
+    return guide(`The token routes take {"name"} and, to create or update one, "description" (text), "read" (table patterns it may read; on update, null for every table), "write" (table patterns it may write, each one readable), "ddl" and "maintain" (true or false), "autolink" (true or false: the default of its writes for automatic links).`, "manageTokens");
   }
   return guide("Check the request's fields against the route in GET /datanotes/openapi.json.", "routes");
 }
@@ -184,9 +187,72 @@ function kindsArg(body: Body): string[] | undefined {
  * a client what to do: 422, refused (change the data); 503, failed partway and rolled back, nothing
  * written (send it again later); 500, failed and not rolled back (undo_migration first).
  */
-function opResponse(r: OpResult): HandlerResponse {
-  if (r.ok) return { status: 200, json: r };
-  return { status: writeStatus(r.failed.length > 0, r.rolled_back), json: { ...r, ...refusalGuidance(r) } };
+function writeResponse(r: OpResult, app: App, settings: DatanotesSettings): HandlerResponse {
+  // the status is the write's; the answer (and so its guidance) is what the caller may read
+  const answer = redactWriteAnswer(r, app, settings);
+  if (r.ok) return { status: 200, json: answer };
+  return { status: writeStatus(r.failed.length > 0, r.rolled_back), json: { ...answer, ...refusalGuidance(answer) } };
+}
+
+/**
+ * The answer of a write as a restricted token may read it (its read scope: src/core/read-scope.ts,
+ * guides/security/tokens#limit-what-a-token-can-read). The write itself is not changed (it checked
+ * links, CHECKs and unique values against every table); its answer leaves out what it would tell
+ * about the notes the token may not read: their entries in `planned_edits`, `planned_creates`,
+ * `planned_moves` (either side), `planned_deletes`, `violations`, `conflicts` and `failed`, the
+ * `commits` of their tables, the `links_added` to them, and the candidates of `ambiguous_mentions`
+ * (a mention left with none goes). When it leaves out a conflict, violation or failure, one
+ * conflict on the empty path says how many such rows block the write. A path of no note (the
+ * empty one, a row the write creates or deleted) stays. Without a scope the result is returned
+ * as it is. Built field by field: a field of the engine's result not listed here is not sent.
+ */
+export function redactWriteAnswer(r: OpResult, app: App, settings: DatanotesSettings): OpResult {
+  const scope = currentReadScope();
+  if (!scope) return r;
+  const hidden = (path: string) => pathHidden(app, settings, path, scope);
+  const blocked = new Set<string>();
+  const keep = <T>(list: readonly T[], pathOf: (x: T) => string): T[] =>
+    list.filter((x) => {
+      const p = pathOf(x);
+      if (!hidden(p)) return true;
+      blocked.add(p);
+      return false;
+    });
+  const conflicts = keep(r.conflicts, (c) => c.path).map((c) => ({ path: c.path, message: c.message }));
+  const violations = keep(r.violations, (v) => v.path).map((v) => ({ path: v.path, violations: v.violations }));
+  const failed = keep(r.failed, (f) => f.path).map((f) => ({ path: f.path, error: f.error }));
+  if (blocked.size > 0) {
+    const n = blocked.size;
+    conflicts.push({ path: "", message: `${n} ${n === 1 ? "row" : "rows"} this token may not read ${n === 1 ? "blocks" : "block"} this write` });
+  }
+  const links = r.links_added?.filter((l) => !hidden(l.path) && !hidden(l.target)).map((l) => ({ path: l.path, text: l.text, target: l.target, link: l.link }));
+  const mentions = r.ambiguous_mentions
+    ?.filter((m) => !hidden(m.path))
+    .map((m) => ({ path: m.path, text: m.text, reason: m.reason, candidates: m.candidates.filter((c) => !hidden(c)), context: m.context, hint: m.hint }))
+    .filter((m) => m.candidates.length > 0);
+  return {
+    ok: r.ok,
+    op: r.op,
+    dry_run: r.dry_run,
+    ...(r.migration_id !== undefined ? { migration_id: r.migration_id } : {}),
+    notes_changed: r.notes_changed,
+    files_created: r.files_created,
+    files_moved: r.files_moved,
+    files_deleted: r.files_deleted,
+    references_updated: r.references_updated,
+    conflicts,
+    violations,
+    failed,
+    ...(r.rolled_back !== undefined ? { rolled_back: r.rolled_back } : {}),
+    planned_edits: r.planned_edits.filter((e) => !hidden(e.path)).map((e) => ({ path: e.path, set: e.set, remove: e.remove, ...(e.body !== undefined ? { body: e.body } : {}) })),
+    planned_creates: r.planned_creates.filter((p) => !hidden(p)),
+    planned_moves: r.planned_moves.filter((m) => !hidden(m.from) && !hidden(m.to)).map((m) => ({ from: m.from, to: m.to })),
+    planned_deletes: r.planned_deletes.filter((p) => !hidden(p)),
+    planned_texts: [...r.planned_texts],
+    ...(r.commits ? { commits: r.commits.filter((c) => tableReadable(c.table, scope)).map((c) => ({ table: c.table, version: c.version, operation: c.operation })) } : {}),
+    ...(links && links.length > 0 ? { links_added: links } : {}),
+    ...(mentions && mentions.length > 0 ? { ambiguous_mentions: mentions } : {}),
+  };
 }
 
 /** The status of a write that did not apply: refused (422), failed and rolled back (503), failed and left (500). */
@@ -206,6 +272,7 @@ export function errorResponse(e: unknown, op?: string, route?: string): HandlerR
   if (e instanceof TableNotFoundError) return { status: 404, json: body(guide("list_tables lists the tables and views, with their descriptions and aliases.", "findTable")) };
   if (e instanceof MigrationNotFoundError) return { status: 404, json: body(guide("list_migrations lists the journal ids (migration_id) of the writes, newest first.", "undo")) };
   if (e instanceof VaultPathNotFoundError) return { status: 404, json: body(guide("list_folder lists a folder, search_notes finds notes by their words.", "readNote")) };
+  if (e instanceof ReadDeniedError) return { status: 403, json: body(READ_DENIED_GUIDANCE) };
   if (e instanceof Forbidden) return { status: 403, json: body(FORBIDDEN_HINT) };
   if (e instanceof AmbiguousCatalogRefError) {
     return { status: 409, json: { ...body(guide(`Name the table in full (catalog.schema.table): ${e.candidates.join(" or ")}.`, "catalogs")), tables: e.candidates } };
@@ -229,6 +296,32 @@ export function errorResponse(e: unknown, op?: string, route?: string): HandlerR
 /** A batch step's error answer as an error, keeping its `hint` and `docs`. */
 function stepFailure(json: unknown): Error {
   return Object.assign(new Error((json as { error: string }).error), guidanceOf(json));
+}
+
+/**
+ * A batch's answer with its `rollback` as a restricted token may read it: the undo conflicts and
+ * failures of notes it may not read left out (as in {@link redactWriteAnswer}). The steps are
+ * redacted by their own answers. Without a scope, or without a rollback, the result as it is.
+ */
+export function redactBatchRollback(r: BatchResult, app: App, settings: DatanotesSettings): BatchResult {
+  const scope = currentReadScope();
+  if (!scope || !r.rollback) return r;
+  const shown = (path: string) => !pathHidden(app, settings, path, scope);
+  return {
+    ok: r.ok,
+    op: r.op,
+    dry_run: r.dry_run,
+    ...(r.migration_id !== undefined ? { migration_id: r.migration_id } : {}),
+    steps: r.steps,
+    ...(r.failed_at !== undefined ? { failed_at: r.failed_at } : {}),
+    ...(r.rolled_back !== undefined ? { rolled_back: r.rolled_back } : {}),
+    rollback: r.rollback.map((u) => ({
+      migration_id: u.migration_id,
+      ok: u.ok,
+      conflicts: u.conflicts.filter((c) => shown(c.path)).map((c) => ({ path: c.path, message: c.message })),
+      failed: u.failed.filter((f) => shown(f.path)).map((f) => ({ path: f.path, error: f.error })),
+    })),
+  };
 }
 
 /** How to go on after a refused batch. */
@@ -290,6 +383,7 @@ export function createHandlers(
   options: HandlerOptions = {},
 ): Record<string, Handler> {
   const s = getSettings;
+  const opResponse = (r: OpResult): HandlerResponse => writeResponse(r, app, s());
   const pub = api ?? createPublicApi(app, getSettings, saveSettings, semantic);
   const needSemantic = (): SemanticIndex => {
     if (!semantic) throw new BadRequest("semantic search is not available", SEMANTIC_OFF);
@@ -666,7 +760,9 @@ export function createHandlers(
       // a step that failed partway (not refused) makes the batch a failure: 503 once all is rolled back
       const failedStep = r.failed_at !== undefined && (r.steps[r.failed_at]?.result?.failed.length ?? 0) > 0;
       const status = r.ok ? 200 : r.rolled_back === false ? 500 : writeStatus(failedStep, true);
-      return { status, json: r.ok ? r : { ...r, ...batchGuidance(r) } };
+      // each step's result is redacted already (opResponse); what the rollback reports is too
+      const answer = redactBatchRollback(r, app, s());
+      return { status, json: answer.ok ? answer : { ...answer, ...batchGuidance(answer) } };
     },
 
     // --- queries ---
@@ -713,10 +809,10 @@ export function createHandlers(
       };
     },
     read_note: async (b) => ({ status: 200, json: await readNote(app, s(), text(b, "path")!) }),
-    list_folder: async (b) => ({ status: 200, json: listFolder(app, text(b, "folder") ?? "") }),
+    list_folder: async (b) => ({ status: 200, json: listFolder(app, text(b, "folder") ?? "", s()) }),
     search_notes: async (b) => {
       const ctx = optInt(b, "context_length");
-      return { status: 200, json: await searchNotes(app, str(b, "query")!, ctx ?? 100) };
+      return { status: 200, json: await searchNotes(app, str(b, "query")!, ctx ?? 100, s()) };
     },
     semantic_search: async (b) => {
       const sem = needSemantic();
@@ -731,6 +827,20 @@ export function createHandlers(
           ...(str(b, "folder") !== undefined ? { folder: str(b, "folder")! } : {}),
           ...(typeof minScore === "number" ? { minScore } : {}),
         }),
+      };
+    },
+    search: async (b) => {
+      const limit = optInt(b, "limit");
+      const minScore = b.min_score; // a number (the input schema)
+      return {
+        status: 200,
+        json: await searchVault(app, s(), {
+          query: str(b, "query")!,
+          ...(limit !== undefined ? { limit } : {}),
+          ...(strings(b, "tables") ? { tables: strings(b, "tables")! } : {}),
+          ...(str(b, "folder") !== undefined ? { folder: str(b, "folder")! } : {}),
+          ...(typeof minScore === "number" ? { minScore } : {}),
+        }, semantic),
       };
     },
     graph_neighbors: async (b) => ({

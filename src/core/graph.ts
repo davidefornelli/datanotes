@@ -28,6 +28,7 @@ import { listTables } from "./table-registry";
 import { parseWikilink } from "./validate";
 import { guide, unknownName } from "./hints";
 import { count, phase } from "./tracing";
+import { assertPathReadable, assertTableReadable, currentReadScope, pathReadable, runWithReadScope, tableReadDenied, tableReadable } from "./read-scope";
 
 export const LINK_LABEL = "link";
 export const MAX_GRAPH_DEPTH = 10;
@@ -83,8 +84,16 @@ function addEdge(g: BuiltGraph, keys: EdgeKeys, from: string, to: string, label:
   g.in.set(to, back);
 }
 
-/** The link graph, rebuilt only when the vault changed since the last build. */
-export async function graphIndex(app: App, settings: DatanotesSettings): Promise<GraphIndex> {
+/**
+ * The link graph, rebuilt only when the vault changed since the last build. It is shared by every
+ * caller: built and kept outside the caller's read scope (whole), and narrowed to what a scope may
+ * read only when a query walks it.
+ */
+export function graphIndex(app: App, settings: DatanotesSettings): Promise<GraphIndex> {
+  return runWithReadScope(null, () => sharedGraph(app, settings));
+}
+
+async function sharedGraph(app: App, settings: DatanotesSettings): Promise<GraphIndex> {
   const generation = vaultGeneration(app);
   // The tables come from the metastore cache: load it when nothing has yet (a graph built without
   // it has no tables), and build again when another metastore is loaded.
@@ -456,7 +465,8 @@ function tablesOf(app: App, settings: DatanotesSettings, names: unknown, what: s
   for (const n of names as string[]) {
     if (TABLE_PATTERN.test(n)) {
       const prefix = n.slice(0, -1); // "" for "*"
-      for (const t of all) if (t.qualified.startsWith(prefix)) out.add(t.qualified);
+      // a pattern names the tables the read scope may read, only
+      for (const t of all) if (t.qualified.startsWith(prefix) && tableReadable(t.qualified)) out.add(t.qualified);
       continue;
     }
     if (n.includes("*")) throw new OperationInputError(`${what}: "${n}" is not a table pattern`, NODE_SET_HINT);
@@ -471,10 +481,12 @@ async function resolveNodes(app: App, settings: DatanotesSettings, set: GraphNod
   for (const p of set.paths ?? []) {
     const path = p.endsWith(".md") ? p : `${p}.md`;
     if (app.vault.getAbstractFileByPath(path) == null) throw new OperationInputError(`${what}: note not found: ${path}`);
+    assertPathReadable(app, settings, path);
     out.add(path);
   }
   if (set.table !== undefined) {
     const t = await loadTable(app, settings, set.table);
+    assertTableReadable(t.catalog.ref.full);
     const pred = compileWhere(await resolveWithin(app, settings, t, set.where), t, settings);
     for (const r of await loadRows(app, settings, t)) if (pred(r)) out.add(r.file.path);
   } else if (set.where !== undefined) {
@@ -493,10 +505,32 @@ async function resolveNodes(app: App, settings: DatanotesSettings, set: GraphNod
 
 export type Direction = "out" | "in" | "both";
 
-function stepsFrom(g: GraphIndex, node: string, direction: Direction, labels: Set<string> | null): { to: string; label: string; dir: "out" | "in" }[] {
+/**
+ * The notes of the shared graph the current read scope may see, decided once per note: null
+ * without a scope (every note). A walk never reaches, returns or passes through another note.
+ */
+function visibleNodes(app: App, settings: DatanotesSettings): ((path: string) => boolean) | null {
+  const scope = currentReadScope();
+  if (!scope) return null;
+  const known = new Map<string, boolean>();
+  return (path) => {
+    let ok = known.get(path);
+    if (ok === undefined) known.set(path, (ok = pathReadable(app, settings, path, scope)));
+    return ok;
+  };
+}
+
+function stepsFrom(
+  g: GraphIndex,
+  node: string,
+  direction: Direction,
+  labels: Set<string> | null,
+  visible: ((path: string) => boolean) | null,
+): { to: string; label: string; dir: "out" | "in" }[] {
   const steps: { to: string; label: string; dir: "out" | "in" }[] = [];
-  if (direction !== "in") for (const e of g.out.get(node) ?? []) if (!labels || labels.has(e.label)) steps.push({ ...e, dir: "out" });
-  if (direction !== "out") for (const e of g.in.get(node) ?? []) if (!labels || labels.has(e.label)) steps.push({ ...e, dir: "in" });
+  const follow = (e: Edge) => (!labels || labels.has(e.label)) && (!visible || visible(e.to));
+  if (direction !== "in") for (const e of g.out.get(node) ?? []) if (follow(e)) steps.push({ ...e, dir: "out" });
+  if (direction !== "out") for (const e of g.in.get(node) ?? []) if (follow(e)) steps.push({ ...e, dir: "in" });
   return steps;
 }
 
@@ -530,11 +564,12 @@ export async function graphNeighbors(app: App, settings: DatanotesSettings, inpu
   const direction = checkDirection(input.direction);
   const g = await graphIndex(app, settings);
   const labels = labelSet(input.edges);
+  const visible = visibleNodes(app, settings);
   const nodes = await resolveNodes(app, settings, input.from, "from");
   if (nodes.length > MAX_GRAPH_NODES) throw new OperationInputError(`"from" matches ${nodes.length} notes (max ${MAX_GRAPH_NODES}): narrow it`);
   return {
     nodes: nodes.map((path) => {
-      const edges: NeighborEdge[] = stepsFrom(g, path, direction, labels).map((s) => ({
+      const edges: NeighborEdge[] = stepsFrom(g, path, direction, labels, visible).map((s) => ({
         path: s.to,
         ...(g.tableOf.has(s.to) ? { table: g.tableOf.get(s.to)! } : {}),
         label: s.label,
@@ -578,11 +613,19 @@ export interface TraversedNode {
 function qualifiedTables(app: App, settings: DatanotesSettings, names: string[] | undefined, what: string): Set<string> | null {
   if (!names || names.length === 0) return null;
   const all = listTables(app, settings.databaseFolder);
+  // under a read scope: a name of a table it may not read is refused, and only readable tables are suggested
+  const scope = currentReadScope();
+  const known = scope ? all.filter((t) => tableReadable(t.qualified, scope)) : all;
   const out = new Set<string>();
   for (const n of names) {
-    const hits = all.filter((t) => t.qualified === n || t.qualified.endsWith(`.${n}`));
+    let hits = all.filter((t) => t.qualified === n || t.qualified.endsWith(`.${n}`));
+    if (scope) {
+      const readable = hits.filter((t) => tableReadable(t.qualified, scope));
+      if (readable.length === 0 && hits.length > 0) throw tableReadDenied(scope.token, hits[0]!.qualified);
+      hits = readable;
+    }
     if (hits.length === 0) {
-      throw new OperationInputError(`${what}: unknown table "${n}"`, unknownName(n.split(".").pop()!, all.map((t) => t.name), "tables", "list_tables lists them.", "graph"));
+      throw new OperationInputError(`${what}: unknown table "${n}"`, unknownName(n.split(".").pop()!, known.map((t) => t.name), "tables", "list_tables lists them.", "graph"));
     }
     if (hits.length > 1) {
       throw new OperationInputError(`${what}: "${n}" matches ${hits.map((h) => h.qualified).join(", ")}`, guide(`Name the table in full: ${hits.map((h) => h.qualified).join(" or ")}.`, "graph"));
@@ -605,6 +648,7 @@ export async function graphTraverse(app: App, settings: DatanotesSettings, input
   const labels = labelSet(input.edges);
   const want = qualifiedTables(app, settings, input.tables, "tables");
   const through = qualifiedTables(app, settings, input.through, "through");
+  const visible = visibleNodes(app, settings);
   const starts = await resolveNodes(app, settings, input.from, "from");
   const via = new Map<string, Step[]>(starts.map((s) => [s, []]));
   let frontier = starts;
@@ -625,7 +669,7 @@ export async function graphTraverse(app: App, settings: DatanotesSettings, input
     const next: string[] = [];
     for (const node of frontier) {
       if (depth > 1 && through && !through.has(g.tableOf.get(node) ?? "")) continue; // do not walk on from here
-      for (const s of stepsFrom(g, node, direction, labels)) {
+      for (const s of stepsFrom(g, node, direction, labels, visible)) {
         if (via.has(s.to)) continue;
         via.set(s.to, [...via.get(node)!, { from: node, label: s.label, direction: s.dir, to: s.to }]);
         next.push(s.to);
@@ -655,6 +699,7 @@ export async function graphPath(app: App, settings: DatanotesSettings, input: Pa
   }
   const g = await graphIndex(app, settings);
   const labels = labelSet(input.edges);
+  const visible = visibleNodes(app, settings);
   const sources = await resolveNodes(app, settings, input.from, "from");
   const targets = new Set(await resolveNodes(app, settings, input.to, "to"));
   const via = new Map<string, Step[]>(sources.map((s) => [s, []]));
@@ -664,7 +709,7 @@ export async function graphPath(app: App, settings: DatanotesSettings, input: Pa
   for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
     const next: string[] = [];
     for (const node of frontier) {
-      for (const s of stepsFrom(g, node, direction, labels)) {
+      for (const s of stepsFrom(g, node, direction, labels, visible)) {
         if (via.has(s.to)) continue;
         const steps = [...via.get(node)!, { from: node, label: s.label, direction: s.dir, to: s.to }];
         if (targets.has(s.to)) return { found: true, length: depth, via: steps, from: steps[0]!.from, to: s.to };

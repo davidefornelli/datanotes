@@ -5,6 +5,49 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.4.0
+
+Datanotes 3.4.0 brings three additions:
+
+- search the notes by words and meaning in one call
+- limit what a named token reads
+- count and total the items of a `json` list
+
+It only adds to 3.3: no operation, argument or setting goes away, and a token without `read` reads every table as before.
+
+### Search by words and meaning
+
+[Search notes by words and meaning](/guides/search/hybrid/) explains how it ranks.
+
+- **`search`**: a new operation. It ranks the notes by their words, with BM25. With semantic search on, it fuses that ranking with the meaning, with Reciprocal Rank Fusion.
+- **Always on**: with semantic search off, or when the embedding provider fails, it ranks by words alone. `meaning` says which.
+- **`matched_by`**: each hit says whether its words, its meaning or both found it.
+- **Query syntax**: `"a phrase"`, `+word` and `-word`, as in `search_docs`. Filters: `tables`, `folder` and `min_score`.
+- **Any language**: case and accents are ignored, and words aren't stemmed.
+- **Read permissions**: a token searches only the notes it may read.
+
+### Named tokens: `read` patterns
+
+[Limit what a token can read](/guides/security/tokens/#limit-what-a-token-can-read) explains the rules.
+
+- **`read`**: a new field of `tokens/create/` and `tokens/update/`. It takes table patterns, like `write`: `catalog.schema.table`, `catalog.schema.*`, `catalog.*` or `*`. `tokens/update/` takes `null` to read every table again.
+- **Refused reads**: a query, a view or a note that names a table outside `read` answers 403. The message names the table, with a hint and a docs link.
+- **Filtered sets**: listings, bases, search, the graph, history and the change feed leave out the tables the token may not read.
+- **Free notes**: a token with a limited `read` never reads the notes outside tables.
+- **Write implies read**: every `write` pattern must fall inside `read`. A token with `ddl` or `maintain` keeps reading every table.
+- **Answers of writes**: a write still checks every table. Its answer leaves out the rows the token may not read.
+- **Where it shows**: `tokens/`, `tokens/me/` and `datanotes status` list `read`. A token without it lists `["*"]`.
+
+### Count and total the items of a json list
+
+A `generated` column can now aggregate a `json` column that holds a list of objects. For example, a day keeps its feedings in `feeds`. The engine then keeps `feeds_count` and `left_min` up to date. [Count and total the items of a json list](/guides/database-objects/columns/#count-and-total-the-items-of-a-json-list) shows it.
+
+- **Five functions**: `count(feeds)`, `count(feeds.min)` for the items with a value, `sum(feeds.min)`, `avg(…)`, `min(…)` and `max(…)`.
+- **A filter**: `count(feeds, side = "left")` keeps the items whose field matches. It compares one field with text, a number, `true` or `false`, using `=`, `!=`, `<`, `<=`, `>` or `>=`.
+- **On every write**: the engine recomputes the value when it writes the row. After a hand edit, `check_table` reports the stale value and `recompute_columns` fixes it.
+- **Checked when you define it**: the engine refuses an aggregate of a column that isn't `json`, or a column type that doesn't fit the result. Each refusal has its own hint and docs.
+- **No wrong numbers**: with no items, `count` and `sum` are 0, and `avg`, `min` and `max` are empty. A field that isn't a number leaves the value empty.
+
 ## 3.3.1
 
 Datanotes 3.3.1 fixes `alter_table` when it renames or moves a table. It only adds to 3.3: no operation, argument or setting goes away.

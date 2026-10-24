@@ -234,7 +234,8 @@ export function formatStatus(r: StatusReport | { running: true; url: string; err
   line("changes", f.running ? `feed running, last seq ${f.head}` : `feed NOT RUNNING: ${f.reason}`);
   line("webhooks", `${r.webhooks.count}${r.webhooks.failing.length ? ` (${r.webhooks.failing.length} failing)` : ""}`);
   for (const w of r.webhooks.failing) out.push(`  ! ${w.id} ${w.url_host}: ${plural(w.failures, "failed attempt")}, retried with backoff${w.last_error ? `; last error: ${w.last_error}` : ""}`);
-  const perms = (t: EngineStatus["tokens"][number]) => [t.write.length ? `write ${t.write.join(", ")}` : "read only", ...(t.ddl ? ["ddl"] : []), ...(t.maintain ? ["maintain"] : [])].join(", ");
+  const reads = (t: EngineStatus["tokens"][number]) => (t.read ? [`read ${t.read.length ? t.read.join(", ") : "nothing"}`] : []);
+  const perms = (t: EngineStatus["tokens"][number]) => [...reads(t), t.write.length ? `write ${t.write.join(", ")}` : t.read ? "no write" : "read only", ...(t.ddl ? ["ddl"] : []), ...(t.maintain ? ["maintain"] : [])].join(", ");
   line("tokens", r.tokens.length ? r.tokens.map((t) => `${t.name} (${perms(t)})`).join("; ") : "owner only");
   const h = r.hand_edits;
   line(

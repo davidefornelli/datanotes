@@ -173,6 +173,29 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "search by words while semantic search is off: BM25, the query syntax, the filters",
+    ops: ["search"],
+    async run(t) {
+      type Hits = { query: string; meaning: string; results: { path: string; table?: string; score: number; heading: string; snippet: string; matched_by: string[] }[] };
+      const hits = await t.ok<Hits>("search", { query: "colour palette" });
+      expect(hits.meaning).toBe("off");
+      // the task has both words in its name: it ranks first; the meeting has them in its text
+      expect(hits.results.map((h) => h.path)).toEqual([task("Choose the colour palette"), MEETINGS[0]]);
+      expect(hits.results[0]).toMatchObject({ table: "work.planning.task", matched_by: ["words"] });
+      expect(hits.results[1]!.snippet).toContain("new colour palette");
+      expect(hits.results[1]).not.toHaveProperty("table");
+      // a note with one of the words is found too, below the ones with both
+      const any = await t.ok<Hits>("search", { query: "palette relaunch", limit: 100 });
+      expect(any.results.map((h) => h.path)).toContain(project("Website relaunch"));
+      expect(any.results[0]!.path).toBe(MEETINGS[0]);
+      // required and excluded words, the filters
+      expect((await t.ok<Hits>("search", { query: `"colour palette" -scope` })).results.map((h) => h.path)).toEqual([task("Choose the colour palette")]);
+      expect((await t.ok<Hits>("search", { query: "colour palette", tables: ["task"] })).results.map((h) => h.path)).toEqual([task("Choose the colour palette")]);
+      expect((await t.ok<Hits>("search", { query: "colour palette", folder: "Meetings" })).results.map((h) => h.path)).toEqual([MEETINGS[0]]);
+      expect(await t.refused("search", { query: "-palette" })).toBe("search: the query has no words to look for");
+    },
+  },
+  {
     name: "semantic search, refused while it is off",
     ops: ["semantic_search", "describe_semantic_index", "sync_semantic_index"],
     async run(t) {
@@ -182,8 +205,8 @@ export const scenarios: Scenario[] = [
     },
   },
   {
-    name: "semantic search on a local embedding provider: index, search with filters, rebuild",
-    ops: ["semantic_search", "describe_semantic_index", "sync_semantic_index"],
+    name: "semantic search on a local embedding provider: index, search with filters, rebuild, hybrid search",
+    ops: ["semantic_search", "describe_semantic_index", "sync_semantic_index", "search"],
     open: async () => {
       const stub = await embeddingStub();
       return { options: { settings: stub.settings }, close: stub.close };
@@ -206,6 +229,12 @@ export const scenarios: Scenario[] = [
       expect(strict.results).toEqual([]);
       await t.ok("sync_semantic_index", { rebuild: true });
       expect(await t.ok("describe_semantic_index", {})).toMatchObject({ files: 25 });
+      // search fuses the words and the meaning: the task has both, every hit says how it was found
+      type Fused = { meaning: string; results: { path: string; matched_by: string[] }[] };
+      const fused = await t.ok<Fused>("search", { query: "colour palette", limit: 100 });
+      expect(fused.meaning).toBe("on");
+      expect(fused.results.find((h) => h.path === task("Choose the colour palette"))!.matched_by).toEqual(["words", "meaning"]);
+      expect(fused.results.some((h) => h.matched_by.join() === "meaning")).toBe(true);
     },
   },
 ];

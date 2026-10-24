@@ -54,7 +54,7 @@ import { basenameOf, claimFreeName, renderPathTemplate, renderRowTemplate } from
 import { computedColumnNames, fileCreated, normalizeDatetimes, withGenerated, withIdentity } from "./computed-columns";
 import { compileWhere, knownKeys, resolveWithin, type Where } from "./where";
 import { constraintViolations, hierarchyViolations } from "./row-checks";
-import { linkedCheckViolations } from "./changeset-checks";
+import { linkedCheckViolations, pathHidden } from "./changeset-checks";
 import { autolinkFragments, autolinkOn, withLinkReport, type AutolinkReport } from "./autolink";
 import { uniqueValues } from "./unique-index";
 
@@ -720,6 +720,19 @@ function clearLinksTo(
   });
 }
 
+/**
+ * The conflict of a row others link to (`restrict`): `referenced by <paths>`. Under a read scope,
+ * only the paths it may read, and how many it may not: `referenced by a.md and 2 rows this token
+ * may not read`.
+ */
+function referencedBy(app: App, settings: DatanotesSettings, sources: readonly string[]): string {
+  const shown = sources.filter((p) => !pathHidden(app, settings, p));
+  const hidden = sources.length - shown.length;
+  if (hidden === 0) return `referenced by ${sources.join(", ")}`;
+  const rest = `${hidden} ${hidden === 1 ? "row" : "rows"} this token may not read`;
+  return `referenced by ${shown.length > 0 ? `${shown.join(", ")} and ${rest}` : rest}`;
+}
+
 async function deleteRowsImpl(
   app: App,
   settings: DatanotesSettings,
@@ -739,7 +752,7 @@ async function deleteRowsImpl(
   for (const r of rows) {
     const sources = inbound.get(r.file.path) ?? [];
     if (sources.length > 0 && policy === "restrict") {
-      conflicts.push({ path: r.file.path, message: `referenced by ${sources.join(", ")}` });
+      conflicts.push({ path: r.file.path, message: referencedBy(app, settings, sources) });
     }
     sources.forEach((s) => referrers.add(s));
   }

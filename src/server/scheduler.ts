@@ -27,7 +27,7 @@ export type OperationClass = "read" | "write" | "free";
 const FREE_WRITES: ReadonlySet<string> = new Set(["sync_semantic_index"]);
 
 /** Reads that wait on something outside the engine (the embedding provider). */
-const FREE_READS: ReadonlySet<string> = new Set(["semantic_search"]);
+const FREE_READS: ReadonlySet<string> = new Set(["semantic_search", "search"]);
 
 /** At most this many writes start while a read waits: then the read starts too. */
 export const MAX_WRITES_AHEAD = 8;

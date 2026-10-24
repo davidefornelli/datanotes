@@ -18,6 +18,76 @@ import { CheckLinks, followsLinks, tableIn, type MetastoreState } from "./check-
 import { linkTargetViolations } from "./link-targets";
 import { messageOf } from "./message";
 import { phase } from "./tracing";
+import { currentReadScope, pathReadable, type ReadScope } from "./read-scope";
+import { parseWikilink } from "./validate";
+
+/**
+ * Is `path` a note the read scope may not read (src/core/read-scope.ts)? A note that exists and is
+ * no row of a readable table. Without a scope nothing is hidden, nor is a path of no note: the
+ * empty path of a conflict about the whole write, a row a write creates, a row it deleted (a
+ * restricted token deletes only rows of a table it writes, which it reads).
+ */
+export function pathHidden(app: App, settings: DatanotesSettings, path: string, scope: ReadScope | null = currentReadScope()): boolean {
+  if (scope === null || path === "" || app.vault.getAbstractFileByPath(path) === null) return false;
+  return !pathReadable(app, settings, path, scope);
+}
+
+/** What a restricted token reads of a CHECK of a row it may not read, which the write breaks. */
+export const HIDDEN_CHECK_MESSAGE = "a linked row of a table this token may not read breaks one of its CHECKs";
+
+/**
+ * The violations of rows the read scope may not read, moved to the rows the change set writes that
+ * they link to (D10: the write is refused all the same; the answer names neither the other row nor
+ * its CHECK): one violation per written row and link column, code kept, message
+ * {@link HIDDEN_CHECK_MESSAGE}. A hidden row that links to no written row (an inverse-link edit
+ * of a row not created yet, a link set_null clears) reports on the rows the write itself writes,
+ * without a column; with none it reports on the empty path.
+ */
+function movedOffHiddenRows(
+  app: App,
+  settings: DatanotesSettings,
+  cs: ChangeSet,
+  written: ReadonlyMap<string, string>,
+  consequential: ReadonlySet<string>,
+  out: Map<string, Violation[]>,
+  scope: ReadScope,
+): Map<string, Violation[]> {
+  // the paths of the vault as it is (before the write) -> the path the answer reports a written row under
+  const reported = new Map<string, string>(written);
+  for (const m of cs.moves) reported.set(m.from, written.get(m.to) ?? m.from);
+  for (const p of cs.deletes) reported.set(p, p);
+  const visible = (p: string) => !pathHidden(app, settings, p, scope);
+  const moved = new Map<string, Violation[]>();
+  const add = (path: string, v: Violation) => {
+    const list = moved.get(path) ?? [];
+    if (!list.some((x) => x.code === v.code && x.column === v.column && x.message === v.message)) list.push(v);
+    moved.set(path, list);
+  };
+  for (const [path, violations] of out) {
+    if (visible(path)) {
+      for (const v of violations) add(path, v);
+      continue;
+    }
+    const file = app.vault.getAbstractFileByPath(path) as TFile;
+    const fm = (app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, unknown>;
+    const targets: [string, string][] = [];
+    for (const [key, value] of Object.entries(fm)) {
+      for (const x of Array.isArray(value) ? value : [value]) {
+        const lp = parseWikilink(x);
+        const dest = lp == null ? null : app.metadataCache.getFirstLinkpathDest(lp, path);
+        const to = dest ? reported.get(dest.path) : undefined;
+        if (to !== undefined && visible(to)) targets.push([to, key]);
+      }
+    }
+    const own = [...new Set(written.values())].filter((p) => !consequential.has(p) && visible(p)).sort();
+    for (const v of violations) {
+      for (const [to, column] of targets) add(to, { column, code: v.code, message: HIDDEN_CHECK_MESSAGE });
+      if (targets.length > 0) continue;
+      for (const to of own.length > 0 ? own : [""]) add(to, { code: v.code, message: HIDDEN_CHECK_MESSAGE });
+    }
+  }
+  return moved;
+}
 
 /** The metastore a change set leaves when it rewrites metastore.yaml (undefined: it does not). */
 export async function metastoreLeftBy(app: App, settings: DatanotesSettings, cs: ChangeSet): Promise<MetastoreState | undefined> {
@@ -201,7 +271,9 @@ async function linkedCheckViolationsImpl(
       }
     }
   }
-  return [...out].map(([path, violations]) => ({ path, violations }));
+  const scope = currentReadScope();
+  const answer = scope ? movedOffHiddenRows(app, settings, cs, written, consequential, out, scope) : out;
+  return [...answer].map(([path, violations]) => ({ path, violations }));
 }
 
 /** {@link linkedCheckViolationsImpl}, traced: the CHECKs and link rules a change set must hold. */
