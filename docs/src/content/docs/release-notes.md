@@ -5,6 +5,19 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.3.1
+
+Datanotes 3.3.1 fixes `alter_table` when it renames or moves a table. It only adds to 3.3: no operation, argument or setting goes away.
+
+### Fixes
+
+- **References follow a moved table**: `alter_table` with `name`, `catalog` or `schema` rewrites every name of the table in the other definitions. Before, the links of other tables kept the old name, and `check_table` then reported a `ref` violation on every row. The engine now rewrites:
+  - the `ref` of link columns and lists of links, in tables and in bases
+  - the `vocabulary` of string columns
+  - the tables a view reads, in `table`, `union` and `join`
+- **`schema_references`**: a new field of the answer lists each name rewritten, also on a dry run. `undo_migration` puts the old names back. [Rename or move a table](/guides/database-objects/tables/#rename-or-move-a-table) shows it.
+- **CHECKs and link filters**: a CHECK that follows links, or a `ref_where` / `ref_by`, that reads the table through a link no longer refuses the move. These rules name columns, not tables, so they follow the rewritten `ref`. `drop_table` still refuses while they read the table.
+
 ## 3.3.0
 
 Datanotes 3.3.0 installs extensions: tables, views, bases and MCP tools from a git repository, pinned to a version. It only adds to 3.2: no operation, argument or setting goes away.

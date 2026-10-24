@@ -167,6 +167,9 @@ describe("responseSchema", () => {
     await check("set_table_bases", { table: "mood", bases: ["event"], dry_run: true });
     await check("create_view", { name: "moods", query: { table: "log", where: { kind: "mood" } } });
     await check("drop_view", { view: "moods", dry_run: true });
+    // a rename rewrites the view's table: schema_references lists it
+    const moved = await check<{ schema_references: unknown[] }>("alter_table", { table: "log", name: "diary", dry_run: true });
+    expect(moved.schema_references).toEqual([{ view: "main.public.moods", key: "table", from: "log", to: "main.public.diary" }]);
     // a clone needs the descriptions the log table (written before they were required) lacks
     await check("clone_table", { source: "mood", target: "mood_copy", dry_run: true });
     await check("drop_table", { table: "log", mode: "archive", dry_run: true });

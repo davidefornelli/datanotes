@@ -153,12 +153,25 @@ const chapter: Chapter = {
     },
     {
       title: "Rename or move a table",
-      say: "`alter_table` renames a table with `name`, or moves it to another `catalog` or `schema`. Here `actors` becomes `actor`, singular like the other tables. The rows’ folder and their front matter key `table` follow, and the engine rewrites the links to them. `dry_run` lists the notes that would move.",
+      say: "`alter_table` renames a table with `name`, or moves it to another `catalog` or `schema`. Here `actors` becomes `actor`, singular like the other tables. The rows’ folder and their front matter key `table` follow, and the engine rewrites the links to them.\n\nThe definitions that name the table follow it too:\n\n- the `ref` of every link column, lists of links and base columns included\n- the `vocabulary` of every string column\n- the tables a view reads, in `table`, `union` and `join`\n\n`dry_run` lists the notes that would move, and `schema_references` lists the names it would rewrite. Here a film’s `lead` links an actor, and the view `cast_list` reads the actors.",
       steps: [
-        { op: "alter_table", args: { table: "classics.actors", name: "actor", dry_run: true } },
+        { op: "add_column", args: { table: "classics.film", column: { name: "lead", type: "link", ref: "diary.classics.actors", description: "The actor in the leading role" } }, quiet: true },
+        { op: "update_row", args: { table: "classics.film", path: "datanotes/diary/classics/film/Nosferatu.md", set: { lead: "[[Max Schreck]]" } }, quiet: true },
+        { op: "create_view", args: { catalog: "diary", schema: "classics", name: "cast_list", query: { table: "diary.classics.actors", columns: ["name"], order_by: "name" }, description: "Every actor, by name" }, quiet: true },
+        {
+          op: "alter_table",
+          args: { table: "classics.actors", name: "actor", dry_run: true },
+          check: (v) => v.schema_references?.length !== 2 && "the dry run should list the link column and the view",
+        },
         { op: "alter_table", args: { table: "classics.actors", name: "actor" } },
         { say: "Then move it to a schema of its own:", op: "alter_table", args: { table: "classics.actor", catalog: "diary", schema: "credits" } },
         { op: "list_folder", args: { folder: "datanotes/diary/credits/actor" } },
+        {
+          say: "The link column and the view now name `diary.credits.actor`, so the view still answers and `check_table` finds no broken link:",
+          op: "select_rows",
+          args: { table: "cast_list" },
+        },
+        { op: "check_table", args: { table: "classics.film" }, check: (v) => v.total !== 0 && "the film's lead should still link a row of the actor table" },
       ],
     },
     {

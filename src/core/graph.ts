@@ -392,9 +392,17 @@ function graphView(app: App, idx: VaultIndex, g: TypedGraph, backlinksOf: (path:
         // typed edges: by the table's place, then the row's path, then the row's own order
         const typed = [...(g.into.get(node) ?? [])].sort((a, b) => g.tables.get(g.rowTable.get(a)!)!.index - g.tables.get(g.rowTable.get(b)!)!.index || a.localeCompare(b));
         for (const from of typed) for (const e of g.edges.get(from)!) if (e.to === node) out.push({ to: from, label: e.label });
-        // other links: in the host's order of the notes (that of its resolved links)
-        const order = (p: string) => idx.note(p)?.order ?? Number.MAX_SAFE_INTEGER;
-        const links = Object.keys(backlinksOf(node)).filter((from) => from !== node && !typedTo(from, node)).sort((a, b) => order(a) - order(b));
+        // other links: in the host's order of the notes (that of its resolved links). A source the
+        // index does not list (a file the host resolves links of, but getMarkdownFiles leaves out,
+        // such as `Note.MD`) has no place in that order: then the host's resolved links give it, as
+        // they give a full build its order
+        const linking = Object.keys(backlinksOf(node)).filter((from) => from !== node && !typedTo(from, node));
+        let order = (p: string) => idx.note(p)?.order ?? -1;
+        if (linking.some((p) => order(p) === -1)) {
+          const at = new Map(Object.keys(app.metadataCache.resolvedLinks).map((p, i) => [p, i]));
+          order = (p) => at.get(p)!; // a source of a backlink is a source of the resolved links
+        }
+        const links = linking.sort((a, b) => order(a) - order(b));
         for (const from of links) out.push({ to: from, label: LINK_LABEL });
         return out.length > 0 ? out : undefined;
       },

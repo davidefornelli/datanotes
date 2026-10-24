@@ -1205,6 +1205,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -1618,6 +1662,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -2022,6 +2110,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -2428,6 +2560,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -2831,6 +3007,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -3239,6 +3459,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -3263,7 +3527,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "alter_table",
-    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields) rewrites the table entry alone: no row is moved or rewritten. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table is refused while a CHECK that follows\nlinks, or a `ref_where` / `ref_by`, of another table reads it through a link (link targets are not\nrewritten): the conflicts name them. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields) rewrites the table entry alone: no row is moved or rewritten. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table rewrites what names it in other\ndefinitions: the `ref` and `vocabulary` of the columns of other tables and bases (lists of links\nincluded) and the tables of views (`table`, `union[].table`, `join.table`); `schema_references`\nlists them. CHECKs and `ref_where` / `ref_by` that read it through a link follow the new `ref`. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3844,6 +4108,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -4304,6 +4612,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -4709,6 +5061,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -5775,6 +6171,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -6185,6 +6625,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -6623,6 +7107,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -7065,6 +7593,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -7582,6 +8154,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -8017,6 +8633,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -8469,6 +9129,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -8933,6 +9637,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -10015,6 +10763,50 @@ export const OPERATIONS: OperationDef[] = [
                       ]
                     },
                     "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+                  },
+                  "schema_references": {
+                    "type": "array",
+                    "items": {
+                      "title": "SchemaReference",
+                      "type": "object",
+                      "description": "A name of the moved table in another definition, rewritten to the new name.",
+                      "properties": {
+                        "table": {
+                          "type": "string",
+                          "description": "The table whose column names it (full name)."
+                        },
+                        "base": {
+                          "type": "string",
+                          "description": "The base whose column names it."
+                        },
+                        "view": {
+                          "type": "string",
+                          "description": "The view whose query names it (full name)."
+                        },
+                        "column": {
+                          "type": "string",
+                          "description": "The column of the table or base."
+                        },
+                        "key": {
+                          "type": "string",
+                          "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+                        },
+                        "from": {
+                          "type": "string",
+                          "description": "The name as written before."
+                        },
+                        "to": {
+                          "type": "string",
+                          "description": "The name written in its place."
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "from",
+                        "to"
+                      ]
+                    },
+                    "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
                   }
                 },
                 "required": [
@@ -10462,6 +11254,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -11549,6 +12385,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -12990,6 +13870,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -14010,6 +14934,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -14412,6 +15380,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -14881,6 +15893,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -15279,6 +16335,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -15708,6 +16808,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [
@@ -16124,6 +17268,50 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         }
       },
       "required": [

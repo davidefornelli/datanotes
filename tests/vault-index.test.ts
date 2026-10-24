@@ -157,6 +157,20 @@ describe("vault index", () => {
     expect(await verifyCurrentStates(v.app, v.settings)).toEqual([]);
   });
 
+  it("links from a note with an upper-case .MD extension come in the host's order of its links, as a full build has them", async () => {
+    // the host resolves the links of a note renamed to `Notes/B.MD`, but getMarkdownFiles (and so the index) lists only `.md` notes
+    const v = nodeVault({ "Notes/a.md": "[[Paul]]\n", "Notes/b.md": "[[Paul]]\n", "Notes/c.md": "[[Paul]]\n", "People/Paul.md": "Paul\n" });
+    await loadMetastore(v.app, v.settings);
+    expect((await graphNeighbors(v.app, v.settings, { from: { paths: ["People/Paul.md"] }, direction: "in" })).nodes[0]!.edges).toHaveLength(3);
+    await v.rename("Notes/b.md", "Notes/B.MD"); // a rename in case only, the extension included
+    await v.rename("Notes/a.md", "Moved/a.md"); // goes last in the host's order, after B.MD
+    const sources = Object.keys(v.app.metadataCache.resolvedLinks).filter((p) => v.app.metadataCache.resolvedLinks[p]!["People/Paul.md"]);
+    const r = await graphNeighbors(v.app, v.settings, { from: { paths: ["People/Paul.md"] }, direction: "in" });
+    expect(r.nodes[0]!.edges.map((e) => e.path)).toEqual(sources);
+    expect(sources).toContain("Notes/B.MD");
+    expect(await verifyIndex(v.app, v.settings)).toEqual([]);
+  });
+
   it("the link graph follows a file that a link column names as it comes, goes and moves", async () => {
     const v = nodeVault({
       "Daily/a.md": '---\ntable: main.public.log\nkind: mood\noccurred_at: 2026-09-25T22:30\npeople: ["[[Ghost]]", "[[Paul]]"]\n---\nSee [[Ghost]].\n',
