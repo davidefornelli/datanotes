@@ -166,6 +166,36 @@ describe("ColumnBinder: view queries", () => {
     ]);
   });
 
+  it("passes values of a shape it does not rewrite through as they are", () => {
+    const b = binder();
+    const odd = {
+      table: "@person",
+      columns: ["name", 1],
+      expand: "partner",
+      order_by: [2, "name"],
+      group_by: ["name", 3],
+      aggregates: { n: 4 },
+      join: { table: 5, on: { name: 6 }, columns: ["city", 7] },
+    };
+    expect(b.query("v", odd)).toEqual({
+      table: "@person",
+      columns: ["full_name", 1],
+      expand: "partner",
+      order_by: [2, "full_name"],
+      group_by: ["full_name", 3],
+      aggregates: { n: 4 },
+      join: { table: 5, on: { full_name: 6 }, columns: ["city", 7] },
+    });
+    expect(b.query("v", { table: "@person", group_by: 1, aggregates: 2, join: 3 })).toEqual({ table: "@person", group_by: 1, aggregates: 2, join: 3 });
+    const union = { union: [8, { table: "@person", columns: ["name", 9], limit: 1, extra: "name" }] };
+    expect(b.query("vu", union).union).toEqual([8, { table: "@person", columns: ["full_name", 9], limit: 1, extra: "name" }]);
+    // a key a union part does not know is kept, and reported when it names a mapped column
+    expect(b.issues).toEqual([{ role: "person", column: "name", where: "view vu (union.extra)" }]);
+    // a column with a ref that is not a link column ends a path
+    const notLink: Pick<ExtensionManifest, "tables"> = { tables: { meal: { owned: true, description: "m", columns: [col("person", { ref: "@person" })] }, person: MANIFEST.tables.person! } };
+    expect(new ColumnBinder(notLink, MAP).path("meal", "person.name")).toBe("person.name");
+  });
+
   it("leaves a query on a table that is not a role, and every query when nothing is bound", () => {
     const q = { table: "base:record", columns: ["name"] };
     expect(binder().query("v", q)).toEqual(q);

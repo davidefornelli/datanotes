@@ -782,11 +782,7 @@ export function planChanges(input: PlanInput): ExtensionPlan {
   }
 
   // 6.6 what the column bindings could not rewrite
-  const seen = new Set<string>();
   for (const i of binder.issues) {
-    const key = `${i.role}.${i.column}.${i.where}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     reconcileProblems.push(
       problem(
         "column_map_unsupported",
