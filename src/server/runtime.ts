@@ -35,7 +35,7 @@ import { job } from "../core/tracing";
 import { traceVaultIo } from "../core/vault-io-tracing";
 import type { OtlpOptions } from "../api/otlp";
 import { newToken, HttpApiServer } from "./http-server";
-import { createHandlers, dispatch, type Handler } from "./rest";
+import { createHandlers, dispatch, type Handler, type HandlerResponse } from "./rest";
 import { checkIndexAfter } from "../core/index-check";
 import { SessionIdentities } from "./identities";
 import { currentActor, type Actor } from "../core/actor";
@@ -54,6 +54,8 @@ import { messageOf } from "../core/message";
 import { guide } from "../core/hints";
 
 /** The routes an MCP server reports its agents on. */
+/** A named token reporting a session another token reported first. */
+const SESSION_TAKEN_HINT = guide("Use your own session id, such as a new UUID for each agent session. This session belongs to another token: only that token and the owner may report it.", "sessionOwner");
 const REPORT_HINT = guide(`Send {"session", "model", "harness"} to sessions/identify/ and {"tool", "args", "ok", ...} to tool-calls/record/; DatanotesClient.recordToolCall does it.`, "reportAgents");
 
 /** Quiet time after the last vault change before hand edits are logged. */
@@ -236,6 +238,8 @@ export class EngineRuntime {
       "/sessions/identify/": async (body) => {
         const session = typeof body.session === "string" ? body.session.trim() : "";
         if (!session) return { status: 400, json: { error: `"session" is required`, ...REPORT_HINT } };
+        const taken = this.sessionTaken(session);
+        if (taken) return taken;
         this.identities.set(session, { model: body.model, harness: body.harness });
         return { status: 200, json: { ok: true } };
       },
@@ -251,6 +255,8 @@ export class EngineRuntime {
       // an MCP server reports the tool calls of its agents (the change feed's tool_call events)
       "/tool-calls/record/": async (body) => {
         if (typeof body.tool !== "string" || !body.tool) return { status: 400, json: { error: `"tool" is required`, ...REPORT_HINT } };
+        const taken = typeof body.session === "string" && body.session.trim() ? this.sessionTaken(body.session.trim()) : null;
+        if (taken) return taken;
         const actor = currentActor();
         // answered once the event is in the feed: a read right after sees it
         await this.recordToolCall({
@@ -302,6 +308,15 @@ export class EngineRuntime {
           }
         : {}),
     };
+  }
+
+  /**
+   * The 403 when the session belongs to another named token; else null, and the session is
+   * claimed for the caller when nobody reported it before (the first reporter keeps it).
+   */
+  private sessionTaken(session: string): HandlerResponse | null {
+    if (this.identities.claim(session, tokenNameOf(currentActor()) ?? "owner") === null) return null;
+    return { status: 403, json: { error: `session "${session}" belongs to another token`, ...SESSION_TAKEN_HINT } };
   }
 
   /**

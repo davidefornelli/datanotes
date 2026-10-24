@@ -97,6 +97,7 @@ const VARIANTS: Record<string, Json[]> = {
     { table: "pantry", this_note: "@diary" },
     { table: "pantry", where: { item: "{this.name}" }, this_note: "@light" },
     { table: "pantry", columns: ["item", "file_backlink_count", "for_weight"], include_body: true },
+    { table: "meals", columns: ["dish", "file_backlink_count"], where: { file_backlink_count: { gte: 1 } }, order_by: "-file_backlink_count" },
     { table: "pantry", order_by: "for_weight.kg" },
     { table: "pantry", where: { note: { contains: "ZZSECRET" } } },
   ],

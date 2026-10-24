@@ -9,6 +9,7 @@
 import { currentActor, type Actor } from "./actor";
 import { markUndone, readJournal, writeJournal } from "./journal";
 import { inverseEditsFor } from "./inverse";
+import { assertChangeSetWritable } from "./write-scope";
 import type { App, TFile } from "./host";
 import { invalidateFiles, readBody, readFrontmatter, readFrontmatterEntries } from "./file-cache";
 import {
@@ -563,6 +564,9 @@ export async function finish(
   base.conflicts = conflicts;
   base.violations = violations.filter((v) => v.violations.length > 0);
   if (base.conflicts.length > 0 || base.violations.length > 0) return base;
+  // a named token's row write changes only rows of tables it may write, side effects included
+  // (set_null, inverse links, align_relations): otherwise nothing is written, dry run or not
+  await assertChangeSetWritable(app, settings, cs);
   if (dryRun) return { ...base, ok: true };
   const done = await whileWriting(app, () => withLogLock(app, async () => {
     // another write applied since this one was checked: it is checked again (runWrite, write-check.ts)

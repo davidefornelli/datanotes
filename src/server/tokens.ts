@@ -13,13 +13,14 @@
 
 import { currentActor, type Actor } from "../core/actor";
 import { matchesTablePattern, READ_SCOPE_SUPPORTED, runWithReadScope, tableReadDenied, type ReadDeniedError, type ReadScope } from "../core/read-scope";
+import { runWithWriteScope, type WriteScope } from "../core/write-scope";
 import type { App } from "../core/host";
 import { loadMetastore, rowTableFull } from "../core/metastore";
 import type { DatanotesSettings } from "../core/settings";
 import { storePath, storeRead, storeWrite } from "../core/store";
 import { telemetry } from "../core/telemetry";
 import { newToken } from "./http-server";
-import { OWNER_ADMIN_ROUTES, OWNER_OPERATIONS, READ_OPERATIONS, READ_ROUTES, READ_SCOPE_UNSUPPORTED, READ_SCOPE_UNSUPPORTED_HINT, READ_TABLE_ARGS, ROW_WRITES, SCHEMA_OPERATIONS } from "./token-routes";
+import { OWNER_ADMIN_ROUTES, OWNER_OPERATIONS, READ_OPERATIONS, READ_ROUTES, READ_SCOPE_UNSUPPORTED, READ_SCOPE_UNSUPPORTED_HINT, READ_TABLE_ARGS, ROW_WRITES, SCHEMA_OPERATIONS, WRITE_SCOPE_UNSUPPORTED, WRITE_SCOPE_UNSUPPORTED_HINT } from "./token-routes";
 import { BadRequest, errorResponse, Forbidden, FORBIDDEN_HINT, isBatchOperation, operationOf, type Body, type Handler, type HandlerResponse } from "./rest";
 import { messageOf } from "../core/message";
 import { guide } from "../core/hints";
@@ -90,6 +91,20 @@ export function scopeOf(t: TokenRecord): ReadScope | null {
 }
 
 /**
+ * What a token's row writes may change while its requests run: null (every table) with `*` in
+ * `write`. The engine refuses a write that changes rows of another table (src/core/write-scope.ts).
+ */
+export function writeScopeOf(t: TokenRecord): WriteScope | null {
+  return t.write.includes("*") ? null : { token: t.name, patterns: t.write };
+}
+
+/** Does this route write rows (a row write, or a batch)? */
+function writesRows(route: string): boolean {
+  const op = operationOf(route);
+  return op === "batch" || (op !== undefined && Object.prototype.hasOwnProperty.call(ROW_WRITES, op));
+}
+
+/**
  * Does read pattern `r` cover write pattern `w` (every table `w` matches, `r` matches)? `*` covers
  * everything; `personal.*` covers `personal.food.*` and `personal.food.pantry`; only `*` covers `*`.
  */
@@ -106,7 +121,7 @@ export function tokenNameOf(actor: Actor | undefined): string | undefined {
 interface Deps {
   app: App;
   getSettings(): DatanotesSettings;
-  /** Whether a read scope can be carried through a request (default: READ_SCOPE_SUPPORTED); a test seam. */
+  /** Whether a read or write scope can be carried through a request (default: READ_SCOPE_SUPPORTED); a test seam. */
   readScopeSupported?: boolean;
 }
 
@@ -369,7 +384,13 @@ export class TokenRegistry {
         telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason: READ_SCOPE_UNSUPPORTED });
         return { status: 503, json: { error: READ_SCOPE_UNSUPPORTED, ...READ_SCOPE_UNSUPPORTED_HINT } };
       }
-      return runWithReadScope(scope, () => dispatch(route, handler, body));
+      const writeScope = writeScopeOf(token);
+      // fail closed too: a row write whose changes to other tables cannot be checked is not run
+      if (writeScope && writesRows(route) && !(this.deps.readScopeSupported ?? READ_SCOPE_SUPPORTED)) {
+        telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason: WRITE_SCOPE_UNSUPPORTED });
+        return { status: 503, json: { error: WRITE_SCOPE_UNSUPPORTED, ...WRITE_SCOPE_UNSUPPORTED_HINT } };
+      }
+      return runWithReadScope(scope, () => runWithWriteScope(writeScope, () => dispatch(route, handler, body)));
     };
   }
 

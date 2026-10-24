@@ -80,6 +80,10 @@ describe("OpenAPI document", () => {
     expect((r("/datanotes/operations/select_rows/")["403"] as { description: string }).description).toContain("`read` patterns");
     expect((r("/datanotes/operations/insert_row/")["403"] as { description: string }).description).not.toContain("`read` patterns");
     expect(Object.keys(r("/datanotes/tokens/create/"))).toContain("403");
+    // the routes an MCP server reports its agents on: 403 for a session another token owns
+    for (const p of ["/datanotes/sessions/identify/", "/datanotes/tool-calls/record/"]) {
+      expect((r(p)["403"] as { description: string }).description).toContain("belongs to another named token");
+    }
     // read patterns: on every entry, on create, and nullable on update
     expect(doc.components.schemas.Token).toMatchObject({ required: expect.arrayContaining(["read", "write"]), properties: { read: { type: "array", items: { type: "string" } } } });
     const body = (p: string) => ((doc.paths[p]!.post! as { requestBody?: unknown }).requestBody as { content: { "application/json": { schema: { properties: Record<string, unknown> } } } }).content["application/json"].schema.properties;

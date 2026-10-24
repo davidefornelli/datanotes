@@ -52,6 +52,20 @@ A pattern of `read` or `write` takes one of these forms:
 
 Some routes stay the owner’s, whatever a named token’s permissions. A named token can’t create or delete tokens and webhooks, list tokens, rotate them or read the engine’s status. A token may list webhooks and read its own entry with `tokens/me/`. With `tokens/update/`, it may change its own `description` and `autolink`, never its permissions.
 
+## A write into another table needs write too
+
+A row write can change rows of tables it doesn't name. The engine checks those rows against `write` too. These writes change other tables:
+
+- **`delete_rows` with `on_referenced: "set_null"`**: it clears the links to the deleted rows in the rows that link to them.
+- **Inverse links**: a link to a row with an [inverse column](/guides/database-objects/relations/) adds the link back on that row.
+- **`align_relations`**: it writes the missing links on the other side.
+
+When one of those rows belongs to a table outside the token's `write`, the engine refuses the whole write with 403. Nothing is written, and a dry run gives the same answer. The refusal names the table, such as `token legacy may not write personal.health.weight: this write changes rows of it`. When the token may not read that table, the refusal doesn't name it, so a token never learns a table name that its listings hide. In a batch, the whole batch is refused with 403 and nothing stays written.
+
+To allow the write, add that table to the token's `write` with `tokens/update/`. The engine also checks its `read`: a token must read every table it writes.
+
+The owner token and a token with `"write": ["*"]` write every table, so these checks never refuse them. Schema changes with `ddl`, and undo and restore with `maintain`, aren't row writes and keep their own rules.
+
 ## Limit what a token can read
 
 By default, a named token reads every table. Give it `read` patterns, and it reads only the tables they match. Use them for an agent that works on one part of your notes, so it never sees the rest.
@@ -88,7 +102,7 @@ The engine follows these rules:
 - **`ddl` and `maintain` need every table.** A token with either one can’t have a limited `read`. Cloning a table, adding a constraint, undo and restore read rows of any table. The engine refuses the combination with 400.
 - **A view needs its tables too.** To read a view, a token must read the view’s name and every table the view reads. That includes nested views, joins, unions and the links its filters follow. `list_tables` lists a view only when the engine can tell its tables from the view’s query alone. It hides a view over a union, even when every table of the union is readable.
 - **Free notes stay hidden.** Only a token that reads every table reads a note outside tables, or any other file of the vault. A token with a limited `read` never reads free notes.
-- **A link stays visible as text.** A readable row may link to a row the token can’t read. The link text, such as `[[Pasta]]`, stays in the answer. `expand` doesn’t expand it, so the linked note’s properties stay hidden. `file_backlink_count` stays a plain count.
+- **A link stays visible as text.** A readable row may link to a row the token can’t read. The link text, such as `[[Pasta]]`, stays in the answer. `expand` doesn’t expand it, so the linked note’s properties stay hidden.
 
 ### What the engine filters and what it refuses
 
@@ -111,6 +125,7 @@ A set you did not list is filtered to what the token may read, with no error:
 - **Wildcards**: a pattern in `tables`, or every table when you leave `table` out
 - **Search and the graph**: `search`, `search_notes`, `semantic_search`, and the neighbours and paths of the graph
 - **History and changes**: `list_changes`, `list_migrations`, `describe_history` and the change feed’s stream
+- **Counts**: `file_backlink_count` counts only the links from readable rows, in `columns`, `where` and `order_by`. The files, passages and pending notes of `describe_semantic_index` count only readable notes.
 
 The engine filters before it applies `limit`, so a search still returns up to `limit` results. A token sees its own tool calls on the change feed, never another token’s. `list_webhooks` shows only the webhooks whose tables the token may all read.
 
@@ -150,9 +165,7 @@ Read patterns limit tables, not columns or rows. These gaps remain:
 
 - **No write-only tokens.** A token always reads what it writes.
 - **No column or row limits.** A token reads every column and every row of a readable table.
-- **Writes into other tables.** A write can change rows of other tables: `on_referenced: "set_null"`, inverse links and `align_relations`. The engine doesn’t check those changes against `write` yet. The answer still hides the rows the token can’t read.
-- **Counts.** `describe_semantic_index` and `file_backlink_count` count every note, readable or not. They may tell how many notes exist.
-- **Tool calls.** Any token may record a tool call with `tool-calls/record/`, in the name of any agent.
+- **Tool calls.** A token reports what its agents say about themselves, such as the harness and the tool. The engine doesn't check it. A token can't report in another token's session, as [A session belongs to one token](/guides/security/who-did-what/#a-session-belongs-to-one-token) explains.
 - **Guessed names.** As [Names are hidden, not secret](#names-are-hidden-not-secret) explains, a refusal confirms that a table exists.
 
 ## Turn automatic links off for a sync program

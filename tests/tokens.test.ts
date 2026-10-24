@@ -137,6 +137,58 @@ describe("tokens: registry, permissions, identity in the journal", () => {
 
 });
 
+describe("tokens: a session belongs to the token that reported it first", () => {
+  it("refuses another token's reports of the session, with a hint and the docs; the owner may report any", async () => {
+    const { call } = await engine("tokens-sessions-");
+    const tokenOf = async (name: string) => (await call("/datanotes/tokens/create/", { name, write: ["main.public.log"] }, "owner-token")).json.token as string;
+    const a = await tokenOf("agent-a");
+    const b = await tokenOf("agent-b");
+    const S = "sess-a-0123456789abcdef";
+
+    // A reports its session first, and owns it
+    expect((await call("/datanotes/sessions/identify/", { session: S, model: "model-a", harness: "harness-a" }, a)).status).toBe(200);
+    expect((await call("/datanotes/tool-calls/record/", { tool: "select_rows", args: {}, ok: true, session: S, value: "by a" }, a)).status).toBe(200);
+
+    // B may not name its model nor report its calls, under the same id, its first 16 characters or a longer one
+    for (const session of [S, S.slice(0, 16), `${S}-more`, ` ${S} `]) {
+      const identify = await call("/datanotes/sessions/identify/", { session, model: "model-b" }, b);
+      expect(identify.status).toBe(403);
+      expect(identify.json).toEqual({
+        error: `session "${session.trim()}" belongs to another token`,
+        hint: "Use your own session id, such as a new UUID for each agent session. This session belongs to another token: only that token and the owner may report it.",
+        docs: "https://datanotes.dev/guides/security/who-did-what.md#a-session-belongs-to-one-token",
+      });
+      const record = await call("/datanotes/tool-calls/record/", { tool: "insert_row", args: {}, ok: true, session, value: "by b" }, b);
+      expect(record.status).toBe(403);
+      expect(record.json).toMatchObject({ error: `session "${session.trim()}" belongs to another token`, hint: expect.stringContaining("Use your own session id"), docs: expect.stringMatching(/#a-session-belongs-to-one-token$/) });
+    }
+
+    // A's identity is still the one A gave: a write of A's session carries it
+    const actor = { "X-Datanotes-Actor": JSON.stringify({ session: S }) };
+    expect((await call("/datanotes/operations/insert_row/", { table: "log", values: { kind: "walk", occurred_at: "2026-10-02T18:00" } }, a, actor)).status).toBe(200);
+    expect((await call("/datanotes/operations/list_migrations/", { op: "insert_row" }, "owner-token")).json.migrations.map((m: { by: string }) => m.by)).toEqual(["harness-a / model-a via agent-a"]);
+
+    // B's own session works; the owner may report A's session, which stays A's
+    expect((await call("/datanotes/sessions/identify/", { session: "sess-b-fedcba9876543210", model: "model-b" }, b)).status).toBe(200);
+    expect((await call("/datanotes/tool-calls/record/", { tool: "list_tables", args: {}, ok: true, session: "sess-b-fedcba9876543210", value: "by b" }, b)).status).toBe(200);
+    expect((await call("/datanotes/tool-calls/record/", { tool: "list_tables", args: {}, ok: true, value: "b, no session" }, b)).status).toBe(200);
+    expect((await call("/datanotes/sessions/identify/", { session: S, model: "model-owner" }, "owner-token")).status).toBe(200);
+    expect((await call("/datanotes/tool-calls/record/", { tool: "describe_table", args: {}, ok: true, session: S, value: "by owner" }, "owner-token")).status).toBe(200);
+    expect((await call("/datanotes/tool-calls/record/", { tool: "insert_row", args: {}, ok: true, session: S }, b)).status).toBe(403);
+    expect((await call("/datanotes/tool-calls/record/", { tool: "select_rows", args: {}, ok: true, session: S, value: "a again" }, a)).status).toBe(200);
+
+    // a session the owner reports first is the owner's: a named token may not report it
+    expect((await call("/datanotes/sessions/identify/", { session: "sess-owner-00000001", model: "model-owner" }, "owner-token")).status).toBe(200);
+    expect((await call("/datanotes/sessions/identify/", { session: "sess-owner-00000001", model: "model-b" }, b)).status).toBe(403);
+
+    // the feed holds no event of B in A's session; B's own calls are there
+    const events = (await call("/datanotes/operations/list_changes/", { since: 0, kinds: ["tool_call"] }, "owner-token")).json.events as { actor?: { auth?: string }; call: { tool: string; session?: string } }[];
+    const inS = events.filter((e) => e.call.session === S);
+    expect(inS.map((e) => [e.call.tool, e.actor?.auth])).toEqual([["select_rows", "agent-a"], ["describe_table", "owner"], ["select_rows", "agent-a"]]);
+    expect(events.filter((e) => e.actor?.auth === "agent-b").map((e) => e.call.session ?? null)).toEqual(["sess-b-fedcba9876543210", null]);
+  }, 30_000);
+});
+
 describe("tokens: the autolink default", () => {
   it("gives a token's writes its autolink default; a write's own wins; null follows the database", async () => {
     const { root, call } = await engine("tokens-autolink-", { "Oscar Reed.md": "A friend.\n" });
