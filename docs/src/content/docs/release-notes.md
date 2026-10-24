@@ -5,6 +5,19 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.4.2
+
+Datanotes 3.4.2 fixes the install of an extension on columns you mapped. It only adds to 3.4: no operation, argument or setting goes away.
+
+### Fixes
+
+- **Mapped columns of a dependency**: `--map person.name=full_name` binds a column of a table the extension depends on. The installer now rewrites that column wherever the extension names it: in view queries, CHECKs, `ref_where` and `ref_by`, through links too, such as `author.name`. Before, those kept the manifest's name and read a column the table doesn't have. [Choose the tables an extension uses](/administration/extensions/#choose-the-tables-an-extension-uses) explains mapping.
+- **No guess where it can't rewrite**: the installer refuses a mapped column in the outer clauses of a `union` view with `column_map_unsupported`. It refuses a migration step that names one with `migration_conflict`. Each problem has a hint and a docs link.
+
+### After you update
+
+- **Repair a mapped install**: an extension installed with a mapped column keeps its old views and CHECKs. Run `datanotes extension install` with the same source again. The repair replaces each view and CHECK that names the mapped column.
+
 ## 3.4.1
 
 Datanotes 3.4.1 closes three gaps in token permissions. It only adds to 3.4: no operation, argument or setting goes away. One fix can refuse a write that 3.4.0 allowed, so check your tokens before you update.

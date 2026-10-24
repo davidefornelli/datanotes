@@ -6,6 +6,7 @@
  * describe_database) and passes what it read; nothing here reads or writes anything.
  */
 
+import { ColumnBinder } from "./extension-columns.js";
 import { bindRoles, compareVersions, EXT_DOCS, rolesNamed, satisfiesEngine } from "./extension-manifest.js";
 import type { ExtensionManifest, ManifestColumn, ManifestTable } from "./extension-manifest.js";
 import type { ExtensionSourceRecord, InstalledExtension, RecordTable } from "./extension-record.js";
@@ -60,6 +61,7 @@ export type ProblemCode =
   | "missing_column"
   | "column_differs"
   | "owned_column_map"
+  | "column_map_unsupported"
   | "migration_conflict"
   | "base_differs"
   | "view_exists"
@@ -162,6 +164,9 @@ export interface ExtensionPlan {
 /** The text every plan ends with, for the agent that runs the installer. */
 export const AGENT_MESSAGE =
   'For the agent installing this extension: show this plan to the user before anything is written. Where a table says "proposed", the installer chose it: ask the user to confirm it, to pick another table (--map <role>=<catalog.schema.table>, --map <role>.<column>=<column>), or to create it (--create <role>). Add a missing column only after the user agrees (--add <role>.<column>). Solve each problem the same way. Then run the same command again with the user\'s choices and --yes, only once the user approved the tables it creates or changes, the tools and the token\'s permissions.';
+
+/** Keys under a filter or a query name columns; elsewhere in a migration step they are parameters. */
+const FILTER_KEYS = new Set(["check", "where", "ref_where", "query", "on"]);
 
 /** The most operations one batch takes. */
 export const MAX_OPERATIONS = 200;
@@ -398,6 +403,12 @@ export function planChanges(input: PlanInput): ExtensionPlan {
   for (const role of m.roles) tables[role] = choiceOf.get(role)?.table ?? `@${role}`;
   const bind = <T>(v: T): T => bindRoles(v, tables);
   const existing = (c: TableChoice): boolean => c.decision === "adopt" || c.decision === "match";
+  // column bindings of the matched dependencies: the installed record's, then the user's choices
+  const columnMap: Record<string, Record<string, string>> = {};
+  for (const c of input.chosen) if (!c.owned && c.decision === "match") columnMap[c.role] = { ...(recorded[c.role]?.columns ?? {}), ...(choices.columns[c.role] ?? {}) };
+  const binder = new ColumnBinder(m, columnMap);
+  /** A manifest column of `role` as the engine takes it: its links bound, the columns it names bound. */
+  const bindColumn = (role: string, c: ManifestColumn): Obj => bind(spec(binder.column(role, c)));
 
   // 4. model
   const model = new Map<string, ModelTable>();
@@ -430,6 +441,19 @@ export function planChanges(input: PlanInput): ExtensionPlan {
           );
           continue;
         }
+        const touched = mappedNamed(raw);
+        if (touched !== null) {
+          migrationProblems.push(
+            problem(
+              "migration_conflict",
+              `migration ${g.version}: ${raw.op} names column ${touched.column} of ${touched.role}, which reads your column ${binder.name(touched.role, touched.column)}`,
+              `Rename your column to ${touched.column} with rename_column and run the command again without --map ${touched.role}.${touched.column}, or ask the extension's author.`,
+              EXT_DOCS.update,
+              { role: touched.role, column: touched.column },
+            ),
+          );
+          continue;
+        }
         const op = bind(raw) as Op;
         const r = simulate(op, g.version);
         if (typeof r === "string") {
@@ -441,6 +465,11 @@ export function planChanges(input: PlanInput): ExtensionPlan {
         } else if (r !== null) operations.push(r);
       }
     }
+  }
+
+  /** The first mapped dependency column a migration step names, or null: migrations are not rewritten, so such a step is refused. */
+  function mappedNamed(raw: Obj): { role: string; column: string } | null {
+    return binder.named(raw, rolesNamed(raw), (k, inKeys) => inKeys || FILTER_KEYS.has(k))[0] ?? null;
   }
 
   /** Fills catalog and schema of a create_table or create_view, as the model reads them. */
@@ -584,7 +613,7 @@ export function planChanges(input: PlanInput): ExtensionPlan {
         schema,
         name: tname,
         description: def.description,
-        columns: bind(def.columns.map(spec)),
+        columns: def.columns.map((c) => bindColumn(role, c)),
         ...(def.filename !== undefined ? { filename: def.filename } : {}),
         ...(def.aliases !== undefined ? { aliases: def.aliases } : {}),
       });
@@ -593,8 +622,8 @@ export function planChanges(input: PlanInput): ExtensionPlan {
     }
     const actualCols = model.get(q)!.columns;
     for (const c of def.columns) {
-      const bound = bind(spec(c));
-      const actualName = choices.columns[role]?.[c.name] ?? recorded[role]?.columns?.[c.name] ?? c.name;
+      const bound = bindColumn(role, c);
+      const actualName = binder.name(role, c.name);
       const actual = actualCols.get(actualName);
       if (actual) {
         const diff = columnDifference(bound, actual, q, false);
@@ -637,7 +666,7 @@ export function planChanges(input: PlanInput): ExtensionPlan {
     const q = t.table!;
     const tags = { extension: name, extension_role: role };
     const instructions = def.instructions === undefined ? undefined : bind(def.instructions);
-    const constraint = (c: { name: string; check: Record<string, unknown>; hint: string }): Op => ({ op: "add_constraint", table: q, name: c.name, check: bind(c.check), hint: c.hint });
+    const constraint = (c: { name: string; check: Record<string, unknown>; hint: string }): Op => ({ op: "add_constraint", table: q, name: c.name, check: bind(binder.where(role, c.check)), hint: c.hint });
     if (t.decision === "create") {
       const [cat, schema, tname] = q.split(".");
       operations.push({
@@ -646,7 +675,7 @@ export function planChanges(input: PlanInput): ExtensionPlan {
         schema,
         name: tname,
         description: def.description,
-        columns: bind(def.columns.map(spec)),
+        columns: def.columns.map((c) => bindColumn(role, c)),
         ...(def.filename !== undefined ? { filename: def.filename } : {}),
         ...(def.aliases !== undefined ? { aliases: def.aliases } : {}),
         ...(instructions !== undefined ? { instructions } : {}),
@@ -660,7 +689,7 @@ export function planChanges(input: PlanInput): ExtensionPlan {
     const mt = model.get(q)!;
     // (a) columns
     for (const c of def.columns) {
-      const bound = bind(spec(c));
+      const bound = bindColumn(role, c);
       const actual = mt.columns.get(c.name);
       if (!actual) {
         operations.push({ op: "add_column", table: q, column: bound });
@@ -686,7 +715,7 @@ export function planChanges(input: PlanInput): ExtensionPlan {
       if (!actual) {
         operations.push(constraint(c));
         t.changes.push(`add CHECK ${c.name}`);
-      } else if (stable(actual.check) !== stable(bind(c.check)) || actual.hint !== c.hint) {
+      } else if (stable(actual.check) !== stable(bind(binder.where(role, c.check))) || actual.hint !== c.hint) {
         operations.push({ op: "drop_constraint", table: q, name: c.name }, constraint(c));
         t.changes.push(`replace CHECK ${c.name}`);
       }
@@ -717,13 +746,14 @@ export function planChanges(input: PlanInput): ExtensionPlan {
   for (const v of Object.keys(m.views)) {
     const def = m.views[v]!;
     const q = `${catalog}.${viewSchema}.${v}`;
+    const query = binder.query(v, def.query);
     const create: Op = {
       op: "create_view",
       catalog,
       schema: viewSchema,
       name: v,
       description: def.description,
-      query: bind(def.query),
+      query: bind(query),
       ...(def.aliases !== undefined ? { aliases: def.aliases } : {}),
       ...(def.labels !== undefined ? { labels: def.labels } : {}),
     };
@@ -732,7 +762,8 @@ export function planChanges(input: PlanInput): ExtensionPlan {
       viewPlan.changes.push(`create view ${v}`);
     } else if (action === "install") {
       reconcileProblems.push(problem("view_exists", `${q} exists already`, "Drop or rename that view (drop_view), or install with --schema <another schema>.", EXT_DOCS.install, { table: q }));
-    } else if (stable(oldManifest!.views[v]) !== stable(def)) {
+    } else if (stable(oldManifest!.views[v]) !== stable(def) || stable(query) !== stable(def.query)) {
+      // a view that reads a mapped column is replaced too: up to 3.4.1 it kept the manifest's names
       operations.push({ ...create, replace: true });
       viewPlan.changes.push(`replace view ${v}`);
     }
@@ -748,6 +779,19 @@ export function planChanges(input: PlanInput): ExtensionPlan {
     for (const [role, rt] of Object.entries(recorded)) {
       if (m.tables[role] === undefined) notes.push(`${role} (${rt.table}) is no longer used by the extension: it stays in the database`);
     }
+  }
+
+  // 6.6 what the column bindings could not rewrite
+  for (const i of binder.issues) {
+    reconcileProblems.push(
+      problem(
+        "column_map_unsupported",
+        `${i.role}: ${i.where} names column ${i.column}, which reads your column ${binder.name(i.role, i.column)}: the installer cannot rewrite it there`,
+        `Rename your column to ${i.column} with rename_column and leave --map ${i.role}.${i.column} out, or ask the extension's author.`,
+        EXT_DOCS.tables,
+        { role: i.role, column: i.column },
+      ),
+    );
   }
 
   // 7. tools

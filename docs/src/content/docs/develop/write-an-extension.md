@@ -200,11 +200,17 @@ The installer compares the manifest with a table it adopts or matches:
 - Instructions that differ are replaced, and the plan shows it.
 - Tags are added. Nothing is migrated again.
 
-Version 1 has three limits:
+Users may bind the columns of a dependency to theirs with `--map role.column=column`. Write the manifest and the tools so that a mapping works:
+
+- Read and write every dependency column through `ctx.column(role, column)`, never by its manifest name.
+- Name dependency columns in view queries, CHECKs, `ref_where` and `ref_by` freely. The installer rewrites them to the user's columns, through links too, such as `author.name`.
+- Expect the rows of your views to carry the user's names. A view with the column `author.name` returns `author.full_name` once `name` is mapped to `full_name`. Aggregate names, such as `n` in `{"n": "count"}`, stay as you wrote them.
+- Keep dependency columns out of the outer clauses of a `union` view and out of migrations. The installer does not rewrite them there: it refuses the mapping with `column_map_unsupported`, or the migration with `migration_conflict`.
+
+Version 1 has two limits:
 
 - A manifest cannot declare an `inverse` across two tables. Only `ref: "self"` takes `inverse`.
 - The columns of the extension's own tables keep the manifest's names. Users map only dependency columns.
-- A dotted key into a dependency, such as `project.kind`, is not mapped in CHECKs and view queries.
 
 ## Write the tools
 

@@ -415,6 +415,88 @@ describe("planChanges: the columns of a dependency", () => {
     expect(mapped.record!.tables.person!.columns).toEqual({ name: "full_name" });
   });
 
+  describe("a mapped column is read under the user's name", () => {
+    /** The user's person table: `full_name` holds the name. */
+    const fullName: DescribedTable = { qualified: "work.planning.person", columns: [...noName.columns, { name: "full_name", type: "string", required: true, description: "Full name" }] };
+    const mapped = (m: ExtensionManifest) => plan(m, { described: { "work.planning.person": fullName }, choices: { columns: { person: { name: "full_name" } } } });
+    const viewOf = (p: ReturnType<typeof plan>) => p.operations.find((o) => o.op === "create_view") as { query: Record<string, unknown> };
+
+    it("in a view: where, columns, order_by, group_by and aggregates follow the link to the dependency", () => {
+      const m = books("v0.1.0", (r) => {
+        r.views.vw_reading.query = {
+          table: "@book",
+          where: { status: "reading", or: [{ "author.name": { icontains: "a" } }, { title: "x" }] },
+          columns: ["title", "author.name"],
+          order_by: ["-author.name", "title"],
+          group_by: "author.name",
+          aggregates: { n: "count", first: "min:author.name" },
+        };
+      });
+      const p = mapped(m);
+      expect(p.problems).toEqual([]);
+      expect(viewOf(p).query).toEqual({
+        table: "work.books.book",
+        where: { status: "reading", or: [{ "author.full_name": { icontains: "a" } }, { title: "x" }] },
+        columns: ["title", "author.full_name"],
+        order_by: ["-author.full_name", "title"],
+        group_by: "author.full_name",
+        aggregates: { n: "count", first: "min:author.full_name" },
+      });
+    });
+
+    it("in a view on the dependency itself, and in a join on it", () => {
+      const m = books("v0.1.0", (r) => {
+        r.views.vw_reading.query = {
+          table: "@person",
+          columns: ["name"],
+          where: { name: { exists: true } },
+          join: { table: "@book", on: { path: "author" }, as: "books", columns: ["title"], where: { status: "reading" } },
+        };
+      });
+      expect(viewOf(mapped(m)).query).toEqual({
+        table: "work.planning.person",
+        columns: ["full_name"],
+        where: { full_name: { exists: true } },
+        join: { table: "work.books.book", on: { path: "author" }, as: "books", columns: ["title"], where: { status: "reading" } },
+      });
+    });
+
+    it("in a CHECK and in a link filter of the extension's own table", () => {
+      const m = books("v0.1.0", (r) => {
+        r.tables.book.constraints.push({ name: "author_named", check: { "author.name": { exists: true } }, hint: "Pick an author with a name." });
+        r.tables.book.columns[1].ref_where = { name: { exists: true } };
+      });
+      const p = mapped(m);
+      expect(p.problems).toEqual([]);
+      const create = p.operations.find((o) => o.op === "create_table") as { columns: { name: string; ref_where?: unknown }[] };
+      expect(create.columns.find((c) => c.name === "author")!.ref_where).toEqual({ full_name: { exists: true } });
+      expect(p.operations).toContainEqual({ op: "add_constraint", table: "work.books.book", name: "author_named", check: { "author.full_name": { exists: true } }, hint: "Pick an author with a name." });
+    });
+
+    it("where the installer cannot rewrite it, it refuses with a hint", () => {
+      const m = books("v0.1.0", (r) => {
+        r.views.vw_reading.query = { union: [{ table: "@book", columns: ["title", "author.name"] }], order_by: "author.name" };
+      });
+      const p = mapped(m);
+      expect(p.ready).toBe(false);
+      expect(p.problems).toEqual([
+        {
+          code: "column_map_unsupported",
+          role: "person",
+          column: "name",
+          detail: "person: view vw_reading (union order_by) names column name, which reads your column full_name: the installer cannot rewrite it there",
+          hint: "Rename your column to name with rename_column and leave --map person.name out, or ask the extension's author.",
+          docs: EXT_DOCS.tables,
+        },
+      ]);
+    });
+
+    it("without a mapping, the view is the manifest's", () => {
+      const p = plan(books());
+      expect(viewOf(p).query).toEqual({ table: "work.books.book", where: { status: "reading" } });
+    });
+  });
+
   it("a table the CLI did not describe has no columns", () => {
     const p = plan(books(), { described: {} });
     expect(p.problems.map((x) => x.code)).toEqual(["missing_column"]);

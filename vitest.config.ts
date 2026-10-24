@@ -24,6 +24,7 @@ class ExamplesFirst extends BaseSequencer {
 const FULL = [
   "src/api/client.ts",
   "src/api/docs.ts",
+  "src/api/extension-columns.ts",
   "src/api/extension-files.ts",
   "src/api/extension-host.ts",
   "src/api/extension-manifest.ts",

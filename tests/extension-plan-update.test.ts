@@ -122,6 +122,68 @@ function bookTable(edit?: (d: DescribedTable) => void): DescribedTable {
 const update = (manifest: ExtensionManifest, o: Overrides = {}) => planChanges(inputFor(manifest, { installed: installedV1(), ...o }));
 const ops = (p: { operations: Record<string, unknown>[] }) => p.operations.map((o) => o.op);
 
+describe("planChanges: an update over a dependency whose column is mapped", () => {
+  /** v0.1.0 installed with person.name read from `full_name`. */
+  const mapped = (): InstalledExtension => {
+    const i = installedV1();
+    return { ...i, tables: { ...i.tables, person: { ...i.tables.person!, columns: { name: "full_name" } } } };
+  };
+  const fullName: DescribedTable = { ...PERSON, columns: PERSON.columns.map((c) => (c.name === "name" ? { ...c, name: "full_name" } : c)) };
+  const described = { "work.planning.person": fullName, "work.books.book": bookTable() };
+
+  it("keeps the mapping and runs a migration that does not name the mapped column", () => {
+    const p = update(V2, { installed: mapped(), described });
+    expect(p.problems).toEqual([]);
+    expect(ops(p)).toEqual(["add_column", "drop_constraint", "add_constraint"]);
+    expect(p.record!.tables.person!.columns).toEqual({ name: "full_name" });
+  });
+
+  it("a view the update replaces reads the mapped column", () => {
+    const m = books("v0.2.0", (r) => (r.views.vw_reading.query.columns = ["title", "author.name"]));
+    const p = update(m, { installed: mapped(), described });
+    expect(p.operations.find((o) => o.op === "create_view")).toMatchObject({ replace: true, query: { columns: ["title", "author.full_name"] } });
+  });
+
+  it("a repair replaces a view and a CHECK that 3.4.1 installed with the manifest's names", () => {
+    const m = books("v0.1.0", (r) => {
+      r.views.vw_reading.query.columns = ["title", "author.name"];
+      r.tables.book.constraints.push({ name: "author_named", check: { "author.name": { exists: true } }, hint: "Pick an author with a name." });
+    });
+    const installed = { ...mapped(), version: "0.1.0", commit: SOURCE_V1.commit };
+    const book = bookTable((d) => {
+      d.constraints = { ...d.constraints, author_named: { "author.name": { exists: true } } };
+      d.constraint_hints = { ...d.constraint_hints, author_named: "Pick an author with a name." };
+    });
+    const listing = { ...LISTING, views: [{ qualified: "work.books.vw_reading" }] };
+    const p = planChanges(inputFor(m, { installed, source: SOURCE_V1, oldManifest: m, listing, described: { "work.planning.person": fullName, "work.books.book": book } }));
+    expect(p.action).toBe("repair");
+    expect(p.problems).toEqual([]);
+    expect(p.operations).toEqual([
+      { op: "drop_constraint", table: "work.books.book", name: "author_named" },
+      { op: "add_constraint", table: "work.books.book", name: "author_named", check: { "author.full_name": { exists: true } }, hint: "Pick an author with a name." },
+      expect.objectContaining({ op: "create_view", replace: true, query: { table: "work.books.book", where: { status: "reading" }, columns: ["title", "author.full_name"] } }),
+    ]);
+  });
+
+  it("refuses a migration step that names the mapped column through a link", () => {
+    const m = books("v0.2.0", (r) => r.migrations[0].operations.push({ op: "add_constraint", table: "@book", name: "author_named", check: { "author.name": { exists: true } }, hint: "Pick an author with a name." }));
+    const p = update(m, { installed: mapped(), described });
+    expect(p.problems).toEqual([
+      {
+        code: "migration_conflict",
+        role: "person",
+        column: "name",
+        detail: "migration 0.2.0: add_constraint names column name of person, which reads your column full_name",
+        hint: "Rename your column to name with rename_column and run the command again without --map person.name, or ask the extension's author.",
+        docs: EXT_DOCS.update,
+      },
+    ]);
+    // the keys of a step are parameters, not columns: its `name` key does not name person.name
+    const own = books("v0.2.0", (r) => r.migrations[0].operations.push({ op: "add_column", table: "@book", column: { name: "label", type: "string", description: "A label" } }));
+    expect(update(own, { installed: mapped(), described }).problems).toEqual([]);
+  });
+});
+
 describe("planChanges: an update", () => {
   it("update runs the migration, then replaces the CHECK whose hint changed", () => {
     const installed = installedV1();
