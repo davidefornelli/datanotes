@@ -105,6 +105,7 @@ export const PAGES: GuidePage[] = [
       ["columns", "Default to today’s date or the current time"],
       ["columns", "Store lists and structured values"],
       ["columns", "Compute a column from other columns"],
+      ["columns", "Count and total the items of a json list"],
       ["columns", "Let the engine fill identity columns"],
       ["columns", "Partition rows into folders"],
       ["columns", "See the column definitions in `metastore.yaml`"],
@@ -359,11 +360,22 @@ export const PAGES: GuidePage[] = [
     ],
   },
   {
+    path: `${SEARCH}/hybrid`,
+    title: "Search notes by words and meaning",
+    label: "Hybrid search",
+    description: "Search every note by its words, and by its meaning too when semantic search is on, in one call.",
+    order: 2,
+    intro:
+      "The [`search`](/reference/operations/queries/#search) operation always works. It ranks the notes by their words, and by their meaning too when [semantic search](/guides/search/semantic/) is on. A note found only one way is still in the answer. The vault has three actors, two classic films, a viewing and two plain notes.",
+    include: "docs/examples/text/hybrid-search.md",
+    examples: [["vault", "Search by words and meaning"]],
+  },
+  {
     path: `${SEARCH}/semantic`,
     title: "Find notes by meaning",
     label: "Semantic search",
     description: "Turn on semantic search with a local or hosted embedding model, and search your notes by what they say.",
-    order: 2,
+    order: 3,
     intro:
       "Semantic search finds notes by meaning instead of exact words. The engine splits each note into passages, sends them to an embedding model you choose and stores the resulting vectors in the vault. Agents and programs then search with the [`semantic_search`](/reference/operations/queries/#semantic_search) operation. It’s off by default, because note text goes to the model’s provider.",
     include: "docs/examples/text/semantic-search.md",
@@ -374,7 +386,7 @@ export const PAGES: GuidePage[] = [
     title: "Walk the link graph",
     label: "Link graph",
     description: "Read the links between notes as a graph: neighbors, walks filtered by label and table, and the shortest path between two notes.",
-    order: 3,
+    order: 4,
     intro: [
       "The engine reads your notes and their links as a labelled graph. Edges from link columns have the column’s name as their label, such as `cast` or `genre`; other resolved links have the label `link`, and each row has its table as its label.",
       "The vault of the examples has three actors, two classic films, a viewing and two plain notes.",

@@ -142,6 +142,7 @@ describe("responseSchema", () => {
     await check("describe_semantic_index", {});
     await check("sync_semantic_index", {});
     await check("semantic_search", { query: "pizza dinner" });
+    expect(await check("search", { query: "pizza dinner" })).toMatchObject({ meaning: "on" });
 
     // database and DDL (history on, so the new table has a transaction log)
     await check("configure_database", { history: true });

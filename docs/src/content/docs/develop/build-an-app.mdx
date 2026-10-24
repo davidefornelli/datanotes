@@ -70,13 +70,14 @@ The app has four small files in `src/`: the client, the films, the change feed a
    console.log(r.token);
    ```
 
-   The token can read every table, and write rows of `watch` and `film` only. It can’t change the schema, undo, or touch `actor`. The engine lists it like this:
+   The request passes no `read`, so the token can read every table. It writes rows of `watch` and `film` only. It can’t change the schema, undo, or touch `actor`. The engine lists it like this:
 
    ```json
    {
      "name": "film-night",
      "description": "Logs film nights and picks the next film",
      "write": ["main.public.watch", "main.public.film"],
+     "read": ["*"],
      "ddl": false
    }
    ```

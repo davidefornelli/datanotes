@@ -145,7 +145,7 @@ A set of rows with the same columns, defined in the metastore. See [Tables](/gui
 
 ## Token
 
-A credential for the HTTP API, sent as `Authorization: Bearer`. The owner token can do everything; a named token has only the permissions you give it. See [Tokens and permissions](/guides/security/tokens/).
+A credential for the HTTP API, sent as `Authorization: Bearer`. The owner token can do everything. A named token reads and writes only the tables you allow, and has only the permissions you give it. See [Tokens and permissions](/guides/security/tokens/).
 
 ## Transaction log
 

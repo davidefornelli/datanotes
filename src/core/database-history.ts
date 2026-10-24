@@ -27,6 +27,7 @@ import { guide } from "./hints";
 import { batchMembership, readJournal } from "./journal";
 import { loadMetastore, metastorePath, parseMetastore, refOf, setTableEntry, type CatalogTableEntry } from "./metastore";
 import type { DatanotesSettings } from "./settings";
+import { currentReadScope, tableReadable } from "./read-scope";
 
 // --- describe_history without a table ---
 
@@ -56,15 +57,50 @@ export interface DatabaseHistory {
   history: DatabaseCommit[];
 }
 
-/** The commits of every logged table, newest first; the commits of one operation are grouped by `tables`. */
+/**
+ * The commits of every logged table, newest first; the commits of one operation are grouped by
+ * `tables`. Under a read scope (a named token with `read` patterns), only the tables it may read
+ * are listed, and only the commits whose every table (the operation's, or its batch's) it may read.
+ */
 export async function describeDatabaseHistory(app: App, settings: DatanotesSettings, input: DatabaseHistoryInput = {}): Promise<DatabaseHistory> {
   const from = input.since === undefined ? undefined : sinceMs(input.since);
   const tables = await loggedTables(app, settings);
   const limit = Math.max(input.limit ?? 50, 0);
-  const all: DatabaseCommit[] = [];
-  // the newest `limit` commits overall are among the newest `limit` of each table: only those are read
-  for (const table of tables) for (const c of await newestCommitInfos(app, settings, table, limit, from)) all.push({ table, ...c });
   const batchOf = await batchMembership(app, settings);
+  const scope = currentReadScope();
+  if (!scope) return databaseCommits(tables, await newestOf(app, settings, tables, limit, from), batchOf, limit);
+  const readable = tables.filter((t) => tableReadable(t, scope));
+  if (!(limit > 0)) return { tables: readable, history: [] };
+  // The newest `depth` commits of each readable table, and every commit of the other tables from
+  // the oldest of those on (a minute before: the other commits of the same operation), so an
+  // operation that also wrote an unreadable table is known as one. Commits hidden that way leave
+  // fewer than `limit`: read deeper until `limit` are shown or the readable logs are read in full.
+  for (let depth = limit; ; depth *= 2) {
+    const mine = await newestOf(app, settings, readable, depth, from);
+    const oldest = mine.reduce((m, c) => Math.min(m, Date.parse(c.timestamp)), Infinity);
+    const others = oldest === Infinity ? [] : await newestOf(app, settings, tables.filter((t) => !readable.includes(t)), Infinity, Math.max(from ?? -Infinity, oldest - 60_000));
+    const all = databaseCommits(tables, [...mine, ...others], batchOf, Infinity);
+    const shown = all.history.filter((c) => tableReadable(c.table, scope) && (c.tables ?? []).every((t) => tableReadable(t, scope)));
+    // final when no table read only in part can hold a newer commit than the last one shown
+    const last = shown.length >= limit ? shown[limit - 1]!.timestamp : null;
+    const complete = readable.every((t) => {
+      const read = mine.filter((c) => c.table === t);
+      // newest first: the last one read is the oldest, and every one not read is older still
+      return read.length < depth || (last !== null && read[read.length - 1]!.timestamp < last);
+    });
+    if (complete) return { tables: readable, history: shown.slice(0, limit) };
+  }
+}
+
+/** The newest `limit` commits of each of these tables, at or after `from`. */
+async function newestOf(app: App, settings: DatanotesSettings, tables: readonly string[], limit: number, from: number | undefined): Promise<DatabaseCommit[]> {
+  const all: DatabaseCommit[] = [];
+  for (const table of tables) for (const c of await newestCommitInfos(app, settings, table, limit, from)) all.push({ table, ...c });
+  return all;
+}
+
+/** The newest `limit` of these commits, newest first, each with its batch and the tables of its operation. */
+function databaseCommits(tables: string[], all: DatabaseCommit[], batchOf: Map<string, string>, limit: number): DatabaseHistory {
   const groupOf = (c: DatabaseCommit) => (c.migrationId === undefined ? undefined : (batchOf.get(c.migrationId) ?? c.migrationId));
   const groups = new Map<string, Set<string>>();
   for (const c of all) {

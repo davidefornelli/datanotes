@@ -22,6 +22,8 @@
 import type { App } from "../core/host";
 import { wireEvent, type ChangeFeed, type ChangeOp } from "../core/change-feed";
 import type { DatanotesSettings } from "../core/settings";
+import { cachedMetastore, rowTableFull } from "../core/metastore";
+import { currentReadScope, tableReadable } from "../core/read-scope";
 import { storePath, storeRead, storeWrite } from "../core/store";
 import { telemetry } from "../core/telemetry";
 import { messageOf } from "../core/message";
@@ -171,8 +173,16 @@ export class WebhookDispatcher {
     await this.saving;
   }
 
+  /**
+   * The webhooks, as the read scope of the request sees them: a restricted token (one with `read`
+   * patterns) sees only the webhooks on tables it may all read, never one on every table.
+   */
   list(): PublicWebhook[] {
-    return this.hooks.map(publicView);
+    const scope = currentReadScope();
+    if (!scope) return this.hooks.map(publicView);
+    const model = cachedMetastore(this.app, this.getSettings());
+    const full = (t: string) => (model ? rowTableFull(model, t) : null) ?? t;
+    return this.hooks.filter((h) => (h.tables ?? []).length > 0 && h.tables!.every((t) => tableReadable(full(t), scope))).map(publicView);
   }
 
   async create(input: { url: string; tables?: string[]; ops?: ChangeOp[]; columns?: string[]; excludeActor?: string; where?: Record<string, unknown>; since?: number }): Promise<PublicWebhook & { secret: string }> {
@@ -270,7 +280,8 @@ export class WebhookDispatcher {
         continue;
       }
       const q = { since: h.cursor, limit: BATCH, ...(h.tables ? { tables: h.tables } : {}), ...(h.ops ? { ops: h.ops } : {}), ...(h.columns ? { columns: h.columns } : {}), ...(h.excludeActor ? { excludeActor: h.excludeActor } : {}), ...(h.where ? { where: h.where } : {}) };
-      const page = await feed.wait(q, WAIT_MS);
+      // the owner's: a delivery outlives the request that started it, whose read scope is not its own
+      const page = await feed.wait(q, WAIT_MS, null);
       if (!this.alive(h)) return;
       if (page.events.length === 0 && !page.gap) {
         if (page.last !== h.cursor) {

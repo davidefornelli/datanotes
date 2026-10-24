@@ -2525,6 +2525,21 @@ answer restore_table.violations[].violations[].hint: string
 answer restore_table.violations[].violations[].index: integer
 answer restore_table.violations[].violations[].message: string
 answer restore_table.violations[].violations[].value: any
+answer search.meaning = "failed"
+answer search.meaning = "off"
+answer search.meaning = "on"
+answer search.meaning: string
+answer search.meaning_error: string
+answer search.query: string
+answer search.results: object[]
+answer search.results[].heading: string
+answer search.results[].matched_by = "meaning"
+answer search.results[].matched_by = "words"
+answer search.results[].matched_by: string[]
+answer search.results[].path: string
+answer search.results[].score: number
+answer search.results[].snippet: string
+answer search.results[].table: string
 answer search_notes.query: string
 answer search_notes.results: object[]
 answer search_notes.results[].matches: object[]
@@ -3334,6 +3349,18 @@ argument restore_table.timestamp: string
 argument restore_table.version optional
 argument restore_table.version: integer
 argument restore_table.version: null
+argument search.folder optional
+argument search.folder: null
+argument search.folder: string
+argument search.limit optional
+argument search.limit: integer
+argument search.min_score optional
+argument search.min_score: null
+argument search.min_score: number
+argument search.query: string
+argument search.tables optional
+argument search.tables: null
+argument search.tables: string[]
 argument search_notes.context_length optional
 argument search_notes.context_length: integer
 argument search_notes.query: string
@@ -3665,6 +3692,7 @@ operation rename_column
 operation rename_value
 operation restore_database
 operation restore_table
+operation search
 operation search_notes
 operation select_rows
 operation semantic_search
@@ -3730,6 +3758,7 @@ route POST /datanotes/operations/rename_column/
 route POST /datanotes/operations/rename_value/
 route POST /datanotes/operations/restore_database/
 route POST /datanotes/operations/restore_table/
+route POST /datanotes/operations/search/
 route POST /datanotes/operations/search_notes/
 route POST /datanotes/operations/select_rows/
 route POST /datanotes/operations/semantic_search/

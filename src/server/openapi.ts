@@ -9,7 +9,8 @@
  * - 400 bad input (`{error}`): every `/datanotes/*` POST (a body that is not a JSON object, an
  *   unknown, missing or wrongly typed argument);
  * - 401 missing or wrong token (`{error}`): every route but `GET /`, the spec and the docs;
- * - 403 (`{error}`): a named token beyond its permissions (writes, schema changes, maintenance; `token-routes.ts`);
+ * - 403 (`{error}`): a named token beyond its permissions (writes, schema changes, maintenance; `token-routes.ts`),
+ *   or a read of a table or note outside its `read` patterns (every operation that reads; `read-scope.ts`);
  * - 404 (`{error}`): unknown table, view or migration, where the operation names one; a missing note or folder;
  * - 409: an ambiguous table name (`{error, paths}` / `{error, tables}`), or an undo refused
  *   (OpResult with `ok: false`);
@@ -94,10 +95,15 @@ const STATUS_TEXT: Record<number, string> = {
   409: "Ambiguous table name: it matches several tables (`paths` or `tables` lists them).",
 };
 
+/** 403 of a read operation: only when it names a table, view or note outside the token's `read` patterns. */
+const READ_DENIED_TEXT =
+  "A named token whose `read` patterns do not cover the table, view or note the request names (such as `token cook may not read personal.health.weight`). Sets it did not name (listings, bases, search, the graph, the change feed) are filtered instead.";
+
 const ERRORS = {
   400: { description: STATUS_TEXT[400], content: json(ref("Error")) },
   401: { $ref: "#/components/responses/Unauthorized" },
   403: { description: STATUS_TEXT[403], content: json(ref("Error")) },
+  readDenied: { description: READ_DENIED_TEXT, content: json(ref("Error")) },
   404: { description: STATUS_TEXT[404], content: json(ref("Error")) },
   409: { description: STATUS_TEXT[409], content: json(ref("AmbiguousName")) },
   500: { $ref: "#/components/responses/ServerError" },
@@ -126,6 +132,7 @@ function postRoute(d: RouteDoc): Schema {
   const op = operationOf(d.route);
   const read = op !== undefined ? READ_OPERATIONS.has(op) : READ_ROUTES.has(d.route) && d.route !== "/tokens/update/";
   if (!read) responses["403"] = ERRORS[403];
+  else if (op !== undefined) responses["403"] = ERRORS.readDenied;
   if (d.namesTable) responses["404"] = ERRORS[404];
   const refused = op !== undefined ? refusedStatus(op) : undefined;
   if (refused === 409) {
@@ -169,6 +176,7 @@ const TOKEN_ROUTES: Record<string, { summary: string; body: Schema; result: Sche
       properties: {
         name: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$", description: "Kebab-case; the journal records it as `auth`. `owner` is reserved." },
         description: { type: "string" },
+        read: { type: "array", items: { type: "string" }, description: "Tables the token may read, as patterns like `write`'s. Absent (or with `*`): every table. It must cover every `write` pattern, and stay absent with `ddl` or `maintain` (400 otherwise)." },
         write: { type: "array", items: { type: "string" }, description: "Tables the token may write: catalog.schema.table, catalog.schema.*, catalog.* or *." },
         ddl: { type: "boolean", description: "May the token change the schema?" },
         maintain: { type: "boolean", description: "May the token also undo, restore, vacuum, configure and rebuild the semantic index? (For an agent's own token.)" },
@@ -179,12 +187,13 @@ const TOKEN_ROUTES: Record<string, { summary: string; body: Schema; result: Sche
     writes: true,
   },
   "/tokens/update/": {
-    summary: "Change a named token. A token may change its own description and autolink default; permissions are the owner's.",
+    summary: "Change a named token. A token may change its own description and autolink default; permissions (`read`, `write`, `ddl`, `maintain`) are the owner's.",
     body: {
       type: "object",
       properties: {
         name: { type: "string", description: "Owner only (a named token updates itself)." },
         description: { type: "string", description: "An empty string removes it." },
+        read: { type: ["array", "null"], items: { type: "string" }, description: "The tables the token may read; null reads every table again. Checked against `write`, `ddl` and `maintain` as on create." },
         write: { type: "array", items: { type: "string" } },
         ddl: { type: "boolean" },
         maintain: { type: "boolean" },
@@ -364,11 +373,12 @@ const SCHEMAS: Record<string, Schema> = {
   Token: {
     type: "object",
     description: "A named token as the registry shows it (never its value).",
-    required: ["name", "write", "ddl", "created_at", "updated_at"],
+    required: ["name", "write", "read", "ddl", "created_at", "updated_at"],
     properties: {
       name: { type: "string" },
       description: { type: "string" },
       write: { type: "array", items: { type: "string" } },
+      read: { type: "array", items: { type: "string" }, description: "The tables it may read (patterns like `write`'s); `[\"*\"]` when it reads every table." },
       ddl: { type: "boolean" },
       maintain: { type: "boolean" },
       autolink: { type: "boolean", description: "The default of its writes for automatic links (absent: the database's setting)." },
@@ -641,11 +651,11 @@ export function openApiDocument(version: string): Schema {
         "Database of Markdown notes: tables of notes, rows, queries, history, a change feed and the vault's notes.\n\n" +
         "**Operations**: every operation is `POST /datanotes/operations/<name>/`, its body the operation's arguments (the same names as the MCP tool of the same name). An unknown argument is refused (400) with the closest real one.\n\n" +
         "**Authentication**: every route but `GET /`, this document and `/datanotes/docs` needs `Authorization: Bearer <token>`: " +
-        "the owner's token (`httpServerToken` in the settings: everything) or a named token (`/datanotes/tokens/create/`: reads everything; writes the tables in its `write` patterns, " +
+        "the owner's token (`httpServerToken` in the settings: everything) or a named token (`/datanotes/tokens/create/`: reads the tables in its `read` patterns, every table without them; writes the tables in its `write` patterns, " +
         "changes the schema with `ddl`; the engine's administration stays the owner's: 403 otherwise).\n\n" +
         "**Actor**: send `X-Datanotes-Actor: {\"harness\": …, \"model\": …, \"session\": …}` (JSON) to record on whose behalf a write is made; " +
         "the journal adds the credential (`auth`: `owner`, or the named token's name), which the client cannot claim.\n\n" +
-        "**Errors**: `{error}` with 400 (bad input), 401 (missing or wrong token), 403 (a named token beyond its permissions), 404 (unknown table, view, migration or note), " +
+        "**Errors**: `{error}` with 400 (bad input), 401 (missing or wrong token), 403 (a named token beyond its permissions, or a read of a table outside its `read` patterns), 404 (unknown table, view, migration or note), " +
         "409 (ambiguous table name), 500. A refused write answers 422 (409 for undo) with the operation's result, `ok: false`: nothing was written.",
     },
     servers: [{ url: "/" }],

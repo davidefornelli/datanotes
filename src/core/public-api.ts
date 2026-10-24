@@ -51,7 +51,9 @@ import { missingDescriptions } from "./descriptions";
 import type { TableColumn } from "./types-table";
 import { catalogRowFiles } from "./row-files";
 import type { DatanotesSettings } from "./settings";
-import { listTables, type TableRef } from "./table-registry";
+import { listTables, viewReadable, type TableRef } from "./table-registry";
+import { assertTableReadable, currentReadScope, tableReadable, tableReadDenied } from "./read-scope";
+import { refOf } from "./query-tables";
 import { graphNeighbors, graphPath, graphTraverse, type NeighborsInput, type PathInput, type TraverseInput } from "./graph";
 import { inferTable, type InferInput, type InferResult } from "./infer";
 import type { SemanticIndex, SemanticSearchInput, SemanticHit, SemanticStatus, SyncResult } from "./semantic";
@@ -192,11 +194,15 @@ export interface DatanotesPublicApi {
   withActor<R>(actor: Actor, fn: () => R): R;
 }
 
-/** Every table and view of `metastore.yaml` (re-read). */
+/**
+ * Every table and view of `metastore.yaml` (re-read). Under a read scope, only those the token may
+ * read: a view when its own name is readable and so is every table it reads.
+ */
 export async function listTablesAndViews(app: App, settings: DatanotesSettings): Promise<{ tables: TableRef[]; views: ViewRef[] }> {
   const ms = await loadMetastore(app, settings);
+  const scope = currentReadScope();
   const views: ViewRef[] = ms
-    ? catalogViews(ms.model).map(({ ref, view }) => ({
+    ? catalogViews(ms.model).filter(({ ref }) => viewReadable(ms.model, ref.full, scope)).map(({ ref, view }) => ({
         name: ref.table,
         catalog: ref.catalog,
         schema: ref.schema,
@@ -205,7 +211,7 @@ export async function listTablesAndViews(app: App, settings: DatanotesSettings):
         ...(view.aliases && view.aliases.length > 0 ? { aliases: view.aliases } : {}),
       }))
     : [];
-  return { tables: listTables(app, settings.databaseFolder), views };
+  return { tables: listTables(app, settings.databaseFolder).filter((t) => tableReadable(t.qualified, scope)), views };
 }
 
 /** What describe_table answers: built field by field, so the engine's internals stay its own. */
@@ -247,7 +253,15 @@ export interface DescribedTableAnswer {
 
 /** A table's definition with its qualified name, row count and what lacks a description. */
 export async function describeTable(app: App, settings: DatanotesSettings, table: string): Promise<DescribedTableAnswer> {
+  const scope = currentReadScope();
+  if (scope) {
+    // a view's name: refused when list_tables would hide it (the view, or a table it reads)
+    const model = (await loadMetastore(app, settings))?.model;
+    const view = model && typeof table === "string" && refOf(model, table, "table") === null ? refOf(model, table, "view") : null;
+    if (model && view && !viewReadable(model, view, scope)) throw tableReadDenied(scope.token, view);
+  }
   const t = await loadTable(app, settings, table);
+  assertTableReadable(t.catalog.ref.full);
   const { def } = t;
   const o = def.options;
   const e = t.catalog.entry;

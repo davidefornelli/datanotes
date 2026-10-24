@@ -64,6 +64,19 @@ const chapter: Chapter = {
       steps: [{ op: "search_notes", args: { query: "grant", context_length: 30 } }],
     },
     {
+      title: "Search by words and meaning",
+      say: "`search` ranks every note that has a word of the query. A rare word counts more than a common one. A word in the note’s name or properties counts more than one in its text. Here semantic search is off, so `meaning` is `off` and every hit has `matched_by: [\"words\"]`.",
+      steps: [
+        { op: "search", args: { query: "cary grant film" }, check: (v) => v.results[0]?.matched_by?.[0] !== "words" && "a words hit expected" },
+        {
+          say: "Quotes keep words together, and a minus sign leaves notes out. This query wants the two words in a row, and no note that names Charade:",
+          op: "search",
+          args: { query: '"cary grant" -charade' },
+          check: (v) => v.results.some((h: { path: string }) => h.path.includes("Charade")) && "Charade should be left out",
+        },
+      ],
+    },
+    {
       title: "See what a note links to and what links to it",
       say: "`graph_neighbors` returns a note’s links in both directions. Each link has a label: the link column it comes from (`cast`), or `link` for a link in the text.",
       steps: [{ op: "graph_neighbors", args: { from_nodes: { table: "actor", where: { name: "Cary Grant" } } } }],

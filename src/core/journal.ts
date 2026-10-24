@@ -19,6 +19,7 @@ import type { DatanotesSettings } from "./settings";
 import { storeAppend, storeExists, storeList, storePath, storeRead, storeRemove, storeStat, storeWrite } from "./store";
 import { databaseMoves, translateJournalEntry } from "./database-move";
 import { phase } from "./tracing";
+import { currentReadScope, tableReadable } from "./read-scope";
 
 type Settings = Pick<DatanotesSettings, "journalRetentionDays"> & Partial<Pick<DatanotesSettings, "databaseId">>;
 
@@ -324,8 +325,18 @@ export interface ListMigrationsInput {
   since?: string;
 }
 
-/** Operations newest first, with what each one touched (no row data). */
+/** The table (or view, or `bases.<name>`) an operation was about: what its `schema` names after `#`. */
+function tableOfEntry(e: MigrationLine): string | undefined {
+  return e.schema?.includes("#") ? e.schema.slice(e.schema.indexOf("#") + 1) : undefined;
+}
+
+/**
+ * Operations newest first, with what each one touched (no row data). Under a read scope (a named
+ * token with `read` patterns), only the operations about a table it may read: an operation about
+ * no table (a batch, a database-wide change) is hidden, and so is one about a base.
+ */
 export async function listMigrations(app: App, settings: Settings, input: ListMigrationsInput = {}): Promise<{ total: number; migrations: MigrationSummary[] }> {
+  const scope = currentReadScope();
   const files = (await storeList(app, journalDir(settings))).files.filter((f) => f.endsWith(".jsonl")).sort().reverse();
   const limit = Math.max(1, Math.min(input.limit ?? 50, 1000));
   const since = input.since ? Date.parse(input.since) : NaN;
@@ -341,13 +352,17 @@ export async function listMigrations(app: App, settings: Settings, input: ListMi
       if (input.op && e.op !== input.op) continue;
       if (input.table && !(e.schema ?? "").includes(input.table) && !e.summary.includes(input.table)) continue;
       if (!Number.isNaN(since) && Date.parse(e.executed_at) < since) continue;
+      if (scope) {
+        const table = tableOfEntry(e);
+        if (table === undefined || !tableReadable(table, scope)) continue;
+      }
       total++;
       if (out.length >= limit) continue;
       out.push({
         migration_id: e.migration_id,
         op: e.op,
         summary: e.summary,
-        ...(e.schema?.includes("#") ? { table: e.schema.slice(e.schema.indexOf("#") + 1) } : {}),
+        ...(tableOfEntry(e) !== undefined ? { table: tableOfEntry(e)! } : {}),
         executed_at: e.executed_at,
         notes_changed: e.rows.length,
         files_changed: e.creates.length + e.moves.length + e.references.length + (e.deleted?.length ?? 0),

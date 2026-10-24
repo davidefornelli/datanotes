@@ -10,6 +10,8 @@ import { loadTableAsOf, TableAbsentError, type HistoricalTable } from "./history
 import { informationSchemaTable, informationSchemaTableData, resolveViewSelect } from "./catalog-ops";
 import { resolveThisTokens, type Host } from "./this-tokens";
 import { baseChain, catalogTables, loadMetastore } from "./metastore";
+import { refOf } from "./query-tables";
+import { assertPathReadable, assertTableReadable, currentReadScope, pathReadable, tableReadable } from "./read-scope";
 import { loadRows, loadRowsWhere, loadTable, OperationInputError, type LoadedRow, type LoadedRowWithBody, type LoadedTable } from "./engine";
 import { readFrontmatter } from "./file-cache";
 import { fmGet, readOrderedFromMarkdown } from "./frontmatter";
@@ -240,9 +242,12 @@ async function loadJoin(
   const [leftText, rightText] = pairs[0]!;
   if (typeof rightText !== "string") throw new OperationInputError(`join.on values must be strings`, JOIN_HINT);
   // time travel: the right table as of the same time as the left one
+  if (asOf.timestamp !== undefined) await assertRefReadable(app, settings, join.table);
   const hist = asOf.timestamp !== undefined ? await loadTableAsOf(app, settings, join.table, { timestamp: asOf.timestamp }) : null;
   if (hist) asOf.read.set(hist.table.catalog.ref.full, hist.version);
   const rt = hist?.table ?? (await loadTable(app, settings, join.table));
+  // the caller named it: refused when the token may not read it (before a row is read)
+  assertTableReadable(rt.catalog.ref.full);
   const rKnown = readableKeys(rt, settings);
   const lGet = rowGetter(app, t, settings, env.tz);
   const rGet = rowGetter(app, rt, settings, env.tz);
@@ -272,6 +277,19 @@ async function loadJoin(
 
 const MAX_VIEW_DEPTH = 8;
 
+/**
+ * Refuse a table the caller names before anything of it is read (src/core/read-scope.ts): for
+ * time travel, whose history is read before the table is known. A name the metastore does not
+ * resolve to a table passes: the read that follows refuses it (not found), or asserts the table
+ * it finds.
+ */
+async function assertRefReadable(app: App, settings: DatanotesSettings, ref: string): Promise<void> {
+  if (!currentReadScope()) return;
+  const model = (await loadMetastore(app, settings))?.model;
+  const full = model ? refOf(model, ref, "table") : null;
+  if (full) assertTableReadable(full);
+}
+
 /** Most rows a single union branch may contribute: a union is sorted in memory, so it must be bounded. */
 export const UNION_BRANCH_MAX = 1000;
 
@@ -296,7 +314,9 @@ async function selectBase(app: App, settings: DatanotesSettings, input: SelectIn
       const ext = (entry.bases as string[] | undefined) ?? [];
       return ext.length > 0 && baseChain(model.bases, ext).includes(name);
     })
-    .map(({ ref }) => ref.full);
+    .map(({ ref }) => ref.full)
+    // a base is a set the caller did not enumerate: only the tables the token may read
+    .filter((full) => tableReadable(full));
   const own = new Set([SYSTEM_ID_COLUMN, ...baseChain(model.bases, [name]).flatMap((b) => model.bases[b]!.columns.map((c) => String(c.name)))]);
   const columns = input.columns ?? [...own];
   for (const c of [...columns, ...Object.keys(input.where ?? {}).filter((k) => !["and", "or", "not"].includes(k))]) {
@@ -391,10 +411,13 @@ async function selectImpl(app: App, settings: DatanotesSettings, input: SelectIn
   }
   if (input.version === undefined && input.timestamp === undefined) return selectOn(app, settings, input, null, read);
   if (input.join && input.version !== undefined) throw perTableVersion("a join reads two tables");
+  await assertRefReadable(app, settings, input.table);
   const hist = await loadTableAsOf(app, settings, input.table, {
     ...(input.version !== undefined ? { version: input.version } : {}),
     ...(input.timestamp !== undefined ? { timestamp: input.timestamp } : {}),
   });
+  // a table dropped since (no name in the metastore now) is told by its history
+  assertTableReadable(hist.table.catalog.ref.full);
   read.set(hist.table.catalog.ref.full, hist.version);
   const r = await selectOn(app, settings, input, hist, read);
   return { ...r, version: hist.version, timestamp: hist.timestamp, ...(input.join ? { versions: sortedVersions(read) } : {}) };
@@ -425,6 +448,8 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
       // a read takes a view too: suggest both
       throw e instanceof TableNotFoundError ? tableNotFound(input.table, (await loadMetastore(app, settings))?.model, "any") : e;
     }));
+  // the table the caller named (time travel and information_schema checked theirs before)
+  if (!hist) assertTableReadable(t.catalog.ref.full);
   const known = readableKeys(t, settings);
   const tz = (await readDatabaseConfig(app, settings)).timezone;
   const now = new Date();
@@ -464,8 +489,9 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
     const linkpath = parseWikilink(v);
     if (linkpath == null) return v;
     const dest = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
-    // an archived row is gone, as a deleted one: its link stays a link
-    if (!dest || isArchivedPath(app, settings, dest.path)) return v;
+    // an archived row is gone, as a deleted one: its link stays a link; so does a link to a note
+    // the token may not read (the link's text is a value of a readable row, the note is not)
+    if (!dest || isArchivedPath(app, settings, dest.path) || !pathReadable(app, settings, dest.path)) return v;
     const fm = (app.metadataCache.getFileCache(dest)?.frontmatter ?? {}) as Record<string, unknown>;
     return { path: dest.path, ...fm };
   };
@@ -590,7 +616,7 @@ export function select(app: App, settings: DatanotesSettings, input: SelectInput
   return traced(
     "datanotes select",
     { "datanotes.op": "select", table: input.table },
-    async () => selectImpl(app, settings, input.thisNote === undefined ? input : { ...input, host: await noteHost(app, input.thisNote) }),
+    async () => selectImpl(app, settings, input.thisNote === undefined ? input : { ...input, host: await noteHost(app, settings, input.thisNote) }),
     (r) => ({ attributes: { total: r.total, returned: r.rows.length } }),
   );
 }
@@ -598,10 +624,12 @@ export function select(app: App, settings: DatanotesSettings, input: SelectInput
 const THIS_NOTE_HINT = guide(`Give "this_note" the vault path of an existing note, with ".md" (list_folder or search_notes find it).`, "thisNote");
 
 /** The note `this_note` names, as its `{this.*}` tokens read it: its path and its properties. */
-async function noteHost(app: App, path: string): Promise<Host> {
+async function noteHost(app: App, settings: DatanotesSettings, path: string): Promise<Host> {
   const why = unsafeVaultPath(path);
   if (why) throw new OperationInputError(`this_note: ${why}`, THIS_NOTE_HINT);
   const file = app.vault.getAbstractFileByPath(path);
+  // before the note is read, and whether or not it exists: a restricted token cannot tell which do
+  assertPathReadable(app, settings, file?.path ?? path);
   if (file == null || !("extension" in file)) throw new OperationInputError(`this_note: no note at "${path}" (give its vault path, e.g. "Journal/2026-10-06.md")`, THIS_NOTE_HINT);
   const { ordered } = readOrderedFromMarkdown(await app.vault.read(file as TFile));
   return { path: file.path, frontmatter: Object.fromEntries(ordered) };

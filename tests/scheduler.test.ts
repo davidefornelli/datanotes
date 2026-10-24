@@ -39,7 +39,7 @@ describe("write priority", () => {
     for (const o of OPERATIONS) {
       const cls = operationClass(o.name);
       expect(["read", "write", "free"], o.name).toContain(cls);
-      if (o.name === "semantic_search" || o.name === "sync_semantic_index") expect(cls, o.name).toBe("free");
+      if (o.name === "semantic_search" || o.name === "search" || o.name === "sync_semantic_index") expect(cls, o.name).toBe("free");
       else expect(cls, o.name).toBe(o.annotations.readOnlyHint === true ? "read" : "write");
     }
     expect([...READ_OPERATIONS].sort()).toEqual(OPERATIONS.filter((o) => o.annotations.readOnlyHint === true).map((o) => o.name).sort());

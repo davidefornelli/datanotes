@@ -145,8 +145,8 @@ describe("token registry: the registry file", () => {
     const restarted = setup({ vault: first.v });
     expect((await restarted.owner("/tokens/")).json).toEqual({ tokens: first.registry.list() });
     expect(restarted.registry.list()).toEqual([
-      { name: "pantry", description: "the kitchen tablet", write: ["personal.food.pantry"], ddl: false, maintain: true, created_at: NOW, updated_at: NOW },
-      { name: "reporting", write: [], ddl: false, created_at: NOW, updated_at: NOW },
+      { name: "pantry", description: "the kitchen tablet", read: ["*"], write: ["personal.food.pantry"], ddl: false, maintain: true, created_at: NOW, updated_at: NOW },
+      { name: "reporting", read: ["*"], write: [], ddl: false, created_at: NOW, updated_at: NOW },
     ]);
     expect((await restarted.registry.authenticate(token))?.name).toBe("pantry");
   });
@@ -195,7 +195,7 @@ describe("token registry: creating a token", () => {
     const s = setup();
     const { entry, token } = await create(s, { name: "pantry", description: "the kitchen tablet", write: ["personal.food.*", "personal.food.pantry", "personal.food.*"], ddl: true, maintain: true });
     expect(token).toMatch(/^[0-9a-f]{48}$/);
-    expect(entry).toEqual({ name: "pantry", description: "the kitchen tablet", write: ["personal.food.*", "personal.food.pantry"], ddl: true, maintain: true, created_at: NOW, updated_at: NOW });
+    expect(entry).toEqual({ name: "pantry", description: "the kitchen tablet", read: ["*"], write: ["personal.food.*", "personal.food.pantry"], ddl: true, maintain: true, created_at: NOW, updated_at: NOW });
     // the file keeps its own keys (camelCase); the answer is snake_case
     expect(s.tokensFile()).toEqual([{ name: "pantry", description: "the kitchen tablet", tokenHash: await sha256Hex(token), write: ["personal.food.*", "personal.food.pantry"], ddl: true, maintain: true, createdAt: NOW, updatedAt: NOW }]);
     expect(s.v.read("store:tokens.json")).not.toContain(token);
@@ -205,7 +205,7 @@ describe("token registry: creating a token", () => {
   it("gives a token with only a name no permissions; the plugin fields of former apps are ignored", async () => {
     const s = setup();
     const { entry } = await create(s, { name: "reporting", ddl: "yes", maintain: 1, mcp_url: "https://reporting.example/mcp", mcp_token: "secret", instructions: "Be brief." });
-    expect(entry).toEqual({ name: "reporting", write: [], ddl: false, created_at: NOW, updated_at: NOW });
+    expect(entry).toEqual({ name: "reporting", read: ["*"], write: [], ddl: false, created_at: NOW, updated_at: NOW });
     expect(s.v.read("store:tokens.json")).not.toMatch(/mcp|secret|Be brief/);
   });
 });
@@ -238,7 +238,7 @@ describe("token registry: updating a token", () => {
     const r = await s.as("pantry", "/tokens/update/", { name: "reporting", description: "the kitchen tablet" });
     expect(r).toEqual({
       status: 200,
-      json: { entry: { name: "pantry", description: "the kitchen tablet", write: ["personal.food.pantry"], ddl: false, created_at: NOW, updated_at: "2026-10-08T10:00:00.000Z" } },
+      json: { entry: { name: "pantry", description: "the kitchen tablet", read: ["*"], write: ["personal.food.pantry"], ddl: false, created_at: NOW, updated_at: "2026-10-08T10:00:00.000Z" } },
     });
     expect(s.registry.get("reporting")).not.toHaveProperty("description");
     // an empty description removes it
@@ -252,7 +252,7 @@ describe("token registry: updating a token", () => {
     const grant = await s.owner("/tokens/update/", { name: "assistant", write: ["personal.*", "personal.*"], ddl: true, maintain: true });
     expect(grant.json).toMatchObject({ entry: { write: ["personal.*"], ddl: true, maintain: true } });
     const revoke = await s.owner("/tokens/update/", { name: "assistant", write: [], ddl: false, maintain: false });
-    expect((revoke.json as { entry: PublicToken }).entry).toEqual({ name: "assistant", write: [], ddl: false, created_at: NOW, updated_at: NOW });
+    expect((revoke.json as { entry: PublicToken }).entry).toEqual({ name: "assistant", read: ["*"], write: [], ddl: false, created_at: NOW, updated_at: NOW });
     expect((s.tokensFile() as Record<string, unknown>[])[0]).not.toHaveProperty("maintain");
   });
 });
@@ -333,7 +333,7 @@ describe("token registry: the routes a token may call about itself", () => {
     await create(s, { name: "reporting" });
     const all = await s.owner("/tokens/");
     expect((all.json as { tokens: PublicToken[] }).tokens.map((t) => t.name)).toEqual(["pantry", "reporting"]);
-    expect(await s.as("reporting", "/tokens/me/")).toEqual({ status: 200, json: { entry: { name: "reporting", write: [], ddl: false, created_at: NOW, updated_at: NOW } } });
+    expect(await s.as("reporting", "/tokens/me/")).toEqual({ status: 200, json: { entry: { name: "reporting", read: ["*"], write: [], ddl: false, created_at: NOW, updated_at: NOW } } });
     expect(await s.owner("/tokens/me/")).toEqual(bad("call this with a named token"));
     const e = await thrown(runWithActor({ auth: "owner" }, () => s.registry.handlers()["/tokens/me/"]!({})));
     expect(e).toBeInstanceOf(BadRequest);

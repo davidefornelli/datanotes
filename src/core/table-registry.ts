@@ -13,6 +13,8 @@ import { vaultGeneration } from "./file-cache";
 import { vaultIndex } from "./vault-index";
 import { closestNames, guide, GuidedError, nameList, sentences, type Guidance } from "./hints";
 import { normalizeDatabaseFolder } from "./db-paths";
+import { currentReadScope, tableReadable, type ReadScope } from "./read-scope";
+import { tablesReadByView } from "./query-tables";
 
 export class TableNotFoundError extends GuidedError {
   override readonly name = "TableNotFoundError";
@@ -25,13 +27,27 @@ export class TableNotFoundError extends GuidedError {
 }
 
 /**
+ * May the read scope (the current one when not given; null: none) read the view `viewFull`? Its own
+ * name must be readable, and every table it reads, as told from the metastore alone: a view whose
+ * reads cannot be told in full (`within`, `base:`, a union, …) is not readable under a scope.
+ */
+export function viewReadable(model: Metastore, viewFull: string, scope: ReadScope | null = currentReadScope()): boolean {
+  if (scope === null) return true;
+  if (!tableReadable(viewFull, scope)) return false;
+  const reads = tablesReadByView(model, viewFull);
+  return reads.complete && reads.tables.every((t) => tableReadable(t, scope));
+}
+
+/**
  * A table (or view) `ref` names none of `model`: the error, with the closest real names (by name
  * or alias), the list of them and the operation that describes them all. `kind` is what the
  * operation takes: a write needs a table, so a view's name gets the view's own explanation.
  */
 export function tableNotFound(ref: string, model: Metastore | null | undefined, kind: "table" | "view" | "any" = "table"): TableNotFoundError {
-  const tables = model ? catalogTables(model).map(({ ref: r, entry }) => ({ r, aliases: entry.aliases })) : [];
-  const views = model ? catalogViews(model).map(({ ref: r, view }) => ({ r, aliases: view.aliases })) : [];
+  // under a read scope, only what the token may read is named (list_tables lists the same)
+  const scope = currentReadScope();
+  const tables = model ? catalogTables(model).filter(({ ref: r }) => tableReadable(r.full, scope)).map(({ ref: r, entry }) => ({ r, aliases: entry.aliases })) : [];
+  const views = model ? catalogViews(model).filter(({ ref: r }) => viewReadable(model, r.full, scope)).map(({ ref: r, view }) => ({ r, aliases: view.aliases })) : [];
   if (model && kind === "table") {
     const view = views.find(({ r }) => r.full === ref.trim() || r.table === ref.trim() || `${r.schema}.${r.table}` === ref.trim());
     if (view) {
@@ -59,7 +75,7 @@ export function tableNotFound(ref: string, model: Metastore | null | undefined, 
     guide(
       sentences(
         near.length > 0 ? `Did you mean ${near.join(" or ")}?` : "",
-        kind !== "view" ? (tableNames.length > 0 ? `Tables: ${nameList(tableNames)}.` : "There are no tables yet (create_table makes one).") : "",
+        kind !== "view" ? (tableNames.length > 0 ? `Tables: ${nameList(tableNames)}.` : scope ? `Token ${scope.token} may read no table.` : "There are no tables yet (create_table makes one).") : "",
         kind !== "table" && viewNames.length > 0 ? `Views: ${nameList(viewNames)}.` : kind === "view" ? "There are no views." : "",
         "list_tables lists them with their descriptions and aliases.",
       ),

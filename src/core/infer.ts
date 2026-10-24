@@ -11,6 +11,7 @@ import { loadTable, loadRows, OperationInputError } from "./engine";
 import { cachedMetastore, loadMetastore, rowTableFull } from "./metastore";
 import type { DatanotesSettings } from "./settings";
 import { validationContextFor } from "./table-registry";
+import { assertPathReadable, assertTableReadable, currentReadScope, pathReadable, tableReadable } from "./read-scope";
 
 export interface InferInput {
   /** Notes in this folder (recursive) … */
@@ -118,14 +119,17 @@ function tableNameFor(folder: string | undefined): string {
 
 function filesOf(app: App, settings: DatanotesSettings, input: InferInput): TFile[] {
   const out = new Map<string, TFile>();
+  // under a read scope: a folder's notes the token may not read are left out, a path it names is refused
+  const scope = currentReadScope();
   if (input.folder !== undefined) {
     const prefix = input.folder.replace(/^\/+|\/+$/g, "");
     for (const f of app.vault.getMarkdownFiles()) {
-      if (prefix === "" || f.path.startsWith(`${prefix}/`)) out.set(f.path, f);
+      if ((prefix === "" || f.path.startsWith(`${prefix}/`)) && pathReadable(app, settings, f.path, scope)) out.set(f.path, f);
     }
   }
   for (const p of input.paths ?? []) {
     const path = p.endsWith(".md") ? p : `${p}.md`;
+    assertPathReadable(app, settings, path);
     const f = app.vault.getAbstractFileByPath(path);
     if (f && "extension" in f) out.set(path, f as TFile);
   }
@@ -226,7 +230,8 @@ function refOf(app: App, settings: DatanotesSettings, links: { path: string; val
     if (owner) counts.set(owner, (counts.get(owner) ?? 0) + 1);
   }
   const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-  return best && resolved > 0 && best[1] >= resolved * 0.8 ? best[0] : undefined;
+  // a table the token may not read is not proposed (list_tables hides it)
+  return best && resolved > 0 && best[1] >= resolved * 0.8 && tableReadable(best[0]) ? best[0] : undefined;
 }
 
 function frontmatter(app: App, f: TFile): Record<string, unknown> {
@@ -242,6 +247,7 @@ export async function inferTable(app: App, settings: DatanotesSettings, input: I
   if (input.table !== undefined) {
     // Existing table: keys its rows use that it does not declare.
     const t = await loadTable(app, settings, input.table);
+    assertTableReadable(t.catalog.ref.full);
     const rows = await loadRows(app, settings, t);
     const declared = new Set([...t.def.columns.map((c) => c.name), ...t.def.untypedFields]);
     const observed = new Map<string, Observed>();

@@ -23,6 +23,7 @@ import { messageOf } from "./message";
 import { acyclicViolations } from "./acyclic";
 import { unreadableMessage, unreadableRows, type UnreadableNote } from "./unreadable";
 import { phase, tally, traceNow, tracingOn } from "./tracing";
+import { assertTableReadable, currentReadScope, pathReadable, tableReadable } from "./read-scope";
 
 // --- CHECK constraints ---
 
@@ -203,11 +204,18 @@ export async function checkOne(
 async function checkImpl(app: App, settings: DatanotesSettings, input: CheckInput): Promise<CheckResult> {
   const limit = Math.min(Math.max(Math.trunc(input.limit ?? CHECK_LIMIT), 1), CHECK_MAX);
   const offset = Math.max(Math.trunc(input.offset ?? 0), 0);
+  // under a read scope: only the tables the token may read, and nothing about a note it may not
+  // read (checked here, at the read site: checkOne also serves the change feed's checks)
+  const scope = currentReadScope();
   const rowsOf = (list: readonly RowViolations[], table?: string): CheckedRow[] =>
-    list.map((r) => ({ path: r.path, ...(table ? { table } : {}), violations: r.violations.map(checkViolation) }));
+    list
+      .filter((r) => scope === null || pathReadable(app, settings, r.path, scope) || r.violations.every((v) => v.code === "unreadable"))
+      .map((r) => ({ path: r.path, ...(table ? { table } : {}), violations: r.violations.map(checkViolation) }));
   if (input.table) {
+    if (scope) assertTableReadable((await loadTable(app, settings, input.table)).catalog.ref.full);
     const r = await checkOne(app, settings, input.table);
-    return { table: r.table, rows_checked: r.rows, total: r.violations.length, violations: rowsOf(r.violations).slice(offset, offset + limit) };
+    const shown = rowsOf(r.violations);
+    return { table: r.table, rows_checked: r.rows, total: shown.length, violations: shown.slice(offset, offset + limit) };
   }
   const model = (await loadMetastore(app, settings))?.model;
   const all: CheckedRow[] = [];
@@ -216,7 +224,7 @@ async function checkImpl(app: App, settings: DatanotesSettings, input: CheckInpu
   let tables = 0;
   // the notes whose front matter cannot be read, found in one pass for every table
   const everyUnreadable = model ? { model, rows: await unreadableRows(app, settings, model) } : undefined;
-  for (const full of (model ? catalogTables(model).map(({ ref }) => ref.full) : []).sort()) {
+  for (const full of (model ? catalogTables(model).map(({ ref }) => ref.full) : []).filter((full) => tableReadable(full, scope)).sort()) {
     let r: Awaited<ReturnType<typeof checkOne>>;
     try {
       r = await checkOne(app, settings, full, everyUnreadable);

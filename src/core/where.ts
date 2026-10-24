@@ -15,6 +15,7 @@ import { isEmptyValue, isValidDate, isValidDatetime, parseWikilink } from "./val
 import { basenameOf } from "./path-templates";
 import { hasThisTokens } from "./this-tokens";
 import { guide, unknownColumn, unknownOperator, type Guidance } from "./hints";
+import { assertTableReadable } from "./read-scope";
 
 const LOGICAL_HINT = guide(`"and" and "or" take a list of where objects, "not" one: {"or": [{"status": "watched"}, {"rating": {"gte": 4}}]}.`, "logical");
 
@@ -283,6 +284,8 @@ export async function resolveWithin(app: App, settings: DatanotesSettings, t: Lo
       const viaLink = via && (via.type === "link" || (via.type === "list" && via.items === "link"));
       if (!via || !viaLink || !via.ref) throw new OperationInputError(`where "${col}": "${head}" is not a link column with ref`, notALink(head, t));
       const target = via.ref === t.catalog.ref.full ? t : await loadTable(app, settings, via.ref);
+      // a filter is a read of the table it follows into (in a write's where too)
+      assertTableReadable(target.catalog.ref.full);
       const sub = await resolveWithin(app, settings, target, { [tail]: cond } as Where);
       const pred = compileWhere(sub, target, settings, rowGetter(app, target, settings));
       const hits = (await loadRows(app, settings, target)).filter(pred).map((r) => `[[${basenameOf(r.file.path)}]]`);
@@ -298,6 +301,7 @@ export async function resolveWithin(app: App, settings: DatanotesSettings, t: Lo
     const isLink = spec && (spec.type === "link" || (spec.type === "list" && spec.items === "link"));
     if (!spec || !isLink || !spec.ref) throw new OperationInputError(`"within" needs a link column with ref: "${col}" is not one`, notALink(col, t));
     const target = spec.ref === t.catalog.ref.full ? t : await loadTable(app, settings, spec.ref);
+    assertTableReadable(target.catalog.ref.full);
     const h = target.def.columns.find((c) => c.hierarchy);
     if (!h) throw new OperationInputError(`"within": ${spec.ref} has no hierarchy column (e.g. parent with hierarchy: true)`, guide(`"within" follows a tree: give ${spec.ref} a parent link with hierarchy: true (add_column), or filter with "eq" / "in" instead.`, "tree"));
     const raw = (cond as Record<string, unknown>).within;

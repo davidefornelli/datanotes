@@ -72,6 +72,7 @@ const FULL = [
   "src/core/path-templates.ts",
   "src/core/public-api.ts",
   "src/core/query.ts",
+  "src/core/read-scope.ts",
   "src/core/relations.ts",
   "src/core/reserved-keys.ts",
   "src/core/row-checks.ts",
@@ -149,13 +150,12 @@ export default defineConfig({
       reporter: ["text", "html"],
       thresholds: {
         // the whole code base: the engine's operations, the HTTP server and tokens, the Node host, the MCP server.
-        // Today 99.56 / 99.67 / 99.08 on both Linux / Node 22 and Windows / Node 24: a small margin
-        // for the few paths that depend on timing.
-        lines: 99.5,
-        statements: 99.5,
-        functions: 99,
-        // 98.5, not 99: timing-dependent paths and Node versions move a few branches between runs
-        branches: 98.5,
+        // Today 99.86 / 99.86 / 99.77 (lines, statements, functions) on Linux / Node 26: rounded down.
+        lines: 99.8,
+        statements: 99.8,
+        functions: 99.7,
+        // today 99.41; 99, not 99.4: timing-dependent paths and Node versions move a few branches between runs
+        branches: 99,
         ...Object.fromEntries(FULL.map((file) => [file, { 100: true }])),
         ...NEAR_FULL,
       },

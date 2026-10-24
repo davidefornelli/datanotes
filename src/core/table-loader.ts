@@ -7,7 +7,7 @@ import { fmGet } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
 import { TABLE_META_KEYS } from "./reserved-keys";
 import type { CatalogRef } from "./metastore";
-import { generatedRefs, isLinkExpression, isTemplateExpression } from "./generated";
+import { generatedRefs, isLinkExpression, isTemplateExpression, parseAggregate, type Aggregate } from "./generated";
 import {
   COLUMNS_KEY,
   DEFAULT_NOW,
@@ -26,7 +26,7 @@ import {
 import type { OrderedFrontmatter } from "./types";
 import { isEmptyValue, validateValue } from "./validate";
 import { messageOf } from "./message";
-import { guide, type Guidance } from "./hints";
+import { guide, guidanceOf, type Guidance } from "./hints";
 import { inDatabase, normalizeDatabaseFolder } from "./db-paths";
 
 export class MalformedColumnError extends Error {
@@ -471,7 +471,7 @@ function checkGeneratedColumns(specs: readonly ColumnSpec[], known: ReadonlySet<
     try {
       refs = generatedRefs(c.generated);
     } catch (e) {
-      throw new MalformedColumnError(index, messageOf(e));
+      throw new MalformedColumnError(index, messageOf(e), guidanceOf(e) ?? undefined);
     }
     if (isTemplateExpression(c.generated) && c.type !== "string") {
       throw new MalformedColumnError(index, `a template expression makes text: "${c.name}" must be a string column`);
@@ -488,7 +488,40 @@ function checkGeneratedColumns(specs: readonly ColumnSpec[], known: ReadonlySet<
         throw new MalformedColumnError(index, `"generated" reads generated column "${ref}", declared after it`);
       }
     }
+    const agg = parseAggregate(c.generated);
+    if (agg) checkAggregate(c, index, agg, specs);
   });
+}
+
+/** An aggregate reads a json column (or a list of json) and makes a number: the column must hold one. */
+function checkAggregate(c: ColumnSpec, index: number, agg: Aggregate, specs: readonly ColumnSpec[]): void {
+  const source = specs.find((s) => s.name === agg.column);
+  if (source?.type !== "json" && !(source?.type === "list" && source.items === "json")) {
+    const what = !source
+      ? `"${agg.column}" is ${agg.column === "path" ? "the row's path" : "an untyped field"}`
+      : source.type === "list"
+        ? // parseColumn gives every list its items ("string" when the spec has none)
+          `"${agg.column}" is a list of ${source.items!}`
+        : `"${agg.column}" has type ${source.type}`;
+    throw new MalformedColumnError(
+      index,
+      `"generated" aggregates "${agg.column}", which is not a json column`,
+      guide(`${agg.fn}() reads a json column (type json, or a list of json) holding a list of objects, such as [{side: left, min: 12}]; ${what}. describe_table shows the type of each column.`, "jsonAggregates"),
+    );
+  }
+  const fits = agg.fn === "avg" ? c.type === "number" : c.type === "number" || c.type === "integer";
+  if (fits) return;
+  if (agg.fn === "count") {
+    throw new MalformedColumnError(index, `count() makes a whole number: "${c.name}" must be an integer or number column`, guide(`Give "${c.name}" type "integer" or "number".`, "jsonAggregates"));
+  }
+  if (agg.fn === "avg") {
+    throw new MalformedColumnError(index, `avg() makes a number: "${c.name}" must be a number column`, guide(`Give "${c.name}" type "number": an average is seldom a whole number.`, "jsonAggregates"));
+  }
+  throw new MalformedColumnError(
+    index,
+    `${agg.fn}() makes a number: "${c.name}" must be a number or integer column`,
+    guide(`Give "${c.name}" type "number", or "integer" when the field holds only whole numbers.`, "jsonAggregates"),
+  );
 }
 
 /**

@@ -11,6 +11,7 @@ import { readHash, readHashed } from "./file-cache";
 import { readDatabaseConfig } from "./database";
 import { isoAt } from "./datetime";
 import { guide, GuidedError } from "./hints";
+import { assertPathReadable, currentReadScope, pathReadable, type ReadScope } from "./read-scope";
 
 /** A note, folder or file the request names is not in the vault (HTTP 404). */
 export class VaultPathNotFoundError extends GuidedError {
@@ -44,7 +45,19 @@ export interface NoteRead {
   size: number | null;
 }
 
-/** A file of the vault with its front matter and tags (`read_note`). */
+/**
+ * Which notes the current read scope may read (the scope read once for a listing or a search).
+ * Null without a scope: everything. Under a restricted scope without the settings, no note can be
+ * told a row of a table: none (fail closed).
+ */
+function readableFilter(app: App, settings: DatanotesSettings | undefined): ((path: string) => boolean) | null {
+  const scope: ReadScope | null = currentReadScope();
+  if (scope === null) return null;
+  if (!settings) return () => false;
+  return (path) => pathReadable(app, settings, path, scope);
+}
+
+/** A file of the vault with its front matter and tags (`read_note`): under a read scope, only a row of a readable table. */
 export async function readNote(app: App, settings: DatanotesSettings, path: string): Promise<NoteRead> {
   const rel = clean(path);
   if (rel === "" || /\/$/.test(path.trim())) {
@@ -56,6 +69,7 @@ export async function readNote(app: App, settings: DatanotesSettings, path: stri
     throw new VaultPathNotFoundError(`no file ${rel} in the vault`, FIND_NOTE);
   }
   const file = f as TFile;
+  assertPathReadable(app, settings, file.path);
   const { content } = await readHashed(app, file);
   const cache = app.metadataCache.getFileCache(file) as { frontmatter?: Record<string, unknown>; tags?: { tag: string }[] } | null;
   const { position: _position, ...frontMatter } = (cache?.frontmatter ?? {}) as Record<string, unknown>;
@@ -87,13 +101,29 @@ export interface FolderListing {
   files: string[];
 }
 
-/** The direct children of a vault folder (`list_folder`); dot-files and dot-folders are left out. */
-export function listFolder(app: App, folder: string): FolderListing {
+/**
+ * The direct children of a vault folder (`list_folder`); dot-files and dot-folders are left out.
+ * Under a read scope (`settings` needed to tell it), only the notes it may read, and the folders
+ * holding one.
+ */
+export function listFolder(app: App, folder: string, settings?: DatanotesSettings): FolderListing {
   const rel = clean(folder);
   const node = rel === "" ? (app.vault.getRoot?.() ?? app.vault.getAbstractFileByPath("/")) : app.vault.getAbstractFileByPath(rel);
   if (!node || !("children" in node)) {
     if (node) throw new VaultPathError(`${rel} is a file: read_note reads it`, guide("Pass a folder of the vault (\"\" is the vault root); read_note reads a file.", "readNote"));
     throw new VaultPathNotFoundError(`no folder ${rel} in the vault`, guide("list_folder with folder \"\" lists the vault root; pass one of its folders.", "readNote"));
+  }
+  const readable = readableFilter(app, settings);
+  // the folders below this one that hold a readable note: found once, from the notes under it
+  let shown: Set<string> | null = null;
+  if (readable) {
+    shown = new Set();
+    const prefix = rel === "" ? "" : `${rel}/`;
+    for (const f of app.vault.getMarkdownFiles()) {
+      if (!f.path.startsWith(prefix) || !readable(f.path)) continue;
+      shown.add(f.path);
+      for (let i = f.path.indexOf("/", prefix.length); i >= 0; i = f.path.indexOf("/", i + 1)) shown.add(f.path.slice(0, i));
+    }
   }
   const folders: string[] = [];
   const files: string[] = [];
@@ -101,6 +131,7 @@ export function listFolder(app: App, folder: string): FolderListing {
     const name = child.name ?? child.path.split("/").pop()!;
     if (name.startsWith(".")) continue;
     const path = rel === "" ? name : `${rel}/${name}`;
+    if (shown && !shown.has(path)) continue;
     ("children" in child ? folders : files).push(path);
   }
   return { folder: rel, folders: folders.sort(), files: files.sort() };
@@ -240,6 +271,11 @@ export function setSearchSource(app: App, source: SearchSource | null): void {
   else SEARCH_SOURCES.delete(app);
 }
 
+/** What the host's search index answers for `words` (see {@link SearchSource.candidates}); null without one, or when it cannot answer now. */
+export function searchCandidates(app: App, words: readonly string[]): SearchCandidates | null {
+  return SEARCH_SOURCES.get(app)?.candidates(words) ?? null;
+}
+
 /** A surrogate code unit outside a pair: the UTF-8 an index holds has no such character. */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
@@ -349,24 +385,29 @@ function candidateFiles(app: App, c: SearchCandidates): TFile[] {
  * match, not one per word. The score counts the words found in the text (at most 20), plus 5 for
  * each word in the path. Passages are built only for the notes returned. With a host's search
  * index ({@link setSearchSource}), only the notes it names are searched; the answer is the same.
+ * Under a read scope (`settings` needed to tell it), only the notes it may read are searched: the
+ * 200 returned and `total` are of those.
  */
-export async function searchNotes(app: App, query: string, contextLength = 100): Promise<NoteSearchResults> {
+export async function searchNotes(app: App, query: string, contextLength = 100, settings?: DatanotesSettings): Promise<NoteSearchResults> {
   const words = [...new Set(fold(query).split(/\s+/).filter(Boolean))];
   if (words.length === 0) return { query, results: [], total: 0 };
   const ctx = Number.isFinite(contextLength) && contextLength >= 0 ? Math.min(Math.floor(contextLength), 1000) : 100;
   // the host's index of the notes' words, for the words it can look up: only the notes it names are searched
   const indexable = words.filter(indexableWord);
-  const narrowed = indexable.length > 0 ? (SEARCH_SOURCES.get(app)?.candidates(indexable) ?? null) : null;
+  const narrowed = indexable.length > 0 ? searchCandidates(app, indexable) : null;
   const files = narrowed ? candidateFiles(app, narrowed) : app.vault.getMarkdownFiles();
   // folded texts are kept only while every note is searched: with an index they would only cost memory
   const keep = narrowed === null;
   const present = keep ? new Set<string>() : null;
   const has = (n: FoldedNote) => words.every((w) => n.text.includes(w) || n.name.includes(w));
+  const readable = readableFilter(app, settings);
   const found: Found[] = [];
   for (const f of files) {
     // a dot-file, or a file in a dot-folder
     if (HIDDEN.test(f.path)) continue;
     present?.add(f.path);
+    // a note the read scope may not read: not searched (before the results are cut to the 200)
+    if (readable && !readable(f.path)) continue;
     // folded once per version of the note, not once per search: a note kept folded needs no text
     // unless it matches (its passages are cut from the text)
     let content: string | undefined;

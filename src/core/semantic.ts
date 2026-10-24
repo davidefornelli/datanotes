@@ -23,6 +23,7 @@ import type { DatanotesSettings } from "./settings";
 import { storePath, storeRead, storeWrite } from "./store";
 import { OperationInputError } from "./engine";
 import { messageOf } from "./message";
+import { assertTableReadable, currentReadScope, pathReadable } from "./read-scope";
 
 const SHARDS = 16;
 const FORMAT = 1;
@@ -469,6 +470,18 @@ export class SemanticIndex {
     const q = await this.queryVector(input.query.trim());
     const limit = Math.min(Math.max(1, input.limit ?? 10), 100);
     const folder = input.folder?.replace(/^\/+|\/+$/g, "");
+    // under a read scope: a table named exactly must be readable; the notes it may not read are
+    // left out before the best are kept (a pattern is narrowed by them)
+    const scope = currentReadScope();
+    const settings = this.getSettings();
+    if (scope) {
+      const model = cachedMetastore(this.app, settings);
+      for (const name of input.tables ?? []) {
+        // a name that is no table (a pattern, an unknown or ambiguous name): narrowed by the notes it may read
+        const full = model ? rowTableFull(model, name) : null;
+        if (full !== null) assertTableReadable(full);
+      }
+    }
     const wantTable = (t: string | undefined) =>
       !input.tables || input.tables.length === 0 || (t !== undefined && input.tables.some((x) => t === x || t.endsWith(`.${x}`)));
     // Each note's best passage (the first of equal ones), then the `limit` best notes, best first;
@@ -485,6 +498,7 @@ export class SemanticIndex {
     for (const [path, f] of this.files) {
       if (folder && !path.startsWith(`${folder}/`)) continue;
       if (!wantTable(f.table)) continue;
+      if (scope && !pathReadable(this.app, settings, path, scope)) continue;
       let estimate = -Infinity;
       for (const x of passing(f)) estimate = Math.max(estimate, x.estimate);
       if (estimate > -Infinity) notes.push({ path, f, estimate });

@@ -68,6 +68,8 @@ import { linkedCheckViolations, metastoreLeftBy } from "./changeset-checks";
 import { fillIdentities } from "./computed-columns";
 import { claimFreeName, renderPathTemplate } from "./path-templates";
 import { select, type SelectInput } from "./select";
+import { assertTableReadable, currentReadScope, tableReadable, type ReadScope } from "./read-scope";
+import { tablesReadByView } from "./query-tables";
 import { compileCheck, hasLogical, type Where } from "./where";
 import { linkTargetOf, mapWhere, modelColumns, rewrittenEntries } from "./link-paths";
 import { validateRow } from "./validate";
@@ -308,6 +310,8 @@ export async function resolveViewSelect(app: App, settings: DatanotesSettings, i
   if (tableRef) return null;
   const ref = resolveCatalogRef(ms.model, input.table, "view");
   if (!ref) return null;
+  // invoker's rights: the view's own name, then (as its query runs) every table it reads
+  assertTableReadable(ref.full);
   const view = ms.model.catalogs[ref.catalog]!.schemas[ref.schema]!.views[ref.table]!;
   const base = viewQueryToSelect(input.host ? resolveThisTokens(view.query, input.host) : view.query);
   let where: Where = { ...(base.where ?? {}) };
@@ -415,13 +419,24 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
   const ms = await loadMetastore(app, settings);
   const model = ms?.model ?? parseMetastore("");
   const cfg = await readDatabaseConfig(app, settings);
-  const tables = catalogTables(model);
+  // under a token's read scope, only what it may read: its tables, the views whose name and every
+  // table it may read, and the schemas and catalogs holding one of them (read-scope.ts)
+  const scope = currentReadScope();
+  const tables = catalogTables(model).filter(({ ref }) => tableReadable(ref.full, scope));
+  const views = catalogViews(model).filter(({ ref }) => viewReadable(model, ref.full, scope));
+  const visible = new Set([...tables, ...views].map(({ ref }) => `${ref.catalog}.${ref.schema}`));
+  const shown = (catalog: string, schema?: string) =>
+    scope === null || (schema !== undefined ? visible.has(`${catalog}.${schema}`) : [...visible].some((k) => k.startsWith(`${catalog}.`)));
   switch (name) {
     case "catalogs":
-      return Object.entries(model.catalogs).map(([c, cat]) => ({ catalog_name: c, comment: cat.description ?? null, is_default: c === cfg.default_catalog }));
+      return Object.entries(model.catalogs)
+        .filter(([c]) => shown(c))
+        .map(([c, cat]) => ({ catalog_name: c, comment: cat.description ?? null, is_default: c === cfg.default_catalog }));
     case "schemata":
       return Object.entries(model.catalogs).flatMap(([c, cat]) =>
-        Object.entries(cat.schemas).map(([s, sch]) => ({ catalog_name: c, schema_name: s, comment: sch.description ?? null })),
+        Object.entries(cat.schemas)
+          .filter(([s]) => shown(c, s))
+          .map(([s, sch]) => ({ catalog_name: c, schema_name: s, comment: sch.description ?? null })),
       );
     case "tables": {
       const out: Record<string, unknown>[] = [];
@@ -435,7 +450,7 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
           latest_version: latest, tags: tableTags(entry) ?? null, instructions: tableInstructions(entry) ?? null,
         });
       }
-      for (const { ref, view } of catalogViews(model)) {
+      for (const { ref, view } of views) {
         out.push({
           table_catalog: ref.catalog, table_schema: ref.schema, table_name: ref.table, full_name: ref.full, table_type: "VIEW",
           comment: view.description ?? null, row_count: null, latest_version: null, tags: null, instructions: null,
@@ -456,7 +471,7 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
         }));
       });
     case "views":
-      return catalogViews(model).map(({ ref, view }) => ({
+      return views.map(({ ref, view }) => ({
         table_catalog: ref.catalog, table_schema: ref.schema, table_name: ref.table, view_definition: JSON.stringify(view.query), comment: view.description ?? null,
         aliases: view.aliases ?? [], labels: view.labels ? JSON.stringify(view.labels) : null,
       }));
@@ -469,6 +484,17 @@ async function informationRows(app: App, settings: DatanotesSettings, name: Info
         }));
       });
   }
+}
+
+/**
+ * May the scope read this view? Its name, and every table its query reads as told from the
+ * metastore alone; a query that cannot be told (a base, `within`, `{this.*}`) is not shown.
+ */
+function viewReadable(model: Metastore, full: string, scope: ReadScope | null): boolean {
+  if (scope === null) return true;
+  if (!tableReadable(full, scope)) return false;
+  const r = tablesReadByView(model, full);
+  return r.complete && r.tables.every((t) => tableReadable(t, scope));
 }
 
 /** An information_schema view as a read-only table the select pipeline can query. */

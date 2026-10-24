@@ -22,6 +22,9 @@
  *   Code, links, URLs, tags, HTML, comments, math, Dataview inline fields and Templater blocks are
  *   skipped, and so are headings: a heading's text is its anchor, which `[[note#heading]]` links
  *   and `body_sections` find it by. The front matter is never part of the text.
+ * - **Read permissions**: a write by a token with restricted `read` patterns (src/core/read-scope.ts)
+ *   links only the notes it may read: the others' names are plain text to it, never a link that
+ *   would put their names in the row. The shared name index is filtered as it is read, never changed.
  * - **Longest match wins**: `Nora Wells` links the note of that name, not `Nora`.
  * - **First mention**: each note is linked once per body, at its first mention in the text written,
  *   and not at all when the body links it already (the usual convention of wikis).
@@ -49,6 +52,7 @@ import { cachedMetastore, catalogTables, loadMetastore, rowTableFull, type Catal
 import type { DatanotesSettings } from "./settings";
 import type { TableDefinition } from "./types-table";
 import { phase } from "./tracing";
+import { currentReadScope, pathReadable } from "./read-scope";
 import { vaultIndex } from "./vault-index";
 
 /** Why a mention was not linked. */
@@ -456,8 +460,11 @@ function standsAlone(text: string, start: number, end: number): boolean {
   return true;
 }
 
-/** The matches of the index in one segment of the text. */
-function matchesIn(text: string, tokens: Token[], ix: NameIndex, self: ReadonlySet<string>): Match[] {
+/**
+ * The matches of the index in one segment of the text. `visible`: the notes the write may link
+ * (a restricted token's read scope); the others are no notes to it, their names plain text.
+ */
+function matchesIn(text: string, tokens: Token[], ix: NameIndex, self: ReadonlySet<string>, visible: (path: string) => boolean): Match[] {
   const out: Match[] = [];
   for (let i = 0; i < tokens.length; i++) {
     let key = tokens[i]!.norm;
@@ -473,9 +480,10 @@ function matchesIn(text: string, tokens: Token[], ix: NameIndex, self: ReadonlyS
         let any = false;
         let isSelf = false;
         for (const p of paths.keys()) {
-          any = true;
           if (self.has(p)) isSelf = true;
-          else cands.push(p);
+          else if (visible(p)) cands.push(p);
+          else continue;
+          any = true;
         }
         if (any) out.push({ ti: i, tj: j, start: tokens[i]!.start, end: tokens[j]!.end, key, cands: isSelf ? [] : cands.sort(), self: isSelf });
       }
@@ -490,7 +498,7 @@ function matchesIn(text: string, tokens: Token[], ix: NameIndex, self: ReadonlyS
 }
 
 /** The mentions of one fragment of text, resolved: longest match, overlaps, phrases, longer names. */
-function mentionsIn(text: string, frag: number, ix: NameIndex, self: ReadonlySet<string>): Mention[] {
+function mentionsIn(text: string, frag: number, ix: NameIndex, self: ReadonlySet<string>, visible: (path: string) => boolean): Mention[] {
   const out: Mention[] = [];
   for (const [a, b] of freeSegments(text)) {
     const tokens: Token[] = [...text.slice(a, b).matchAll(WORD_RE)].map((m) => ({
@@ -498,7 +506,7 @@ function mentionsIn(text: string, frag: number, ix: NameIndex, self: ReadonlySet
       end: a + m.index! + m[0].length,
       norm: m[0].normalize("NFC").toLowerCase(),
     }));
-    const matches = matchesIn(text, tokens, ix, self);
+    const matches = matchesIn(text, tokens, ix, self, visible);
     if (matches.length === 0) continue;
     const inMatch = new Set<number>();
     for (const m of matches) for (let t = m.ti; t <= m.tj; t++) inMatch.add(t);
@@ -640,7 +648,16 @@ async function autolinkFragmentsImpl(
   if (input.fragments.every((f) => f.trim() === "")) return { fragments: [...input.fragments], report };
   const ix = await nameIndex(app, settings);
   const self = new Set([input.path, ...(input.self ?? [])]);
-  const mentions = input.fragments.flatMap((text, i) => mentionsIn(text, i, ix, self));
+  // the name index is shared by every request: a read scope filters the notes here, never in it
+  const scope = currentReadScope();
+  const seenVisible = new Map<string, boolean>();
+  const visible = (p: string): boolean => {
+    if (!scope) return true;
+    let v = seenVisible.get(p);
+    if (v === undefined) seenVisible.set(p, (v = pathReadable(app, settings, p, scope)));
+    return v;
+  };
+  const mentions = input.fragments.flatMap((text, i) => mentionsIn(text, i, ix, self, visible));
   // a name in doubt stays text everywhere; one at the start of a sentence only there
   const doubtful = new Set(mentions.filter((m) => m.kind !== "clear" && m.kind !== "self" && m.kind !== "sentence_start").flatMap((m) => m.keys));
   const linked = linkedTargets(app, input.body, input.path);

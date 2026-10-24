@@ -114,7 +114,7 @@ Each extension gets a named token, `ext-<name>`. The token has three limits:
 
 - It writes only the tables of the roles in the manifest's `permissions.write`.
 - It never changes the schema and never undoes. The installer changes the schema with the owner's token.
-- It reads every table, like every named token today.
+- It reads every table: the installer gives it no `read` patterns. You may limit it, as [Limit what a token can read](/guides/security/tokens/#change-what-a-token-reads) shows.
 
 The tools of an extension run when an agent calls them. Before a tool that writes runs, the MCP server checks the agent's own token. If that token may not write the tool's tables, the call fails. A read-only client cannot write through an extension. To allow the call, add the table to the `write` patterns of the client's token. Or call the tool with a token that may write.
 
@@ -130,7 +130,7 @@ The code runs inside the MCP server's process. It is trusted code, not a sandbox
 Known limits in this version:
 
 - **No isolation.** Extension code has the privileges of the MCP server's process.
-- **No read-scoped tokens.** The token of an extension reads every table. When read patterns ship, the installer will limit it to the extension's tables.
+- **No read patterns from the installer.** The token of an extension reads every table. If you limit its `read`, cover the tables it writes. An install or update that writes a table outside `read` is refused with 400: widen `read` first.
 - **No data-converting migrations.** A migration lists operations. It cannot run code to convert rows.
 
 ## Update an extension

@@ -141,7 +141,8 @@ export interface EngineStatus {
   } | null;
   change_feed: { running: boolean; reason?: string; head: number | null };
   webhooks: { count: number; failing: { id: string; url_host: string; failures: number; last_error?: string; last_delivery?: string; cursor: number }[] };
-  tokens: { name: string; write: string[]; ddl: boolean; maintain: boolean; last_seen: string | null }[];
+  /** `read`: the read patterns of a token that may not read every table (absent: every table). */
+  tokens: { name: string; read?: string[]; write: string[]; ddl: boolean; maintain: boolean; last_seen: string | null }[];
   hand_edits: { window_hours: number; checked: boolean; reason?: string } & Partial<HandEditSummary>;
   logs: { folder: string | null; console_log: string | null; telemetry: string | null };
 }
@@ -275,7 +276,7 @@ export async function engineStatus(i: StatusInput): Promise<EngineStatus> {
         cursor: w.cursor,
       })),
     },
-    tokens: i.tokens.map((t) => ({ name: t.name, write: t.write, ddl: t.ddl, maintain: t.maintain === true, last_seen: t.last_seen ?? null })),
+    tokens: i.tokens.map((t) => ({ name: t.name, ...(t.read.includes("*") ? {} : { read: t.read }), write: t.write, ddl: t.ddl, maintain: t.maintain === true, last_seen: t.last_seen ?? null })),
     hand_edits: handEdits,
     logs: {
       folder: s.fileLogEnabled ? (i.host?.store ? `${i.host.store}${i.host.store.includes("\\") ? "\\" : "/"}logs` : storePath("logs")) : null,
