@@ -52,7 +52,9 @@ describe("mergePack", () => {
 });
 
 describe("pack-merge as git's merge driver", () => {
-  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  // an identity of its own: a CI runner has none, and a pull makes a merge commit
+  const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env });
   let bin = "";
   let tmp = "";
 
@@ -110,7 +112,7 @@ describe("pack-merge as git's merge driver", () => {
     git(a, "push", "-q", "origin", "HEAD:main");
     fs.writeFileSync(path.join(b, "feed", "feed 2026-10.md"), pack(row("a", 1), row("b", 20), row("d", 4)));
     commit(b, "b adds d, changes b");
-    const pull = spawnSync("git", ["pull", "-q", "--no-rebase", "--no-edit", "origin", "main"], { cwd: b, encoding: "utf8" });
+    const pull = spawnSync("git", ["pull", "-q", "--no-rebase", "--no-edit", "origin", "main"], { cwd: b, encoding: "utf8", env });
     expect(pull.status, pull.stderr).toBe(0);
     expect(minutes(fs.readFileSync(path.join(b, "feed", "feed 2026-10.md"), "utf8"))).toEqual({ a: 1, b: 20, c: 3, d: 4 });
   });
@@ -124,7 +126,7 @@ describe("pack-merge as git's merge driver", () => {
     fs.writeFileSync(path.join(b, "feed", "feed 2026-10.md"), pack(row("a", 20), row("b", 2)));
     fs.writeFileSync(path.join(b, "Note.md"), "one\ntwo\nthree changed\n");
     commit(b, "b");
-    const pull = spawnSync("git", ["pull", "-q", "--no-rebase", "--no-edit", "origin", "main"], { cwd: b, encoding: "utf8" });
+    const pull = spawnSync("git", ["pull", "-q", "--no-rebase", "--no-edit", "origin", "main"], { cwd: b, encoding: "utf8", env });
     expect(pull.status).not.toBe(0);
     const text = fs.readFileSync(path.join(b, "feed", "feed 2026-10.md"), "utf8");
     expect(text).toContain("## a\n<<<<<<< ours:feed/feed 2026-10.md\nid:: id-a\nminutes:: 20\n=======\nid:: id-a\nminutes:: 10\n>>>>>>> theirs:feed/feed 2026-10.md\n");
