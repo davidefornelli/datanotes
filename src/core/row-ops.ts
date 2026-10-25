@@ -46,6 +46,7 @@ import type { OrderedFrontmatter } from "./types";
 import {
   isEmptyValue,
   parseWikilink,
+  wikilinkTarget,
   validateRow,
   requiredMessage,
   validateValue,
@@ -709,7 +710,7 @@ function clearLinksTo(
   targets: ReadonlySet<string>,
 ): OrderedFrontmatter {
   const pointsAt = (v: unknown) => {
-    const lp = parseWikilink(v);
+    const lp = wikilinkTarget(v, app.packs !== undefined);
     if (lp == null) return false;
     const dest = app.metadataCache.getFirstLinkpathDest(lp, sourcePath);
     return dest != null && targets.has(dest.path);

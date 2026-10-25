@@ -7,7 +7,7 @@
  */
 
 import type { ColumnSpec } from "./types-table";
-import { isEmptyValue, parseWikilink } from "./validate";
+import { isEmptyValue, linkNoteName } from "./validate";
 import { guide, GuidedError, unknownName } from "./hints";
 
 const columnsHint = (col: string, known: ReadonlySet<string>) =>
@@ -67,8 +67,8 @@ export function keysOf(value: unknown): string[] {
   const out: string[] = [];
   for (const v of values) {
     if (isEmptyValue(v)) continue;
-    const link = parseWikilink(v);
-    out.push(link != null ? `link:${link.split("/").pop()!.replace(/\.md$/i, "").toLowerCase()}` : JSON.stringify(v));
+    const link = linkNoteName(v);
+    out.push(link != null ? `link:${link.toLowerCase()}` : JSON.stringify(v));
   }
   return out;
 }

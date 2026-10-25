@@ -47,11 +47,12 @@ afterEach(async () => {
 });
 
 async function engine() {
+  // the headless host: it keeps packs of rows (pack_rows, unpack_rows)
   const v = logVault({
     "Notes/Dinner.md": "Dinner with [[Alice]] and pizza.\n",
     "Alice.md": "---\nrole: friend\n---\n# Alice\nLikes pizza.\n",
     "Inbox/feeling.md": "---\noccurred_at: 2026-09-27T09:00\nvalue: 3\n---\nfine\n",
-  });
+  }, "node");
   Object.assign(v.settings, { semanticEnabled: true, semanticProvider: "custom", semanticBaseUrl: "http://emb.test/v1", semanticModel: "fake" } satisfies Partial<DatanotesSettings>);
   const feed = new ChangeFeed(v.app, () => v.settings);
   await feed.start();
@@ -225,6 +226,11 @@ describe("responseSchema", () => {
     const hook = await check<{ id: string }>("create_webhook", { url: "http://receiver.test/hook", tables: ["log"], kinds: ["update"] });
     await check("list_webhooks");
     await check("delete_webhook", { id: hook.id });
+
+    // packs of rows (the headless host keeps them)
+    await check("alter_table", { table: "mood", pack: "{occurred_at:YYYY-MM}", pack_after_days: 0 });
+    expect(await check("pack_rows", { table: "mood", dry_run: true })).toMatchObject({ op: "pack_rows", packs: [], excluded: [expect.objectContaining({ reason: "it changed in the last 24 hours" })] });
+    await check("unpack_rows", { table: "mood", key: "2026-09", dry_run: true });
 
     expect(v.exists("Notes/Dinner.md")).toBe(true);
     expect(validated.length).toBeGreaterThanOrEqual(25);

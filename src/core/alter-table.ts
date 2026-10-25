@@ -30,6 +30,7 @@ import {
 } from "./metastore";
 import {
   finish,
+  packOptions,
   serializeOptions,
   instrumented,
   emptyResult,
@@ -342,6 +343,24 @@ export interface AlterTableInput {
   archive?: string;
   /** Untyped fields to set (name → default, as in create_table `fields`); a `null` value removes that field. */
   fields?: Record<string, unknown>;
+  /** Packs of rows: a template of a date column (`{started_at:YYYY-MM}`); null or "" removes it. */
+  pack?: string | null;
+  /** Days after the end of a period before its rows go into a pack; null for the default (7). */
+  packAfterDays?: number | null;
+}
+
+/**
+ * Refuse a change of where the rows go (or of their packs) while some of them are in packs: a
+ * packed row keeps the path its values give, so the layout changes only once they are notes again.
+ */
+function assertNotPacked(app: App, t: LoadedTable, what: string): void {
+  const packs = app.packs?.packsOf(t.catalog.ref.full).filter((p) => p.rows.length > 0) ?? [];
+  if (packs.length === 0) return;
+  const rows = packs.reduce((n, p) => n + p.rows.length, 0);
+  throw new OperationInputError(
+    `${t.catalog.ref.full} has ${rows} row${rows === 1 ? "" : "s"} in ${packs.length} pack${packs.length === 1 ? "" : "s"}: ${what} only while every row is a note of its own`,
+    guide(`Run unpack_rows on ${t.catalog.ref.full} first, then alter the table, then pack_rows again.`, "unpackFirst"),
+  );
 }
 
 /** alter_table `fields`: an object; names that are columns or reserved keys are refused. */
@@ -426,9 +445,28 @@ async function alterTableImpl(
     }
   }
   const fields = input.fields === undefined ? {} : fieldsInput(t, settings, input.fields);
+  const own = t.catalog.entry.options ?? {};
+  const packProps: Record<string, unknown> = {};
+  if (input.pack !== undefined) {
+    const removed = input.pack === null || (typeof input.pack === "string" && input.pack.trim() === "");
+    const next = removed ? null : packOptions(app, t.catalog.ref.full, t.def.columns, input.pack, undefined).pack!;
+    if (next !== (own.pack ?? null)) {
+      assertNotPacked(app, t, removed ? "the pack option goes" : "the pack option changes");
+      packProps.pack = next;
+    }
+  }
+  if (input.packAfterDays !== undefined) packProps.pack_after_days = input.packAfterDays === null ? null : packOptions(app, t.catalog.ref.full, t.def.columns, undefined, input.packAfterDays).pack_after_days!;
+  const layoutChanges =
+    (input.catalog !== undefined && input.catalog !== t.def.catalog) ||
+    (input.schema !== undefined && input.schema !== t.def.schema) ||
+    (input.name !== undefined && input.name !== t.def.name) ||
+    (input.partition !== undefined && (input.partition || undefined) !== cur.partition) ||
+    (input.filename !== undefined && input.filename !== cur.filename);
+  if (layoutChanges) assertNotPacked(app, t, "the table moves or its rows change folder or name");
   return relocateTable(app, settings, t, { catalogRef: refOf(catalog, schema, name) }, changes, opts, {
     ...(input.history !== undefined ? { history: input.history } : {}),
     ...(input.autolinkTarget !== undefined ? { autolink_target: input.autolinkTarget } : {}),
+    ...packProps,
   }, input.rowTemplate, tags, fields, input.instructions);
 }
 

@@ -19,7 +19,7 @@ import { linkTargetViolations } from "./link-targets";
 import { messageOf } from "./message";
 import { phase } from "./tracing";
 import { currentReadScope, pathReadable, type ReadScope } from "./read-scope";
-import { parseWikilink } from "./validate";
+import { wikilinkTarget } from "./validate";
 
 /**
  * Is `path` a note the read scope may not read (src/core/read-scope.ts)? A note that exists and is
@@ -73,7 +73,7 @@ function movedOffHiddenRows(
     const targets: [string, string][] = [];
     for (const [key, value] of Object.entries(fm)) {
       for (const x of Array.isArray(value) ? value : [value]) {
-        const lp = parseWikilink(x);
+        const lp = wikilinkTarget(x, app.packs !== undefined);
         const dest = lp == null ? null : app.metadataCache.getFirstLinkpathDest(lp, path);
         const to = dest ? reported.get(dest.path) : undefined;
         if (to !== undefined && visible(to)) targets.push([to, key]);

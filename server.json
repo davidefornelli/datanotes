@@ -8,13 +8,13 @@
     "url": "https://github.com/davidefornelli/datanotes",
     "source": "github"
   },
-  "version": "3.4.2",
+  "version": "3.5.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "datanotes",
-      "version": "3.4.2",
+      "version": "3.5.0",
       "transport": {
         "type": "stdio"
       },

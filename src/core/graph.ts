@@ -25,7 +25,7 @@ import { cachedMetastore, loadMetastore, metastorePath, type Metastore } from ".
 import { compileWhere, resolveWithin, type Where } from "./rows";
 import type { DatanotesSettings } from "./settings";
 import { listTables } from "./table-registry";
-import { parseWikilink } from "./validate";
+import { wikilinkTargets } from "./validate";
 import { guide, unknownName } from "./hints";
 import { count, phase } from "./tracing";
 import { assertPathReadable, assertTableReadable, currentReadScope, pathReadable, runWithReadScope, tableReadDenied, tableReadable } from "./read-scope";
@@ -57,9 +57,15 @@ const BUILDS = new WeakMap<object, { generation: number; metastore: Metastore | 
 /** The vault generation and metastore path at which the metastore last failed to parse, per app. */
 const UNPARSABLE = new WeakMap<object, string>();
 
-function linkTargets(value: unknown): string[] {
-  const list = Array.isArray(value) ? value : [value];
-  return list.map(parseWikilink).filter((l): l is string => l != null);
+/**
+ * The targets of a link column's value, as the host resolves them: with their `#heading` on a host
+ * with packs of rows (`[[pack#row]]`), and the names they look up (the row's name too).
+ */
+function linkTargets(app: App, value: unknown): { lookup: string; names: string[] }[] {
+  return wikilinkTargets(value, app.packs !== undefined).map((t) => {
+    const hash = t.lookup.indexOf("#", t.path.length);
+    return { lookup: t.lookup, names: hash < 0 ? [t.path] : [t.path, t.lookup.slice(hash + 1).split("#")[0]!] };
+  });
 }
 
 /** The edges already added, `from\0to\0label` (a hub note has thousands: no scan of its list). */
@@ -155,8 +161,8 @@ function fullGraph(app: App, settings: DatanotesSettings): Promise<BuiltGraph> {
       for (const r of await loadRows(app, settings, t)) {
         g.tableOf.set(r.file.path, ref.qualified);
         for (const c of linkColumns) {
-          for (const linkpath of linkTargets(fmGet(r.ordered, c.name))) {
-            const dest = app.metadataCache.getFirstLinkpathDest(linkpath, r.file.path);
+          for (const { lookup } of linkTargets(app, fmGet(r.ordered, c.name))) {
+            const dest = app.metadataCache.getFirstLinkpathDest(lookup, r.file.path);
             if (!dest || dest.path === r.file.path) continue;
             addEdge(g, keys, r.file.path, dest.path, c.name);
             typed.add(`${r.file.path}\0${dest.path}`);
@@ -278,9 +284,9 @@ async function keepTyped(app: App, settings: DatanotesSettings, idx: VaultIndex,
     const seen = new Set<string>();
     const names = new Set<string>();
     for (const c of t.tables.get(table)!.linkColumns) {
-      for (const linkpath of linkTargets(fmGet(ordered, c))) {
-        for (const n of linkLookupNames(linkpath, path)) names.add(n);
-        const dest = app.metadataCache.getFirstLinkpathDest(linkpath, path);
+      for (const { lookup, names: looked } of linkTargets(app, fmGet(ordered, c))) {
+        for (const l of looked) for (const n of linkLookupNames(l, path)) names.add(n);
+        const dest = app.metadataCache.getFirstLinkpathDest(lookup, path);
         if (!dest || dest.path === path) continue;
         targets.add(dest.path);
         if (seen.has(`${dest.path}\0${c}`)) continue;

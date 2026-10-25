@@ -217,9 +217,28 @@ export const runGit: GitRunner = async (args, cwd, options = {}) => {
   return spawnGit(args, cwd, options, gitEnv(process.env, ssh));
 };
 
+/** The name of the merge driver of packs of rows in git's config (`merge.<name>.driver`) and in `.gitattributes`. */
+export const PACK_MERGE_DRIVER = "datanotes-pack";
+
+/** The `.gitattributes` line that hands the notes to it (it merges any other note as text). */
+export const PACK_MERGE_ATTRIBUTE = `*.md merge=${PACK_MERGE_DRIVER}`;
+
+/** How git calls the `datanotes` command of this process (`"<node>" "<datanotes.cjs>"`); null when it is not one. */
+export function datanotesCommand(execPath = process.execPath, script = process.argv[1] ?? ""): string | null {
+  if (!/datanotes(-service)?\.cjs$/i.test(script)) return null;
+  const slash = (p: string) => p.replace(/\\/g, "/");
+  return `"${slash(execPath)}" "${slash(path.resolve(script))}"`;
+}
+
 export interface GitSyncOptions {
   /** The vault folder (inside a git working tree). */
   vault: string;
+  /**
+   * The `datanotes` command git runs as the merge driver of packs of rows (`pack-merge`): set in
+   * the repository's config with the `.gitattributes` line at the vault's root, at start. Absent:
+   * no driver is registered.
+   */
+  packMergeCommand?: string | null;
   intervalMs?: number;
   /** Quiet time after the last engine write before a cycle. */
   quietMs?: number;
@@ -311,6 +330,7 @@ export class GitSync {
     const head = await this.git("rev-parse", "--short", "--verify", "-q", "HEAD");
     if (head.code === 0 && head.stdout.trim()) this.status.lastCommit = head.stdout.trim();
     await this.warnEngineFolders();
+    await this.registerPackMerge();
     this.timer = setInterval(() => void this.cycle(), this.o.intervalMs ?? 10 * 60_000);
     this.log("INFO", "datanotes git sync started", { repo: this.repo, vault_path: this.vaultRel || ".", interval_ms: this.o.intervalMs ?? 600_000 });
     return true;
@@ -333,6 +353,31 @@ export class GitSync {
           : `Add ${folder}/ to .gitignore, or move the folder out of the vault.`,
       });
     }
+  }
+
+  /**
+   * The merge driver of packs of rows: in the repository's config (`merge.datanotes-pack.driver`,
+   * this process's command) and in the `.gitattributes` of the vault's root (`*.md
+   * merge=datanotes-pack`), so a pull merges a pack changed on two devices row by row.
+   */
+  private async registerPackMerge(): Promise<void> {
+    const cmd = this.o.packMergeCommand;
+    if (!cmd) return;
+    const set = async (key: string, value: string) => {
+      const r = await this.git("config", key, value);
+      if (r.code !== 0) this.log("WARN", "datanotes git sync could not register the merge driver of packs", { key, error: r.stderr.trim() });
+    };
+    await set(`merge.${PACK_MERGE_DRIVER}.name`, "Datanotes packs of rows, merged row by row");
+    await set(`merge.${PACK_MERGE_DRIVER}.driver`, `${cmd} pack-merge %O %A %B %P`);
+    const file = path.join(this.o.vault, ".gitattributes");
+    let text = "";
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch {
+      text = "";
+    }
+    if (text.split(/\r?\n/).some((l) => l.trim() === PACK_MERGE_ATTRIBUTE)) return;
+    fs.writeFileSync(file, `${text}${text !== "" && !text.endsWith("\n") ? "\n" : ""}${PACK_MERGE_ATTRIBUTE}\n`);
   }
 
   stop(): void {

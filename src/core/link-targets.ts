@@ -12,7 +12,7 @@ import type { DatanotesSettings } from "./settings";
 import { traced } from "./telemetry";
 import type { ColumnSpec, TableColumn, Violation } from "./types-table";
 import type { OrderedFrontmatter } from "./types";
-import { isEmptyValue, parseWikilink } from "./validate";
+import { isEmptyValue, linkNoteName, parseWikilink } from "./validate";
 import { basenameOf } from "./path-templates";
 import { compileWhere, rowGetter, type Where } from "./where";
 import { CheckLinks, refLinkColumn, tableIn, type MetastoreState } from "./check-links";
@@ -109,7 +109,7 @@ async function linkTargetRule(t: LoadedTable, settings: DatanotesSettings, links
       const ok = targets(d).filter((p) => p !== row.file.path).map(basenameOf);
       return `valid: ${ok.length === 0 ? "none" : `${ok.slice(0, VALID_TARGETS_SHOWN).join(", ")}${ok.length > VALID_TARGETS_SHOWN ? ` (+${ok.length - VALID_TARGETS_SHOWN} more)` : ""}`}`;
     };
-    const missing = given.filter((_, i) => paths[i] == null || !rows.has(paths[i]!)).map((x) => `[[${basenameOf(parseWikilink(x) ?? String(x))}]]`);
+    const missing = given.filter((_, i) => paths[i] == null || !rows.has(paths[i]!)).map((x) => `[[${linkNoteName(x) ?? basenameOf(String(x))}]]`);
     if (missing.length > 0) {
       out.push({ column: c.name, code: "broken_link", message: `${missing.join(", ")} ${missing.length > 1 ? "are not rows" : "is not a row"} of ${target.catalog.ref.full}; ${shown()}`, value: v });
     }
@@ -278,7 +278,10 @@ export interface LinkOptionsResult {
  */
 function findRow(rows: readonly LoadedRow[], ref: string, table: string): LoadedRow | undefined {
   const given = ref.trim();
-  const want = (parseWikilink(given) ?? given).replace(/^\/+/, "").replace(/\.md$/i, "");
+  // a link into a pack of rows ([[pack#row]]) names the row
+  const path = parseWikilink(given);
+  const named = linkNoteName(given);
+  const want = (path !== null && named !== null && named !== basenameOf(path) ? named : path ?? given).replace(/^\/+/, "").replace(/\.md$/i, "");
   const stem = (r: LoadedRow) => r.file.path.replace(/\.md$/i, "");
   const byPath = rows.find((r) => r.file.path === given || stem(r) === want);
   if (byPath) return byPath;

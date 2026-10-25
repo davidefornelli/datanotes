@@ -4,7 +4,7 @@
  */
 
 import { OperationInputError } from "./engine";
-import { isEmptyValue, parseWikilink } from "./validate";
+import { isEmptyValue, linkNoteName, parseWikilink } from "./validate";
 import { formatDateTokensOrNull } from "./datetime";
 
 // --- Path templates ---
@@ -18,8 +18,11 @@ export function formatDateTokens(value: string, format: string): string {
 
 function scalarForPath(value: unknown): string {
   const link = parseWikilink(value);
-  if (link != null) return link.split("/").pop()!;
-  return String(value);
+  if (link == null) return String(value);
+  // a row of a pack ([[pack#row]]) by its own name; any other link by its file name, as written
+  const own = link.split("/").pop()!;
+  const name = linkNoteName(value)!;
+  return name === own.replace(/\.md$/i, "") ? own : name;
 }
 
 export function sanitizeFileName(name: string): string {

@@ -36,6 +36,11 @@ export interface Step {
   edit?: { path: string; text: string | ((current: string) => string) };
   /** Instead of a call: rename or move a note by hand, as a person in a file manager would. */
   move?: { from: string; to: string };
+  /**
+   * Instead of a call: give the files under a folder an older modification time, as notes left
+   * unchanged since `at` (an ISO date-time) have. The engine sees it within a second or two.
+   */
+  age?: { folder: string; at: string };
   /** Milliseconds to wait after the step (hand edits are picked up within a second or two). */
   wait?: number;
   /**

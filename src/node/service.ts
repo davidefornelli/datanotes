@@ -44,7 +44,7 @@ import { recordDatabaseMove } from "../core/database";
 import { setBulkWriter } from "../core/vault-settle";
 import { writeJournal } from "../core/journal";
 import { METASTORE_FILE } from "../core/metastore";
-import { GitSync } from "./git-sync";
+import { datanotesCommand, GitSync } from "./git-sync";
 import { gitBusy, gitDirOf } from "./git-state";
 import { setRepairGate } from "../core/hand-moves";
 import { followStoreChanges, MIN_EVERY_S, parseEvery, StoreBackup } from "./store-backup";
@@ -283,7 +283,7 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
   // the notes, read many at a time once the walk found the store; with the vault index on disk,
   // only those changed since the last start
   if (!settings.vaultIndexEnabled) removeVaultIndex(opened.store);
-  const indexed = await indexNodeHost(host, settings.vaultIndexEnabled ? { index: { store: opened.store, version: VERSION }, hold: true } : {});
+  const indexed = await indexNodeHost(host, { ...(settings.vaultIndexEnabled ? { index: { store: opened.store, version: VERSION }, hold: true } : {}), packs: opened.store });
   const tVault = traceNow();
   let recorded = opened.database;
   const save = async () => {
@@ -445,7 +445,7 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
   const port = runtime.httpPort!;
   await lock.setPort(port);
   if (o.gitSync) {
-    git = new GitSync({ vault: o.vault, ...o.gitSync, exclude: [".obsidian", ".trash"], log: (level, msg, attrs) => telemetry().log(level, msg, attrs as never) });
+    git = new GitSync({ vault: o.vault, ...o.gitSync, exclude: [".obsidian", ".trash"], packMergeCommand: datanotesCommand(), log: (level, msg, attrs) => telemetry().log(level, msg, attrs as never) });
     if (await git.start()) {
       offApplied = onApplied(app, (e) => git!.noteOperation({ summary: e.summary, ...(e.actor?.harness ? { actor: e.actor.harness } : {}) }));
       void git.cycle();

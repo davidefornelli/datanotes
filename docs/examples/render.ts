@@ -100,6 +100,10 @@ function step(r: StepResult): string {
     parts.push(`You rename \`${s.move.from}\` to \`${s.move.to}\` by hand, outside the engine.`);
     return parts.join("\n\n");
   }
+  if (s.age) {
+    parts.push(`The notes in \`${s.age.folder}\` haven’t changed since ${s.age.at.slice(0, 10)}.`);
+    return parts.join("\n\n");
+  }
   if (!s.op) {
     // A step that only shows a file is there for the file: never folded.
     if (r.file) parts.push(file(r.file, false));

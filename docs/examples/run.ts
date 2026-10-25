@@ -83,6 +83,14 @@ export async function runChapter(chapter: Chapter): Promise<ChapterRun> {
         if (step.wait) await sleep(step.wait);
         return { step, ok: true, value: undefined };
       }
+      if (step.age) {
+        const at = new Date(step.age.at);
+        const walk = (dir: string): string[] =>
+          fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
+        for (const rel of walk(step.age.folder)) fs.utimesSync(path.join(root, rel), at, at);
+        await sleep(step.wait ?? 1500);
+        return { step, ok: true, value: undefined };
+      }
       if (step.received) {
         if (step.wait) await sleep(step.wait);
         if (received.length === 0) throw new Error(`${where}: the webhook receiver got nothing`);

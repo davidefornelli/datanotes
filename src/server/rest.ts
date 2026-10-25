@@ -37,6 +37,7 @@ import { MalformedColumnError, MalformedTableOptionsError } from "../core/table-
 import { TableNotFoundError } from "../core/table-registry";
 import { AmbiguousCatalogRefError, MetastoreError } from "../core/metastore";
 import { describeHistory, restoreTable, tableChanges, vacuumTable, wireCommit } from "../core/history";
+import { packRows, unpackRows } from "../core/pack-rows";
 import { describeDatabaseHistory, restoreDatabase } from "../core/database-history";
 import { graphNeighbors, graphPath, graphTraverse, type Direction, type GraphNodeSet } from "../core/graph";
 import { telemetry, type AttrValue } from "../core/telemetry";
@@ -473,6 +474,9 @@ export function createHandlers(
       }
       const target = optBool(b, "autolink_target");
       if (target !== undefined) options.autolink_target = target;
+      // packs of rows: the engine checks the template and the days
+      if (b.pack !== undefined && b.pack !== null) options.pack = b.pack;
+      if (b.pack_after_days !== undefined && b.pack_after_days !== null) options.pack_after_days = b.pack_after_days;
       const history = optBool(b, "history");
       const template = text(b, "row_template");
       const instructions = text(b, "instructions");
@@ -537,6 +541,9 @@ export function createHandlers(
             ...(optBool(b, "clear_tags") === true ? { clearTags: true } : {}),
             ...(archive !== undefined ? { archive } : {}),
             ...(obj(b, "fields") ? { fields: obj(b, "fields")! } : {}),
+            // "" removes the pack option; pack_after_days "default" goes back to 7
+            ...(b.pack !== undefined && b.pack !== null ? { pack: b.pack === "" ? null : (b.pack as string) } : {}),
+            ...(b.pack_after_days === "default" ? { packAfterDays: null } : b.pack_after_days !== undefined && b.pack_after_days !== null ? { packAfterDays: b.pack_after_days as number } : {}),
           },
           runOpts(b),
         ),
@@ -936,6 +943,12 @@ export function createHandlers(
       if ((timestamp === undefined) === (before === undefined)) throw new BadRequest(`pass "timestamp" or "before_migration" (one of them)`);
       return opResponse(await restoreDatabase(app, s(), { ...(timestamp !== undefined ? { timestamp } : { beforeMigration: before! }) }, runOpts(b)));
     },
+    pack_rows: async (b) =>
+      opResponse(await packRows(app, s(), { table: str(b, "table")!, ...(str(b, "key") !== undefined ? { key: str(b, "key")! } : {}) }, runOpts(b))),
+    unpack_rows: async (b) =>
+      opResponse(
+        await unpackRows(app, s(), { table: str(b, "table")!, ...(str(b, "key") !== undefined ? { key: str(b, "key")! } : {}), ...(obj(b, "where") ? { where: obj(b, "where") as never } : {}) }, runOpts(b)),
+      ),
     vacuum_table: async (b) => {
       const retain = optInt(b, "retain_from_version");
       runOpts(b);

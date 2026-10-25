@@ -249,6 +249,7 @@ export function validationContextFor(
       return dest !== null && isArchivedPath(app, settings, dest) ? null : dest;
     },
     vocabulary: (table) => vocabularyOf(app, settings, table),
+    linkSubpaths: app.packs !== undefined,
     tableOfPath: (path) => {
       const f = markdownFile(app, path);
       if (!f) return null;

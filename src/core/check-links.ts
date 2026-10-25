@@ -13,7 +13,7 @@ import type { DatanotesSettings } from "./settings";
 import { isArchivedPath, tableNotFound, validationContextFor } from "./table-registry";
 import type { TableColumn } from "./types-table";
 import type { OrderedFrontmatter } from "./types";
-import { isEmptyValue, parseWikilink, type ValidationContext } from "./validate";
+import { isEmptyValue, parseWikilink, wikilinkTarget, type ValidationContext } from "./validate";
 import { basenameOf } from "./path-templates";
 import { compileWhere, LOGICAL_KEYS, rowGetter, type Where } from "./where";
 
@@ -169,11 +169,13 @@ export class CheckLinks {
   resolve(value: unknown, source: string): string | null {
     const lp = parseWikilink(value);
     if (lp == null) return null;
+    // with its #heading on a host with packs of rows ([[pack#row]])
+    const lookup = wikilinkTarget(value, this.app.packs !== undefined)!;
     const from = this.movedFrom.get(source) ?? source;
-    const key = `${lp}\u0000${from}`;
+    const key = `${lookup}\u0000${from}`;
     const known = this.resolved.get(key);
     if (known !== undefined) return known;
-    const dest = this.locate(lp, from);
+    const dest = this.locate(lookup, from);
     const out = dest !== null && !this.archived(dest) ? dest : this.freshTarget(lp);
     this.resolved.set(key, out);
     return out;
@@ -213,7 +215,7 @@ export class CheckLinks {
         const v = fmGet(o, c);
         for (const x of Array.isArray(v) ? v : [v]) {
           // a row the change set archives is changed by it too
-          const lp = parseWikilink(x);
+          const lp = wikilinkTarget(x, this.app.packs !== undefined);
           const p = lp == null ? null : this.locate(lp, this.movedFrom.get(source) ?? source) ?? this.resolve(x, source);
           if (p !== null && this.changed.has(p)) out.add(basenameOf(this.movedTo.get(p) ?? p));
         }
@@ -281,6 +283,7 @@ export class CheckLinks {
     return {
       ...validationContextFor(this.app, this.settings, source),
       resolveLink: (linkpath) => this.resolve(`[[${linkpath}]]`, source),
+      linkSubpaths: this.app.packs !== undefined,
       tableOfPath: (path) => this.tableOf(path),
     };
   }

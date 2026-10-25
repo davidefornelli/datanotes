@@ -5,6 +5,35 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.5.0
+
+Datanotes 3.5.0 brings packs of rows: one note holds the rows of a closed period, such as a month, one `##` section per row. A table with thousands of small rows a year keeps a few files instead of thousands. The engine still sees one row at a time. It only adds to 3.4: no operation, argument or setting goes away, and a table without the new option works as before.
+
+### Packs of rows
+
+[Packs of rows](/guides/database-objects/packs/) explains the format, the rules and who reads the files.
+
+- **`pack` and `pack_after_days`**: two new options of `create_table` and `alter_table`. `pack` is a template of a date or date-time column, such as `"{started_at:YYYY-MM}"`. `pack_after_days` sets how many days after the end of a period its rows wait, 7 by default. `describe_table` shows both in `options`.
+- **`pack_rows`**: a new operation. It puts the rows of every closed period into their pack. A dry run lists the packs and the rows that stay notes of their own, with the reason.
+- **`unpack_rows`**: a new operation. It takes rows out again, as notes of their own, byte for byte, with their modification time.
+- **Silent for the rows**: each row keeps its id, path, values, text and `file_modified`. The change feed, the webhooks and the table's history see no change.
+- **Writes**: a write to a packed row changes its section. A row whose new values move it to another period comes out as a note of its own.
+- **Hand edits**: the engine compares a pack changed by hand with what it had, by `id`. Only the rows that changed get an event.
+- **Links**: a link to a packed row is `[[pack#row]]`, which Obsidian follows too. `pack_rows` and `unpack_rows` rewrite the links of other notes, and a link column takes the new form.
+- **Journaled**: `undo_migration` takes a pack apart, or packs the rows again.
+- **`autoPack`**: a new setting, on by default. Once a day, after 10 minutes without writes, the engine runs `pack_rows` on every table with a `pack` option.
+- **Engine service only**: Obsidian’s plugin refuses the `pack` option.
+
+### Git
+
+- **`datanotes pack-merge`**: a new command, a git merge driver. It merges a pack changed on two devices row by row, by `id`, so a conflict stays in the one row changed on both sides.
+- **Git sync registers it**: `--git-sync` sets `merge.datanotes-pack.driver` in the repository and adds `*.md merge=datanotes-pack` to the vault’s `.gitattributes`. [Merge packs row by row](/administration/git-sync/#merge-packs-row-by-row) explains it.
+
+### Before you set `pack` on a table
+
+- **Check who reads its files**: Obsidian, scripts that count or open the table’s files, and agents with a shell see the packs, not one file per row. Programs that go through the engine see no difference.
+- **Change the layout first**: while rows are in packs, `alter_table` refuses to rename or move the table and to change its `partition`, `filename` or `pack`. Run `unpack_rows` first.
+
 ## 3.4.2
 
 Datanotes 3.4.2 fixes the install of an extension on columns you mapped. It only adds to 3.4: no operation, argument or setting goes away.

@@ -88,7 +88,8 @@ import type { LinkAdded, LinkAmbiguous } from "./autolink";
 import { isEmptyValue, requiredMessage, validateValue } from "./validate";
 import { telemetry, traced, type AttrValue, type Severity } from "./telemetry";
 import { messageOf } from "./message";
-import { closestNames, guide, GuidedError, unknownColumn, type Guidance } from "./hints";
+import { closestNames, guide, GuidedError, guidanceOf, unknownColumn, type Guidance } from "./hints";
+import { PackOptionError, readPackAfterDays, readPackTemplate } from "./pack-layout";
 import { addColumnRefusal, createTableRefusal, hasText, missingDescriptions, removedDescriptionRefusal, withEngineDescription, type Refusal } from "./descriptions";
 import { STALE_WRITE, staleWrite, wrote } from "./write-check";
 import { count, phase } from "./tracing";
@@ -1141,7 +1142,7 @@ export interface CreateTableInput {
    * its rows (absent: yes, unless its rows are named by a date or a time). Kept in the entry's
    * `options`, not in `_table`.
    */
-  options?: Omit<TableOptions, "name" | "description"> & { autolink_target?: boolean };
+  options?: Omit<TableOptions, "name" | "description"> & { autolink_target?: boolean; pack?: string; pack_after_days?: number };
   /** Transaction log for the table: true / false (absent: the database's setting). Kept in the entry's `properties`. */
   history?: boolean;
   /** Untyped top-level fields with default values (e.g. `{ type: "log" }`). */
@@ -1154,6 +1155,25 @@ export interface CreateTableInput {
   instructions?: string;
   /** Key/value labels of the table (`{ domain: "health" }`), kept in `metastore.yaml`. */
   tags?: Record<string, string>;
+}
+
+/**
+ * A table's `pack` and `pack_after_days` options as given (absent: none), read and checked: the
+ * properties they set. Refused on a host without packs, with the table's date columns in the hint.
+ */
+export function packOptions(app: App, table: string, columns: readonly Pick<ColumnSpec, "name" | "type">[], pack: unknown, afterDays: unknown): { pack?: string; pack_after_days?: number } {
+  const out: { pack?: string; pack_after_days?: number } = {};
+  try {
+    if (pack !== undefined && pack !== null) {
+      if (!app.packs) throw new OperationInputError(`${table}: packs of rows need the engine service (datanotes serve); this host keeps every row in a note of its own`, guide(`Leave "pack" out here, or run the engine service on the vault (datanotes serve) and set it there.`, "packHost"));
+      out.pack = readPackTemplate(pack, columns).template;
+    }
+    if (afterDays !== undefined && afterDays !== null) out.pack_after_days = readPackAfterDays(afterDays);
+  } catch (e) {
+    if (e instanceof PackOptionError) throw new OperationInputError(`${table}: ${e.message}`, guidanceOf(e));
+    throw e;
+  }
+  return out;
 }
 
 async function createTableImpl(
@@ -1209,7 +1229,9 @@ async function createTableImpl(
       const format = tc.type === "date" ? cfg.default_filename.replace(/\s*(\[[^\]]*\])?\s*[Hh]{1,2}.*$/, "") || "YYYY-MM-DD" : cfg.default_filename;
       extra.filename = `{${tc.name}:${format}}`;
     }
-    const { autolink_target: linkTarget, ...givenOptions } = input.options ?? {};
+    const { autolink_target: linkTarget, pack, pack_after_days: packAfterDays, ...givenOptions } = input.options ?? {};
+    // packs of rows: a template of a date column of the table, on a host that keeps packs
+    const packProps = packOptions(app, ref.full, columns, pack, packAfterDays);
     if (linkTarget !== undefined && linkTarget !== null && typeof linkTarget !== "boolean") {
       throw new OperationInputError(
         `"autolink_target" must be true or false, not ${JSON.stringify(linkTarget)}`,
@@ -1253,6 +1275,7 @@ async function createTableImpl(
     // the entry has options: a table needs a filename
     if (typeof linkTarget === "boolean") entry.options = { ...entry.options, autolink_target: linkTarget };
     if (typeof input.history === "boolean") entry.options = { ...entry.options, history: input.history };
+    if (Object.keys(packProps).length > 0) entry.options = { ...entry.options, ...packProps };
     checkColumnRefs(model, ref.full, entry.columns, ref.full);
     const missing = missingDescriptions(catOptions.description, columns);
     if (missing) throw refused(createTableRefusal(ref.full, missing, input.columns, proposal));

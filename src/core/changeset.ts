@@ -86,6 +86,22 @@ export interface FileMove {
   to: string;
 }
 
+/**
+ * Rows going into a pack (`pack`) or coming out of it (`unpack`), through the host (`App.packs`):
+ * silent for the rows (same paths, texts and stats), journaled so undo can do the opposite.
+ */
+export interface PackChange {
+  action: "pack" | "unpack";
+  table: string;
+  key: string;
+  /** The pack's file. */
+  pack: string;
+  /** The rows' paths. */
+  rows: string[];
+  /** The property that names a row's table (the setting `tableKey`). */
+  tableKey: string;
+}
+
 export interface ChangeSet {
   op: string;
   schema?: string;
@@ -102,6 +118,8 @@ export interface ChangeSet {
   texts: { path: string; before: string; after: string }[];
   /** Set when the change set already holds its inverse-link edits (no second pass). */
   skipInverse?: boolean;
+  /** Rows going into packs or coming out (after the texts). */
+  packs?: PackChange[];
 }
 
 export function emptyChangeSet(op: string, summary: string, schema?: string): ChangeSet {
@@ -224,6 +242,8 @@ export interface JournalEntry {
   members?: string[];
   /** The agent that ran the operation (MCP session, harness, model, tool); absent for commands. */
   actor?: Actor;
+  /** Rows the operation put into packs or took out (pack_rows, unpack_rows), in order: undo does the opposite. */
+  packs?: PackChange[];
 }
 
 export interface ApplyResult {
@@ -361,6 +381,18 @@ async function inOrder<T, R>(
   return { done, failed: f ? { path: pathOf(items[first]!), error: f.error } : null };
 }
 
+/** Put rows into a pack, or take them out, through the host. */
+async function applyPack(app: App, p: PackChange): Promise<void> {
+  if (!app.packs) throw new Error("this host keeps no packs of rows");
+  if (p.action === "pack") await app.packs.pack({ table: p.table, key: p.key, path: p.pack, rows: p.rows, tableKey: p.tableKey });
+  else await app.packs.unpack(p.pack, p.rows);
+}
+
+/** The opposite of a pack change (undo). */
+function oppositePack(p: PackChange): PackChange {
+  return { ...p, action: p.action === "pack" ? "unpack" : "pack" };
+}
+
 async function moveFile(app: App, from: string, to: string): Promise<void> {
   // Files of the engine's store (e.g. a transaction log following a renamed table).
   if (inStore(from)) return storeRename(app, from, to);
@@ -387,6 +419,7 @@ async function applyChangeSetImpl(
   const references: JournalReference[] = [];
   const deleted: { path: string; content: string }[] = [];
   const failed: { path: string; error: string }[] = [];
+  const packs: PackChange[] = [];
   let referencesUpdated = 0;
 
   const fail = (path: string, e: unknown) => {
@@ -439,6 +472,15 @@ async function applyChangeSetImpl(
         references.push({ path: t.path, before_text: t.before, after_text: t.after });
       } catch (err) {
         fail(t.path, err);
+        break run;
+      }
+    }
+    for (const p of cs.packs ?? []) {
+      try {
+        await applyPack(app, p);
+        packs.push(p);
+      } catch (err) {
+        fail(p.pack, err);
         break run;
       }
     }
@@ -529,6 +571,7 @@ async function applyChangeSetImpl(
       references,
       deleted,
       failed,
+      ...(packs.length > 0 ? { packs } : {}),
     },
     now,
   );
@@ -743,6 +786,25 @@ export async function undoMigration(
   for (const m of since) {
     if (await occupied(app, m.from)) conflicts.push({ path: m.from, message: "original path is occupied" });
   }
+  // rows put into packs are still there; rows taken out are notes of their own still
+  for (const p of entry.packs ?? []) {
+    const where = p.rows.map((r) => app.packs?.locate(r)?.pack ?? null);
+    if (p.action === "pack") {
+      if (where.every((w) => w === p.pack)) continue;
+      if (partial && where.every((w, i) => w === null && fileOrNull(app, p.rows[i]!))) {
+        back.add(p);
+        continue;
+      }
+      p.rows.forEach((r, i) => where[i] !== p.pack && conflicts.push({ path: r, message: `row no longer in the pack ${p.pack}` }));
+    } else {
+      if (where.every((w, i) => w === null && fileOrNull(app, p.rows[i]!))) continue;
+      if (partial && where.every((w) => w === p.pack)) {
+        back.add(p);
+        continue;
+      }
+      p.rows.forEach((r, i) => (where[i] !== null || !fileOrNull(app, r)) && conflicts.push({ path: r, message: where[i] !== null ? `row went into the pack ${where[i]} since the operation` : "note no longer exists" }));
+    }
+  }
   const hashOfCreated = new Map((entry.created_hashes ?? []).map((h) => [h.path, h.hash]));
   for (const c of entry.creates) {
     const f = fileOrNull(app, currentPath(c));
@@ -778,8 +840,21 @@ export async function undoMigration(
   const undoCreates: string[] = [];
   const undoCreatedHashes: { path: string; hash: string }[] = [];
   const undoDeleted: { path: string; content: string }[] = [];
+  const undoPacks: PackChange[] = [];
   /** The writes of the undo, in order, each with the file it puts back. */
   const steps: { path: string; run: () => Promise<void> }[] = [];
+  // the packs first (they were written after the texts), newest first
+  for (const p of [...(entry.packs ?? [])].reverse()) {
+    if (back.has(p)) continue;
+    steps.push({
+      path: p.pack,
+      run: async () => {
+        const o = oppositePack(p);
+        await applyPack(app, o);
+        undoPacks.push(o);
+      },
+    });
+  }
   for (const ref of entry.references) {
     if (back.has(ref)) continue;
     steps.push({
@@ -876,6 +951,7 @@ export async function undoMigration(
       deleted: undoDeleted,
       failed,
       undoes: migrationId,
+      ...(undoPacks.length > 0 ? { packs: undoPacks } : {}),
     },
     now,
   );

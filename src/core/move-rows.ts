@@ -25,7 +25,7 @@ import type { DatanotesSettings } from "./settings";
 import { validationContextFor } from "./table-registry";
 import { readDatabaseConfig } from "./database";
 import type { OrderedFrontmatter } from "./types";
-import { isEmptyValue, parseWikilink, validateRow } from "./validate";
+import { isEmptyValue, parseWikilink, validateRow, wikilinkTarget } from "./validate";
 import { CheckLinks } from "./check-links";
 import { basenameOf, claimFreeName, renderPathTemplate } from "./path-templates";
 import { computedColumnNames, fileCreated, normalizeDatetimes, withGenerated, withIdentity, withRowId } from "./computed-columns";
@@ -232,7 +232,7 @@ async function linksLeftBehind(app: App, settings: DatanotesSettings, src: Loade
       for (const c of columns) {
         const v = fmGet(row.ordered, c.name);
         for (const x of Array.isArray(v) ? v : [v]) {
-          const lp = parseWikilink(x);
+          const lp = wikilinkTarget(x, app.packs !== undefined);
           const dest = lp === null ? null : ctx.resolveLink!(lp);
           if (dest !== null && moved.has(dest)) from.set(dest, (from.get(dest) ?? new Set()).add(`${row.file.path} ("${c.name}")`));
         }

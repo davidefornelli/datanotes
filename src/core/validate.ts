@@ -20,6 +20,11 @@ export interface ValidationContext {
   tableOfPath?: (path: string) => string | null;
   /** Allowed values of a vocabulary table (the `name` of its rows), or null when unknown. */
   vocabulary?: (table: string) => ReadonlySet<string> | null;
+  /**
+   * Links are resolved with their `#heading` (see {@link wikilinkTarget}): the host keeps packs of
+   * rows, where `[[pack#row]]` names a row.
+   */
+  linkSubpaths?: boolean;
 }
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -38,6 +43,59 @@ export function parseWikilink(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const m = value.trim().match(WIKILINK_RE);
   return m ? m[1]!.trim() : null;
+}
+
+/**
+ * The file names (lower case, no `.md`) of the packs of rows the hosts of this process keep, each
+ * with how many packs have it: a link `[[pack#row]]` names the row, not the pack (pack-store.ts
+ * keeps it up to date).
+ */
+const PACK_NAMES = new Map<string, number>();
+
+/** A pack named `name` came (`+1`) or went (`-1`). */
+export function countPackName(name: string, delta: 1 | -1): void {
+  const key = name.toLowerCase();
+  const n = (PACK_NAMES.get(key) ?? 0) + delta;
+  if (n > 0) PACK_NAMES.set(key, n);
+  else PACK_NAMES.delete(key);
+}
+
+/**
+ * The name of the note a link value names (`[[People/Alice|A]]` → `Alice`): for a link into a pack
+ * of rows (`[[milk_feed 2026-10#2026-10-23T142214]]`), the row's; null when it is not a link.
+ */
+export function linkNoteName(value: unknown): string | null {
+  const lp = parseWikilink(value);
+  if (lp == null) return null;
+  const name = lp.split("/").pop()!.replace(/\.md$/i, "");
+  if (PACK_NAMES.size === 0 || !PACK_NAMES.has(name.toLowerCase())) return name;
+  const m = (value as string).trim().match(WIKILINK_RE);
+  const heading = (m?.[2] ?? "").slice(1).split("#")[0]!.trim();
+  return heading !== "" ? heading : name;
+}
+
+/**
+ * What a host resolves for a wikilink string: its path, and with `subpath` (a host with packs of
+ * rows, where `[[milk_feed 2026-10#2026-10-23T142214]]` names a row) its `#heading` too; null when
+ * `value` is not a wikilink.
+ */
+export function wikilinkTarget(value: unknown, subpath: boolean): string | null {
+  if (!subpath || typeof value !== "string") return parseWikilink(value);
+  const m = value.trim().match(WIKILINK_RE);
+  if (!m) return null;
+  const heading = (m[2] ?? "").trim();
+  return heading.length > 1 ? `${m[1]!.trim()}${heading}` : m[1]!.trim();
+}
+
+/** The link values' targets of a column value (a link or a list of links), as a host resolves them (see {@link wikilinkTarget}). */
+export function wikilinkTargets(value: unknown, subpath: boolean): { path: string; lookup: string }[] {
+  const list = Array.isArray(value) ? value : [value];
+  const out: { path: string; lookup: string }[] = [];
+  for (const v of list) {
+    const path = parseWikilink(v);
+    if (path != null) out.push({ path, lookup: wikilinkTarget(v, subpath)! });
+  }
+  return out;
 }
 
 export function isValidDate(value: unknown): boolean {
@@ -137,7 +195,7 @@ function validateScalar(
       }
       // a generated link (link(…)) may point to a row not created yet, e.g. a day note
       if (!ctx.resolveLink || spec.generated !== undefined) return [];
-      const dest = ctx.resolveLink(linkpath);
+      const dest = ctx.resolveLink(wikilinkTarget(value, ctx.linkSubpaths === true)!);
       if (dest == null) {
         return [violation(column, "broken_link", `link does not resolve: ${linkpath}`, value)];
       }

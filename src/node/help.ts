@@ -18,6 +18,8 @@ Usage:
   datanotes extension update | rollback | remove <name> --database <folder>   change an installed one
   datanotes extension list --database <folder>    the installed extensions
   datanotes extension check <folder>             check an extension's repository (for its authors)
+  datanotes pack-merge <base> <ours> <theirs> [<path>]   git's merge driver of packs of rows, row by row
+                                               (git sync registers it: merge.datanotes-pack.driver)
   Every command takes --vault <folder> instead of --database for a vault holding the database.
 ${MCP_USAGE}
   datanotes --version | --help

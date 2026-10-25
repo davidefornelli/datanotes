@@ -35,7 +35,7 @@ import { guide, unknownColumn, unknownName } from "./hints";
 
 const JOIN_HINT = guide(`Write join as {"table": "<other table>", "on": {"<left column or expression>": "<right column or expression>"}}, e.g. {"table": "watch", "on": {"title": "film"}}.`, "join");
 const UNION_HINT = guide(`Write a union as {"union": [{"table": "a", "where": {...}}, {"table": "b"}]}, with at least two branches; order_by, limit and columns apply to the stacked rows.`, "union");
-import { isEmptyValue, parseWikilink } from "./validate";
+import { isEmptyValue, parseWikilink, wikilinkTarget } from "./validate";
 import { comparable, compileWhere, readableKeys, resolveWithin, rowGetter, type RowGetter, type Where } from "./where";
 
 export interface SelectJoin {
@@ -486,7 +486,7 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
   const page = phase("engine.query.sort", () => orderBy(rows, order, (r, col) => comparable(specs.get(col), get(r, col)), offset + limit).slice(offset, offset + limit), { "datanotes.rows_in": rows.length });
   const expand = new Set(input.expand ?? []);
   const expandLink = (sourcePath: string, v: unknown): unknown => {
-    const linkpath = parseWikilink(v);
+    const linkpath = wikilinkTarget(v, app.packs !== undefined);
     if (linkpath == null) return v;
     const dest = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
     // an archived row is gone, as a deleted one: its link stays a link; so does a link to a note

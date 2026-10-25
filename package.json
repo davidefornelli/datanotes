@@ -1,6 +1,6 @@
 {
   "name": "datanotes",
-  "version": "3.4.2",
+  "version": "3.5.0",
   "mcpName": "io.github.davidefornelli/datanotes",
   "description": "The engine of your second brain: Markdown notes as database tables, for you and your agents.",
   "keywords": [

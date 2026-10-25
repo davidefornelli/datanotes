@@ -168,6 +168,28 @@ export function readOrderedFromMarkdown(
   };
 }
 
+/**
+ * One YAML value (the text after `key:` on one line), as the front matter reads it: the same
+ * plain JavaScript values, the same strings. Throws on YAML that does not parse.
+ */
+export function parseYamlValue(text: string): unknown {
+  const doc = parseDocument(text);
+  if (doc.errors.length > 0) throw new Error(doc.errors[0]!.message);
+  return yamlNodeToPlain(doc.contents as Node | null, "value");
+}
+
+/**
+ * A value as YAML on one line (flow style: `[a, b]`, `{k: v}`, a string quoted only when it must
+ * be); JSON, which YAML reads too, when the YAML would take more than one line (a list holding
+ * a text with line breaks). {@link parseYamlValue} reads it back.
+ */
+export function flowYamlValue(value: unknown): string {
+  const text = stringify(value, { lineWidth: 0, collectionStyle: "flow", blockQuote: false, flowCollectionPadding: false }).replace(/\n$/, "");
+  // a line break of another kind (U+0085, U+2028, U+2029) would end the line too: escaped in JSON
+  if (!/[\n\r\u0085\u2028\u2029]/.test(text)) return text;
+  return JSON.stringify(value).replace(/[\u0085\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
 function stringifyYamlOrdered(ordered: OrderedFrontmatter): string {
   const obj = Object.fromEntries(ordered) as Record<string, unknown>;
   return stringify(obj, {

@@ -11,7 +11,7 @@ import type { DatanotesSettings } from "./settings";
 import { isoAt } from "./datetime";
 import { enumPosition } from "./query";
 import type { ColumnSpec } from "./types-table";
-import { isEmptyValue, isValidDate, isValidDatetime, parseWikilink } from "./validate";
+import { isEmptyValue, isValidDate, isValidDatetime, linkNoteName } from "./validate";
 import { basenameOf } from "./path-templates";
 import { hasThisTokens } from "./this-tokens";
 import { guide, unknownColumn, unknownOperator, type Guidance } from "./hints";
@@ -84,9 +84,8 @@ export function comparable(spec: ColumnSpec | undefined, v: unknown): unknown {
     return enumPosition(spec, v) ?? v;
   }
   if (t === "link") {
-    // Compare links by note name so `[[Alice]]` matches `[[People/Alice|A]]`.
-    const lp = parseWikilink(v);
-    return lp == null ? v : lp.split("/").pop()!.replace(/\.md$/i, "");
+    // Compare links by note name so `[[Alice]]` matches `[[People/Alice|A]]` (a row of a pack: its own name).
+    return linkNoteName(v) ?? v;
   }
   return v;
 }
@@ -445,6 +444,5 @@ function notALink(col: string, t: LoadedTable): Guidance {
 
 /** The note name a link value names (`[[People/Alice|A]]` → `Alice`); null when it is not a link. */
 export function linkName(v: unknown): string | null {
-  const lp = parseWikilink(v);
-  return lp == null ? null : lp.split("/").pop()!.replace(/\.md$/i, "");
+  return linkNoteName(v);
 }
