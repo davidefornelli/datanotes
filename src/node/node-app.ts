@@ -441,8 +441,9 @@ export class NodeVault implements Vault {
         }
         const st = stats.get(p);
         const f = this.files.get(p);
-        // a file gone between its listing and its stat is reported by the OS, or the next check
-        if (st && (!f || f.stat.mtime !== st.mtimeMs || f.stat.size !== st.size)) out.push(p);
+        // a file gone between its listing and its stat is reported by the OS, or the next check;
+        // a pack is no file of the index: as the host last read or wrote it, no change
+        if (st && (!f || f.stat.mtime !== st.mtimeMs || f.stat.size !== st.size) && !this.packs.unchanged(p, { mtime: st.mtimeMs, size: st.size })) out.push(p);
       }
     }
     // rows of packs are not on disk, nor the folders that hold only them
@@ -759,9 +760,12 @@ export class NodeVault implements Vault {
     return [...new Set(changed)];
   }
 
-  /** Whether a path is (or may be) a pack's: a pack known, or a file named as one. */
+  /**
+   * Whether a path is a pack's: a pack known, or a file named as one with `pack` in its front
+   * matter (read only for a file named `<folder> <key>.md`; a note of that name is no pack).
+   */
   private packish(rel: string): boolean {
-    return this.packs.isPack(rel) || namedAsPack(rel);
+    return this.packs.isPack(rel) || (namedAsPack(rel) && this.packs.handles(rel));
   }
 
   /**
@@ -770,10 +774,10 @@ export class NodeVault implements Vault {
    */
   private packsLast(paths: Iterable<string>): string[] {
     const all = [...paths];
-    const packs = all.filter((p) => this.packish(p));
-    if (packs.length === 0) return all;
+    const packs = new Set(all.filter((p) => this.packish(p)));
+    if (packs.size === 0) return all;
     const onDisk = (p: string) => this.statOf(p) !== null;
-    return [...all.filter((p) => !this.packish(p)), ...packs.filter(onDisk), ...packs.filter((p) => !onDisk(p))];
+    return [...all.filter((p) => !packs.has(p)), ...[...packs].filter(onDisk), ...[...packs].filter((p) => !onDisk(p))];
   }
 
   /** Every path under the folder `rel` (dot entries left out), parents before their children. */
@@ -1089,9 +1093,10 @@ export class NodeVault implements Vault {
       return;
     }
     if (this.folders.has(rel)) {
+      // the rows of packs under it come out first, as the notes the folder holds
+      await this.packs.extractUnder(rel);
       const gone = [...this.files.values()].filter((f) => f.path.startsWith(`${rel}/`));
-      // a folder that holds only rows of packs may not be on disk
-      await fsp.rm(this.abs(rel), { recursive: force === true, force: this.packs.holdsRows(rel) });
+      await fsp.rm(this.abs(rel), { recursive: force === true });
       this.packs.forgetUnder(rel);
       const folder = this.dropFolder(rel)!;
       for (const f of gone) this.emit("delete", f);
@@ -1123,8 +1128,8 @@ export class NodeVault implements Vault {
     const isFolder = this.folders.has(file.path);
     const gone = isFolder ? [...this.files.values()].filter((f) => f.path.startsWith(`${file.path}/`)) : [];
     await fsp.mkdir(this.abs(".trash"), { recursive: true });
-    // a folder that holds only rows of packs may not be on disk
-    if (isFolder && this.packs.holdsRows(file.path)) await fsp.mkdir(this.abs(file.path), { recursive: true });
+    // the rows of packs under it come out first, as the notes the folder takes to the trash
+    if (isFolder) await this.packs.extractUnder(file.path);
     await renameRetrying(this.abs(file.path), this.abs(target));
     if (isFolder) {
       this.packs.forgetUnder(file.path);

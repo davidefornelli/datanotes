@@ -70,6 +70,21 @@ describe("auto-pack", () => {
     expect(packed(v)).toEqual([]);
   });
 
+  it("a refused or failed packing is reported with its reason; tables without pack are left alone; no database, nothing to do", async () => {
+    const v = await vault();
+    expect((await createTable(v.app, v.settings, described({ name: "other", options: { filename: "{name}" }, columns: [{ name: "name", type: "string" }] }))).ok).toBe(true);
+    const answer = (extra: Record<string, unknown>) => async () => ({ ok: false, conflicts: [], failed: [], packs: [], ...extra }) as never;
+    const later = new Date(Date.now() + 11 * MINUTE);
+    expect((await new AutoPack(v.app, () => v.settings, answer({ conflicts: [{ path: "p", message: "in the way" }] })).tick(later)).failed).toEqual({ [TABLE]: "p: in the way" });
+    expect((await new AutoPack(v.app, () => v.settings, answer({ failed: [{ path: "p", error: "disk full" }] })).tick(later)).failed).toEqual({ [TABLE]: "p: disk full" });
+    expect((await new AutoPack(v.app, () => v.settings, answer({})).tick(later)).failed).toEqual({ [TABLE]: "refused" });
+    // a packing that packs nothing, and one whose answer has no excluded rows
+    expect(await new AutoPack(v.app, () => v.settings, async () => ({ ok: true, packs: [], conflicts: [], failed: [] }) as never).tick(later)).toEqual({ ran: true, tables: {} });
+    expect(await new AutoPack(v.app, () => v.settings, async () => ({ ok: true, packs: [{ pack: "x", key: "k", rows: ["a"] }], conflicts: [], failed: [] }) as never).tick(later)).toEqual({ ran: true, tables: { [TABLE]: { packs: 1, rows: 1 } } });
+    const empty = createDbVault({}, {}, { host: "node" });
+    expect(await new AutoPack(empty.app, () => empty.settings).tick(later)).toEqual({ ran: true, tables: {} });
+  });
+
   it("a host without packs: it never runs", async () => {
     const v = createDbVault({}, {}, { host: "fake" });
     expect(await new AutoPack(v.app, () => v.settings).tick(new Date(Date.now() + 11 * MINUTE))).toEqual({ ran: false });

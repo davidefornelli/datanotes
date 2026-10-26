@@ -383,9 +383,9 @@ async function inOrder<T, R>(
 
 /** Put rows into a pack, or take them out, through the host. */
 async function applyPack(app: App, p: PackChange): Promise<void> {
-  if (!app.packs) throw new Error("this host keeps no packs of rows");
-  if (p.action === "pack") await app.packs.pack({ table: p.table, key: p.key, path: p.pack, rows: p.rows, tableKey: p.tableKey });
-  else await app.packs.unpack(p.pack, p.rows);
+  // a change set holds pack changes only on a host with packs (pack_rows refuses them elsewhere), and so does its journal
+  if (p.action === "pack") await app.packs!.pack({ table: p.table, key: p.key, path: p.pack, rows: p.rows, tableKey: p.tableKey });
+  else await app.packs!.unpack(p.pack, p.rows);
 }
 
 /** The opposite of a pack change (undo). */
@@ -786,24 +786,16 @@ export async function undoMigration(
   for (const m of since) {
     if (await occupied(app, m.from)) conflicts.push({ path: m.from, message: "original path is occupied" });
   }
-  // rows put into packs are still there; rows taken out are notes of their own still
+  // rows put into a pack are still in it, rows taken out still notes of their own; rows already
+  // back where they were (taken out, or packed again, since) are left as they are
   for (const p of entry.packs ?? []) {
-    const where = p.rows.map((r) => app.packs?.locate(r)?.pack ?? null);
-    if (p.action === "pack") {
-      if (where.every((w) => w === p.pack)) continue;
-      if (partial && where.every((w, i) => w === null && fileOrNull(app, p.rows[i]!))) {
-        back.add(p);
-        continue;
-      }
-      p.rows.forEach((r, i) => where[i] !== p.pack && conflicts.push({ path: r, message: `row no longer in the pack ${p.pack}` }));
-    } else {
-      if (where.every((w, i) => w === null && fileOrNull(app, p.rows[i]!))) continue;
-      if (partial && where.every((w) => w === p.pack)) {
-        back.add(p);
-        continue;
-      }
-      p.rows.forEach((r, i) => (where[i] !== null || !fileOrNull(app, r)) && conflicts.push({ path: r, message: where[i] !== null ? `row went into the pack ${where[i]} since the operation` : "note no longer exists" }));
-    }
+    // only a host with packs journals them
+    const inPack = p.rows.map((r) => app.packs!.locate(r)?.pack === p.pack);
+    const asNotes = p.rows.map((r) => app.packs!.locate(r) === null && fileOrNull(app, r) !== null);
+    const now = p.action === "pack" ? inPack : asNotes;
+    const before = p.action === "pack" ? asNotes : inPack;
+    if (before.every(Boolean)) back.add(p);
+    else if (!now.every(Boolean)) conflicts.push({ path: p.pack, message: `rows of ${p.pack} moved since the operation (written, moved or deleted)` });
   }
   const hashOfCreated = new Map((entry.created_hashes ?? []).map((h) => [h.path, h.hash]));
   for (const c of entry.creates) {

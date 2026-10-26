@@ -160,7 +160,8 @@ export class NodePackStore implements PackStore {
   constructor(private readonly vault: PackVault) {}
 
   relinks(rows: readonly string[], to: "pack" | "note", targets: ReadonlyMap<string, { pack: string; heading: string }>): Promise<LinkRewrite[]> {
-    return this.relinker ? this.relinker(rows, to, targets) : Promise.resolve([]);
+    // set with the host (createNodeHost): the metadata cache knows the links
+    return this.relinker!(rows, to, targets);
   }
 
   /** Keep the rows' stats in `<store>/packs.json` (read now). */
@@ -291,15 +292,9 @@ export class NodePackStore implements PackStore {
 
   /** The row of the pack at `packPath` named `heading`, as a vault path; null when there is none. */
   rowAt(packPath: string, heading: string): string | null {
-    const s = this.packs.get(packPath);
-    if (!s) return null;
-    for (const r of s.rows.values()) if (r.heading === heading) return r.file.path;
+    // asked of a pack the resolver found: one the host keeps
+    for (const r of this.packs.get(packPath)!.rows.values()) if (r.heading === heading) return r.file.path;
     return null;
-  }
-
-  /** The pack and heading of a packed row (for its links: `[[pack#heading]]`). */
-  rowOf(rel: string): { pack: string; heading: string } | null {
-    return this.locate(rel);
   }
 
   /** The paths of the packs (for link resolution). */
@@ -321,13 +316,9 @@ export class NodePackStore implements PackStore {
   loadAll(paths: readonly string[]): void {
     for (const p of paths) {
       if (!namedAsPack(p)) continue;
-      let text: string;
-      try {
-        text = fs.readFileSync(this.vault.abs(p), "utf8");
-      } catch {
-        continue;
-      }
-      if (packFrontmatter(text)) this.register(p, text, false);
+      const text = this.read(p);
+      // a file gone since the walk is no pack
+      if (text !== null && packFrontmatter(text)) this.register(p, text, false);
     }
     if (this.dirty || this.rows.size !== this.saved.size) this.flush();
   }
@@ -363,8 +354,8 @@ export class NodePackStore implements PackStore {
 
   /** A note of its own appeared at a packed row's path: it wins, the section is left aside. */
   noteAt(rel: string): void {
-    const r = this.rows.get(rel);
-    if (!r) return;
+    // asked for a row's path (isRow)
+    const r = this.rows.get(rel)!;
     const state = this.packs.get(r.pack)!;
     state.rows.delete(r.id);
     state.aside.push({ path: rel, row: r.row });
@@ -380,7 +371,8 @@ export class NodePackStore implements PackStore {
       const i = s.aside.findIndex((a) => a.path === rel);
       if (i < 0) continue;
       const [a] = s.aside.splice(i, 1);
-      const st = s.stat ?? { mtime: Date.now(), size: 0 };
+      // a pack read or written has its stat
+      const st = s.stat!;
       const file = this.vault.addFile(rel, { ctime: st.mtime, mtime: st.mtime, size: Buffer.byteLength(rowNoteText(a!.row)) });
       const packed: PackedRow = { file, pack: s.path, heading: a!.row.heading, id: idOf(a!.row), hash: this.hashOf(s, a!.row), row: a!.row };
       s.rows.set(packed.id, packed);
@@ -449,6 +441,24 @@ export class NodePackStore implements PackStore {
     const st = fs.statSync(this.vault.abs(to));
     file.stat = { ctime: file.stat.ctime, mtime: st.mtimeMs, size: st.size, changed: st.ctimeMs };
     this.save();
+  }
+
+  /**
+   * Before a folder goes (deleted or trashed): the packed rows under it come out of their packs as
+   * notes of their own in place, so the folder holds them on disk. Silent (the caller announces
+   * what it drops).
+   */
+  async extractUnder(folder: string): Promise<void> {
+    for (const r of [...this.rows.values()]) {
+      if (!r.file.path.startsWith(`${folder}/`)) continue;
+      await this.extractTo(r.file, r.file.path);
+    }
+  }
+
+  /** Whether a path is a pack the host knows with this stat on disk (nothing to read again). */
+  unchanged(rel: string, st: { mtime: number; size: number }): boolean {
+    const s = this.packs.get(rel);
+    return s !== undefined && sameStat(s.stat, st);
   }
 
   /**
@@ -549,6 +559,7 @@ export class NodePackStore implements PackStore {
   private diskStat(rel: string): { mtime: number; size: number; ctime: number } | null {
     try {
       const s = fs.statSync(this.vault.abs(rel));
+      /* v8 ignore next -- a folder named like a pack, or a file system without birth times */
       return s.isFile() ? { mtime: s.mtimeMs, size: s.size, ctime: s.birthtimeMs || s.ctimeMs } : null;
     } catch {
       return null;

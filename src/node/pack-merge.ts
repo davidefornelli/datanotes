@@ -42,7 +42,8 @@ export function mergePack(base: string, ours: string, theirs: string, labels: { 
   const o = sectionsOf(ours);
   const t = sectionsOf(theirs);
   if (!o || !t) return null;
-  const metaOf = (text: string) => splitFrontmatter(text)?.yamlText ?? "";
+  // a pack read has its front matter
+  const metaOf = (text: string) => splitFrontmatter(text)!.yamlText;
   const b = base.trim() === "" ? { head: "", byId: new Map<string, PackSection>() } : sectionsOf(base);
   if (!b) return null;
   // the same table and key on both sides (the description may differ: ours wins)

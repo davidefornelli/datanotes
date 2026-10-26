@@ -69,8 +69,7 @@ export function linkNoteName(value: unknown): string | null {
   if (lp == null) return null;
   const name = lp.split("/").pop()!.replace(/\.md$/i, "");
   if (PACK_NAMES.size === 0 || !PACK_NAMES.has(name.toLowerCase())) return name;
-  const m = (value as string).trim().match(WIKILINK_RE);
-  const heading = (m?.[2] ?? "").slice(1).split("#")[0]!.trim();
+  const heading = ((value as string).trim().match(WIKILINK_RE)![2] ?? "").slice(1).split("#")[0]!.trim();
   return heading !== "" ? heading : name;
 }
 

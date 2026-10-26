@@ -198,10 +198,9 @@ export interface PackStore {
    * The notes whose links lead to `rows`, each with its text now and with those links rewritten:
    * `to: "pack"` (the rows go into packs; `targets` gives each its pack and heading) writes
    * `[[pack#row]]`, the form Obsidian follows too; `to: "note"` (they come out) writes the link to
-   * the note. The notes among `rows` are left as they are. Nothing is written. Optional: a host
-   * without it leaves the links as they are (they still lead to the rows for the engine).
+   * the note. The notes among `rows` are left as they are. Nothing is written.
    */
-  relinks?(rows: readonly string[], to: "pack" | "note", targets: ReadonlyMap<string, { pack: string; heading: string }>): Promise<LinkRewrite[]>;
+  relinks(rows: readonly string[], to: "pack" | "note", targets: ReadonlyMap<string, { pack: string; heading: string }>): Promise<LinkRewrite[]>;
 }
 
 /** The environment the engine runs in. Named `App` so engine code reads like plugin code. */

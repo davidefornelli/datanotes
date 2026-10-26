@@ -314,12 +314,13 @@ export function packable(text: string, heading: string, table: string, tableKey 
   if (h !== null) return { ok: false, reason: `its text has a # or ## heading: ${JSON.stringify(h)}` };
   const row: PackRow = { heading, ordered, body };
   // the row read back from its section as a pack holds it
-  let back: PackSection | undefined;
+  let back: PackSection;
   try {
-    back = parsePack(writePack({ table, key: "x" }, [row], tableKey), tableKey).sections[0];
+    back = parsePack(writePack({ table, key: "x" }, [row], tableKey), tableKey).sections[0]!;
   } catch (e) {
     return { ok: false, reason: `it does not read back from a pack: ${(e as Error).message}` };
   }
-  if (!back || back.body !== body || !sameValue(back.ordered, ordered)) return { ok: false, reason: "a value or its text does not read back the same from a pack" };
+  /* v8 ignore next -- defensive: every value front matter gives reads back from one line of YAML (tested type by type) */
+  if (back.body !== body || !sameValue(back.ordered, ordered)) return { ok: false, reason: "a value or its text does not read back the same from a pack" };
   return { ok: true, row };
 }

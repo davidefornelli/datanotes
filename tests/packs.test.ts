@@ -144,6 +144,13 @@ describe("pack_rows and unpack_rows", () => {
     expect(linked.ok, JSON.stringify(linked)).toBe(true);
     const x = await select(v.app, v.settings, { table: TABLE, where: { minutes: 1 }, expand: ["baby"] });
     expect((x.rows[0]!.baby as { path: string }).path).toBe(`${FOLDER}/2026-10-01T0800.md`);
+    // the graph follows it to the row; a filter on the link compares the row's name
+    const from = x.rows[0]!.path as string;
+    expect((await graphNeighbors(v.app, v.settings, { from: { paths: [from] } })).nodes[0]!.edges).toContainEqual({ path: `${FOLDER}/2026-10-01T0800.md`, table: TABLE, label: "baby", direction: "out" });
+    expect((await select(v.app, v.settings, { table: TABLE, where: { baby: "[[2026-10-01T0800]]" } })).rows.map((r) => r.path)).toEqual([from]);
+    // a text that links into a pack: automatic links see the row as linked already
+    const body = await insertRow(v.app, v.settings, { table: TABLE, values: { started_at: "2026-11-05T06:05:00+02:00", minutes: 3 }, body: "After [[feed 2026-10#2026-10-01T0800]], see [[#Top]] and [[Journal/Day#]].\n" });
+    expect(body.ok, JSON.stringify(body)).toBe(true);
     const wrong = await insertRow(v.app, v.settings, { table: TABLE, values: { started_at: "2026-11-04T06:05:00+02:00", minutes: 2, baby: "[[feed 2026-10#2026-10-09T0000]]" } });
     expect(wrong.ok).toBe(false);
 
@@ -165,7 +172,7 @@ describe("pack_rows and unpack_rows", () => {
     expect(all.ok).toBe(true);
     expect(v.list().filter((p) => p.endsWith(".md") && path.posix.basename(p).startsWith("feed "))).toEqual([]);
     for (const [p, text] of Object.entries(texts)) expect(v.read(p)).toBe(text);
-    expect((await rowsOf(v)).filter((r) => r.minutes !== 1)).toEqual(before);
+    expect((await rowsOf(v)).filter((r) => r.minutes !== 1 && r.minutes !== 3)).toEqual(before);
   });
 
   it("alter_table refuses to move the rows while some are packed", async () => {
@@ -201,5 +208,115 @@ describe("pack_rows and unpack_rows", () => {
     const undo = await undoOperation(v.app, v.settings, u.migration_id!);
     expect(undo.ok, JSON.stringify(undo)).toBe(true);
     expect(v.read(PACK)).toContain("minutes:: 11");
+  });
+});
+
+describe("pack_rows and unpack_rows: edge cases", () => {
+  it("pack_after_days of the table, a key given, a key that is no key", async () => {
+    const v = await feeds({ pack: "{started_at:YYYY-MM}", pack_after_days: 30 });
+    // October ends 2026-11-01: closed after 30 days on 2026-12-01 only
+    expect((await packRows(v.app, v.settings, { table: TABLE }, { dryRun: true, now: NOW })).packs.map((p) => p.key)).toEqual(["2026-09"]);
+    expect((await packRows(v.app, v.settings, { table: TABLE, key: "2026-09" }, { dryRun: true, now: new Date("2026-12-20T00:00:00Z") })).packs.map((p) => p.key)).toEqual(["2026-09"]);
+    const e = await packRows(v.app, v.settings, { table: TABLE, key: " " }).catch((x: unknown) => x);
+    expect((e as Error).message).toMatch(/"key" must be the period of a pack/);
+    expect(guided(e).docs).toMatch(/packs\.md#pack-and-unpack-rows$/);
+  });
+
+  it("rows left out: not at their path, with no date, or with an empty column of the file name", async () => {
+    const v = createDbVault({}, {}, { host: "node" });
+    expect((await createTable(v.app, v.settings, described({
+      name: "note",
+      options: { filename: "{title}", pack: "{day:YYYY-MM}" },
+      columns: [{ name: "title", type: "string" }, { name: "day", type: "date" }],
+    }))).ok).toBe(true);
+    const folder = `${TEST_DATABASE_FOLDER}/main/public/note`;
+    v.write(`${folder}/Right.md`, "---\ntable: main.public.note\nid: 01a0f000-0000-7000-8000-000000000001\ntitle: Right\nday: 2025-01-02\n---\n");
+    v.write(`${folder}/Wrong name.md`, "---\ntable: main.public.note\nid: 01a0f000-0000-7000-8000-000000000002\ntitle: Other\nday: 2025-01-03\n---\n");
+    v.write(`${folder}/No title.md`, "---\ntable: main.public.note\nid: 01a0f000-0000-7000-8000-000000000003\nday: 2025-01-04\n---\n");
+    v.write(`${folder}/No day.md`, "---\ntable: main.public.note\nid: 01a0f000-0000-7000-8000-000000000004\ntitle: No day\n---\n");
+    age(v, folder);
+    const r = await packRows(v.app, v.settings, { table: "main.public.note" }, { dryRun: true, now: NOW });
+    expect(r.packs.map((p) => p.rows)).toEqual([[`${folder}/Right.md`]]);
+    expect(r.excluded).toEqual([
+      { path: `${folder}/No day.md`, reason: "it has no day" },
+      { path: `${folder}/No title.md`, reason: expect.stringMatching(/a column of the file-name pattern is empty/) },
+      { path: `${folder}/Wrong name.md`, reason: `it is not at the path its values give (${folder}/Other.md)` },
+    ]);
+  });
+
+  it("a note named as the pack is a conflict; a pack renamed by hand keeps taking the rows of its key", async () => {
+    const v = await feeds();
+    v.write(PACK, "---\ntitle: in the way\n---\n");
+    (v.app.vault as unknown as { syncPath(p: string): void }).syncPath(PACK);
+    const r = await packRows(v.app, v.settings, { table: TABLE, key: "2026-10" }, { now: NOW });
+    expect(r.ok).toBe(false);
+    expect(r.conflicts).toEqual([{ path: PACK, message: "a note has the name of the pack of 2026-10: rename it first" }]);
+    v.remove(PACK);
+    expect((await packRows(v.app, v.settings, { table: TABLE, key: "2026-10" }, { now: NOW })).ok).toBe(true);
+    const renamed = `${FOLDER}/feed october.md`;
+    fs.renameSync(v.abs(PACK), v.abs(renamed));
+    (v.app.vault as unknown as { syncPaths(p: string[]): string[] }).syncPaths([PACK, renamed]);
+    // a row of October that comes back as a note goes into the renamed pack
+    expect((await unpackRows(v.app, v.settings, { table: TABLE, where: { minutes: 9 } })).ok).toBe(true);
+    age(v);
+    const again = await packRows(v.app, v.settings, { table: TABLE, key: "2026-10" }, { now: NOW });
+    expect(again.packs).toEqual([{ pack: renamed, key: "2026-10", rows: [`${FOLDER}/2026-10-01T0800.md`] }]);
+  });
+
+  it("a table without a date column: the hint still gives an example", async () => {
+    const v = createDbVault({}, {}, { host: "node" });
+    expect((await createTable(v.app, v.settings, described({ name: "plain", options: { filename: "{title}" }, columns: [{ name: "title", type: "string" }] }))).ok).toBe(true);
+    const e = await packRows(v.app, v.settings, { table: "plain" }).catch((x: unknown) => x);
+    expect(guided(e).hint).toContain('"pack": "{occurred_at:YYYY-MM}"');
+  });
+
+  it("unpack_rows with nothing to take out, and the public API's methods", async () => {
+    const v = await feeds();
+    const { createPublicApi } = await import("../src/core/public-api");
+    const api = createPublicApi(v.app, () => v.settings);
+    expect(await api.unpackRows({ table: TABLE })).toMatchObject({ ok: true, op: "unpack_rows", packs: [] });
+    expect(await api.packRows({ table: TABLE }, { dryRun: true, now: NOW })).toMatchObject({ ok: true, op: "pack_rows" });
+    // today's date: nothing of October 2026 is closed yet before 8 November
+    expect(await api.packRows({ table: TABLE }, { dryRun: true })).toMatchObject({ ok: true });
+  });
+
+  it("a pack the host fails to write: the write fails and is rolled back", async () => {
+    const v = await feeds();
+    const packs = v.app.packs!;
+    const real = packs.pack.bind(packs);
+    let calls = 0;
+    packs.pack = async (input) => {
+      if (++calls === 2) throw new Error("disk full");
+      return real(input);
+    };
+    const r = await packRows(v.app, v.settings, { table: TABLE }, { now: NOW });
+    packs.pack = real;
+    expect(r.ok).toBe(false);
+    expect(r.failed).toEqual([{ path: PACK, error: "disk full" }]);
+    expect(r.rolled_back).toBe(true);
+    expect(packs.packsOf(TABLE)).toEqual([]);
+    expect(v.exists(`${FOLDER}/2026-09-30T2310.md`)).toBe(true);
+  });
+});
+
+describe("undo of pack_rows and unpack_rows", () => {
+  it("rows already back where they were are left alone; rows moved since refuse the undo", async () => {
+    const v = await feeds();
+    const packed = await packRows(v.app, v.settings, { table: TABLE }, { now: NOW });
+    const out = await unpackRows(v.app, v.settings, { table: TABLE, key: "2026-09" });
+    // the September rows are notes again: undoing the pack leaves them, takes October apart
+    expect((await undoOperation(v.app, v.settings, packed.migration_id!)).ok).toBe(true);
+    expect(v.app.packs!.packsOf(TABLE)).toEqual([]);
+    // the unpack of September: undone, it packs them again (they are notes now)
+    expect((await undoOperation(v.app, v.settings, out.migration_id!)).ok).toBe(true);
+    expect(v.app.packs!.packsOf(TABLE).map((p) => p.key)).toEqual(["2026-09"]);
+
+    const second = await packRows(v.app, v.settings, { table: TABLE, key: "2026-10" }, { now: NOW });
+    expect(second.ok).toBe(true);
+    // a row of October changes month since: undoing the pack would not find it there
+    expect((await updateRow(v.app, v.settings, { table: TABLE, path: `${FOLDER}/2026-10-01T0800.md`, set: { started_at: "2026-11-01T08:00:00+02:00" } })).ok).toBe(true);
+    const u = await undoOperation(v.app, v.settings, second.migration_id!);
+    expect(u.ok).toBe(false);
+    expect(JSON.stringify(u)).toMatch(/moved since the operation/);
   });
 });

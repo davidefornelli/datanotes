@@ -139,6 +139,37 @@ describe("pack format: packs", () => {
   });
 });
 
+describe("pack format: sections read before", () => {
+  const rows = [row("a", [["n", 1]], "text\n"), row("b", [["n", 2]])];
+  const text = writePack({ table: TABLE, key: "k" }, rows);
+
+  it("a known section takes its values from `known`, its text from the pack", () => {
+    const seen: string[] = [];
+    const p = parsePack(text, "table", (t) => {
+      seen.push(t);
+      return t.startsWith("## a") ? [["table", TABLE], ["id", "id-a"], ["n", 100]] : undefined;
+    });
+    expect(seen).toHaveLength(2);
+    expect(p.sections.map((s) => [s.heading, new Map(s.ordered).get("n"), s.body])).toEqual([["a", 100, "text\n"], ["b", 2, ""]]);
+  });
+
+  it("a known section without text, and one saved with CRLF (parsed again)", () => {
+    const known = () => [["table", TABLE], ["id", "x"]] as [string, unknown][];
+    expect(parsePack(writePack({ table: TABLE, key: "k" }, [row("a", [])]), "table", known).sections[0]!.body).toBe("");
+    const crlf = parsePack(text.replace(/\n/g, "\r\n"), "table", known);
+    expect(crlf.sections.map((s) => new Map(s.ordered).get("id"))).toEqual(["id-a", "id-b"]);
+  });
+
+  it("two known sections with one id are refused", () => {
+    expect(() => parsePack(text, "table", () => [["id", "same"]])).toThrow(/two rows with the id same/);
+  });
+
+  it("a pack without rows, and rows given with one heading twice", () => {
+    expect(parsePack("---\npack: t\nkey: k\n---\n").sections).toEqual([]);
+    expect(() => parsePack(writePack({ table: TABLE, key: "k" }, [row("a", []), row("a", [])]))).toThrow(/two rows named "a"/);
+  });
+});
+
 describe("pack format: errors name the line", () => {
   const head = "---\npack: t\nkey: k\n---\n";
   const fails = (text: string, line: number, what: RegExp) => {

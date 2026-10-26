@@ -9,7 +9,7 @@
  * writes them, in the same migration, which undo_migration takes back whole.
  */
 
-import type { App, LinkRewrite } from "./host";
+import type { App } from "./host";
 import { emptyChangeSet, type PackChange } from "./changeset";
 import { finish, instrumented, loadRows, loadTable, OperationInputError, packOptions, type OpConflict, type OpResult, type RunOptions } from "./engine";
 import type { DatanotesSettings } from "./settings";
@@ -68,11 +68,6 @@ const needPacks = (app: App, table: string) => {
   return app.packs;
 };
 
-/** The links of other notes to these rows, rewritten (see PackStore.relinks); none on a host that cannot. */
-async function relinks(app: App, rows: readonly string[], to: "pack" | "note", targets: ReadonlyMap<string, { pack: string; heading: string }>): Promise<LinkRewrite[]> {
-  return app.packs?.relinks ? app.packs.relinks(rows, to, targets) : [];
-}
-
 async function packRowsImpl(app: App, settings: DatanotesSettings, input: PackRowsInput, opts: RunOptions = {}): Promise<PackRowsResult> {
   const t = await loadTable(app, settings, input.table);
   const full = t.catalog.ref.full;
@@ -92,7 +87,8 @@ async function packRowsImpl(app: App, settings: DatanotesSettings, input: PackRo
   const now = opts.now ?? new Date();
   const cfg = await readDatabaseConfig(app, settings);
   const today = wallClock(now, cfg.timezone).slice(0, 10);
-  const layout = { rowPath: t.def.layout.rowPath, filename: t.def.options.filename ?? "" };
+  // every table has a file-name pattern (create_table requires one)
+  const layout = { rowPath: t.def.layout.rowPath, filename: t.def.options.filename! };
   const groups = new Map<string, string[]>();
   const excluded: ExcludedRow[] = [];
   let open = 0;
@@ -110,19 +106,20 @@ async function packRowsImpl(app: App, settings: DatanotesSettings, input: PackRo
       open++;
       continue;
     }
-    const mtime = r.file.stat?.mtime ?? 0;
-    if (now.getTime() - mtime < PACK_QUIET_MS) {
+    // the host with packs gives every file its stat
+    if (now.getTime() - r.file.stat!.mtime < PACK_QUIET_MS) {
       excluded.push({ path: p, reason: "it changed in the last 24 hours" });
       continue;
     }
-    let expected: string | null = null;
+    let expected: string;
     try {
-      expected = layout.filename ? rowPathOf(layout, values) : null;
+      expected = rowPathOf(layout, values);
     } catch {
-      expected = null;
+      excluded.push({ path: p, reason: "its values give no path (a column of the file-name pattern is empty)" });
+      continue;
     }
     if (expected !== p) {
-      excluded.push({ path: p, reason: `it is not at the path its values give${expected ? ` (${expected})` : ""}` });
+      excluded.push({ path: p, reason: `it is not at the path its values give (${expected})` });
       continue;
     }
     const ok = packable(await app.vault.read(r.file), basenameOf(p), full, settings.tableKey);
@@ -142,9 +139,10 @@ async function packRowsImpl(app: App, settings: DatanotesSettings, input: PackRo
   const cs = emptyChangeSet("pack_rows", `pack ${planned.reduce((n, p) => n + p.rows.length, 0)} rows of ${t.def.name}`, t.def.schemaPath);
   const targets = new Map<string, { pack: string; heading: string }>();
   for (const p of planned) for (const r of p.rows) targets.set(r, { pack: p.pack, heading: basenameOf(r) });
-  for (const l of await relinks(app, [...targets.keys()], "pack", targets)) cs.texts.push({ path: l.path, before: l.before, after: l.after });
+  for (const l of await packs.relinks([...targets.keys()], "pack", targets)) cs.texts.push({ path: l.path, before: l.before, after: l.after });
   cs.packs = planned.map((p): PackChange => ({ action: "pack", table: full, key: p.key, pack: p.pack, rows: p.rows, tableKey: settings.tableKey }));
-  const result = planned.length === 0 && conflicts.length === 0 ? { ...emptyResultOf("pack_rows", opts), ok: true } : await finish(app, settings, cs, conflicts, [], opts);
+  // a conflict names a planned pack: nothing planned, nothing to write
+  const result = planned.length === 0 ? { ...emptyResultOf("pack_rows", opts), ok: true } : await finish(app, settings, cs, conflicts, [], opts);
   return { ...result, packs: planned, excluded: excluded.sort((a, b) => (a.path < b.path ? -1 : 1)), open_rows: open };
 }
 
@@ -165,7 +163,7 @@ async function unpackRowsImpl(app: App, settings: DatanotesSettings, input: Unpa
   const cs = emptyChangeSet("unpack_rows", `unpack ${planned.reduce((n, p) => n + p.rows.length, 0)} rows of ${t.def.name}`, t.def.schemaPath);
   const targets = new Map<string, { pack: string; heading: string }>();
   for (const p of planned) for (const r of p.rows) targets.set(r, { pack: p.pack, heading: basenameOf(r) });
-  for (const l of await relinks(app, [...targets.keys()], "note", targets)) cs.texts.push({ path: l.path, before: l.before, after: l.after });
+  for (const l of await packs.relinks([...targets.keys()], "note", targets)) cs.texts.push({ path: l.path, before: l.before, after: l.after });
   cs.packs = planned.map((p): PackChange => ({ action: "unpack", table: full, key: p.key, pack: p.pack, rows: p.rows, tableKey: settings.tableKey }));
   const result = planned.length === 0 ? { ...emptyResultOf("unpack_rows", opts), ok: true } : await finish(app, settings, cs, [], [], opts);
   return { ...result, packs: planned };

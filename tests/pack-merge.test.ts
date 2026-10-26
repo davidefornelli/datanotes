@@ -44,10 +44,21 @@ describe("mergePack", () => {
     expect(r.text).toContain("<<<<<<< ours\n## a\nid:: id-a\nminutes:: 10\n=======\n>>>>>>> theirs\n");
   });
 
+  it("a row removed on our side and changed on theirs, rows added under one name, packs without rows", () => {
+    const r = mergePack(base, pack(row("b", 2), row("c", 3)), pack(row("a", 7), row("b", 2), row("c", 3)))!;
+    expect(r.conflicts).toBe(1);
+    expect(r.text).toContain("<<<<<<< ours\n=======\n## a\nid:: id-a\nminutes:: 7\n>>>>>>> theirs\n");
+    const twin = (id: string): PackRow => ({ heading: "z", ordered: [["table", TABLE], ["id", id], ["minutes", 1]], body: "" });
+    expect(mergePack(base, pack(row("a", 1), row("b", 2), row("c", 3), twin("z1")), pack(row("a", 1), row("b", 2), row("c", 3), twin("z2")))!.text.match(/## z\n/g)).toHaveLength(2);
+    const empty = writePack({ table: TABLE, key: "2026-10" }, []);
+    expect(mergePack(empty, empty, empty)).toEqual({ text: empty, conflicts: 0 });
+  });
+
   it("a note that is not a pack, or a pack of another key, is left to a text merge", () => {
     expect(mergePack("", "---\ntitle: x\n---\nA\n", "---\ntitle: y\n---\nB\n")).toBeNull();
     expect(mergePack(base, pack(row("a", 1)), writePack({ table: TABLE, key: "2026-11" }, [row("a", 1)]))).toBeNull();
     expect(mergePack(base, "---\npack: x\nkey: k\n---\n\n## a\nn:: 1\n", base)).toBeNull();
+    expect(mergePack("a note before it was a pack\n", base, base)).toBeNull();
   });
 });
 
@@ -128,9 +139,47 @@ describe("pack-merge as git's merge driver", () => {
     commit(b, "b");
     const pull = spawnSync("git", ["pull", "-q", "--no-rebase", "--no-edit", "origin", "main"], { cwd: b, encoding: "utf8", env });
     expect(pull.status).not.toBe(0);
-    const text = fs.readFileSync(path.join(b, "feed", "feed 2026-10.md"), "utf8");
+    // a Windows checkout may have CRLF line endings (core.autocrlf)
+    const text = fs.readFileSync(path.join(b, "feed", "feed 2026-10.md"), "utf8").replace(/\r\n/g, "\n");
     expect(text).toContain("## a\n<<<<<<< ours:feed/feed 2026-10.md\nid:: id-a\nminutes:: 20\n=======\nid:: id-a\nminutes:: 10\n>>>>>>> theirs:feed/feed 2026-10.md\n");
     expect(text).toContain("## c\nid:: id-c\nminutes:: 3\n");
-    expect(fs.readFileSync(path.join(b, "Note.md"), "utf8")).toBe("one changed\ntwo\nthree changed\n");
+    expect(fs.readFileSync(path.join(b, "Note.md"), "utf8").replace(/\r\n/g, "\n")).toBe("one changed\ntwo\nthree changed\n");
+  });
+});
+
+describe("packMergeMain", () => {
+  const files = (base: string, ours: string, theirs: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "datanotes-pack-merge-main-"));
+    const at = (n: string, t: string) => {
+      fs.writeFileSync(path.join(dir, n), t);
+      return path.join(dir, n);
+    };
+    return [at("base", base), at("ours", ours), at("theirs", theirs)] as const;
+  };
+  const base = pack(row("a", 1), row("b", 2));
+
+  it("merges a pack into ours (0), or leaves its conflict there (1)", async () => {
+    const { packMergeMain } = await import("../src/node/pack-merge");
+    const clean = files(base, pack(row("a", 1), row("b", 2), row("c", 3)), pack(row("a", 10), row("b", 2)));
+    expect(packMergeMain([...clean, "feed/feed 2026-10.md"])).toBe(0);
+    expect(minutes(fs.readFileSync(clean[1], "utf8"))).toEqual({ a: 10, b: 2, c: 3 });
+    const conflict = files(base, pack(row("a", 5), row("b", 2)), pack(row("a", 6), row("b", 2)));
+    expect(packMergeMain(conflict)).toBe(1);
+    expect(packMergeMain([...files(base, pack(row("a", 5), row("b", 5)), pack(row("a", 6), row("b", 6))), "feed/f.md"])).toBe(1);
+    expect(fs.readFileSync(conflict[1], "utf8")).toContain("<<<<<<< ours\n");
+    // a missing base: a pack both sides added
+    const added = files("", pack(row("a", 1)), pack(row("b", 2)));
+    fs.rmSync(added[0]);
+    expect(packMergeMain([...added])).toBe(0);
+  });
+
+  it("merges any other note as text, as git does; refuses missing arguments", async () => {
+    const { packMergeMain } = await import("../src/node/pack-merge");
+    const text = files("one\ntwo\nthree\n", "one changed\ntwo\nthree\n", "one\ntwo\nthree changed\n");
+    expect(packMergeMain([...text])).toBe(0);
+    expect(fs.readFileSync(text[1], "utf8")).toBe("one changed\ntwo\nthree changed\n");
+    const clash = files("one\n", "two\n", "three\n");
+    expect(packMergeMain([...clash, "Note.md"])).toBe(1);
+    expect(packMergeMain(["only-one"])).toBe(2);
   });
 });
