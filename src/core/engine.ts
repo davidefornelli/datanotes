@@ -89,7 +89,7 @@ import { isEmptyValue, requiredMessage, validateValue } from "./validate";
 import { telemetry, traced, type AttrValue, type Severity } from "./telemetry";
 import { messageOf } from "./message";
 import { closestNames, guide, GuidedError, guidanceOf, unknownColumn, type Guidance } from "./hints";
-import { PackOptionError, readPackAfterDays, readPackTemplate } from "./pack-layout";
+import { packPartitionWarning, PackOptionError, readPackAfterDays, readPackTemplate, type LayoutWarning } from "./pack-layout";
 import { addColumnRefusal, createTableRefusal, hasText, missingDescriptions, removedDescriptionRefusal, withEngineDescription, type Refusal } from "./descriptions";
 import { STALE_WRITE, staleWrite, wrote } from "./write-check";
 import { count, phase } from "./tracing";
@@ -169,6 +169,11 @@ export interface OpResult {
    * move rewrites (or, on a dry run, would). Present when there is one.
    */
   schema_references?: SchemaReference[];
+  /**
+   * create_table and alter_table: what is unwise in the table's layout, though allowed (a partition
+   * wider than the periods of its packs), each with how to fix it. Present when there is one.
+   */
+  warnings?: LayoutWarning[];
   /** Query lines rewritten (or to be rewritten on a dry run) by `rename_value`. */
   /** Occurrences `rename_value` did not change because it cannot be sure they refer to the table. */
 }
@@ -1281,7 +1286,9 @@ async function createTableImpl(
     if (missing) throw refused(createTableRefusal(ref.full, missing, input.columns, proposal));
     const cs = emptyChangeSet("create_table", `create table ${ref.full}`, pseudo);
     cs.texts.push({ path: metastorePath(settings), before: text, after: setTableEntry(text, ref, entry) });
-    return finish(app, settings, cs, conflicts, [], opts);
+    const result = await finish(app, settings, cs, conflicts, [], opts);
+    const warning = packPartitionWarning(ref.full, catOptions.partition, packProps.pack);
+    return warning ? { ...result, warnings: [warning] } : result;
   }
 }
 

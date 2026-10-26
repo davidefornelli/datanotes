@@ -4,7 +4,7 @@
  */
 
 import type { App, TFile } from "./host";
-import { catalogTables, constraintHints, loadMetastore, type Metastore } from "./metastore";
+import { catalogTables, constraintHints, loadMetastore, type CatalogTableEntry, type Metastore } from "./metastore";
 import { loadRows, loadTable, uniqueViolations, type LoadedRow, type LoadedTable, type RowViolations } from "./engine";
 import { fmGet } from "./frontmatter";
 import type { DatanotesSettings } from "./settings";
@@ -24,6 +24,7 @@ import { acyclicViolations } from "./acyclic";
 import { unreadableMessage, unreadableRows, type UnreadableNote } from "./unreadable";
 import { phase, tally, traceNow, tracingOn } from "./tracing";
 import { assertTableReadable, currentReadScope, pathReadable, tableReadable } from "./read-scope";
+import { packPartitionWarning, type LayoutWarning } from "./pack-layout";
 
 // --- CHECK constraints ---
 
@@ -133,6 +134,19 @@ export interface CheckResult {
   total: number;
   /** Tables that could not be checked (when every table was checked), with the reason; the others are. */
   errors?: { table: string; error: string }[];
+  /** What is unwise in the layout of the tables checked, though allowed (a partition wider than its packs). */
+  warnings?: LayoutWarning[];
+}
+
+/** The layout warnings of these tables (their entries in the metastore). */
+function layoutWarnings(tables: readonly { ref: { full: string }; entry: CatalogTableEntry }[]): LayoutWarning[] {
+  const out: LayoutWarning[] = [];
+  for (const { ref, entry } of tables) {
+    // the metastore's parser keeps `partition` and `pack` as written: text, when given
+    const w = packPartitionWarning(ref.full, entry.options?.partition, entry.options?.pack);
+    if (w) out.push(w);
+  }
+  return out;
 }
 
 export const CHECK_LIMIT = 500;
@@ -215,7 +229,9 @@ async function checkImpl(app: App, settings: DatanotesSettings, input: CheckInpu
     if (scope) assertTableReadable((await loadTable(app, settings, input.table)).catalog.ref.full);
     const r = await checkOne(app, settings, input.table);
     const shown = rowsOf(r.violations);
-    return { table: r.table, rows_checked: r.rows, total: shown.length, violations: shown.slice(offset, offset + limit) };
+    const { ref, entry } = (await loadTable(app, settings, input.table)).catalog;
+    const warnings = layoutWarnings([{ ref, entry }]);
+    return { table: r.table, rows_checked: r.rows, total: shown.length, violations: shown.slice(offset, offset + limit), ...(warnings.length > 0 ? { warnings } : {}) };
   }
   const model = (await loadMetastore(app, settings))?.model;
   const all: CheckedRow[] = [];
@@ -236,7 +252,8 @@ async function checkImpl(app: App, settings: DatanotesSettings, input: CheckInpu
     tables++;
     all.push(...rowsOf(r.violations, full));
   }
-  return { table: null, rows_checked: rows, tables_checked: tables, total: all.length, violations: all.slice(offset, offset + limit), ...(errors.length > 0 ? { errors } : {}) };
+  const warnings = layoutWarnings(model ? catalogTables(model) : []).filter((w) => tableReadable(w.table, scope));
+  return { table: null, rows_checked: rows, tables_checked: tables, total: all.length, violations: all.slice(offset, offset + limit), ...(errors.length > 0 ? { errors } : {}), ...(warnings.length > 0 ? { warnings } : {}) };
 }
 
 export function checkTable(app: App, settings: DatanotesSettings, input: CheckInput): Promise<CheckResult> {

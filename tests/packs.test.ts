@@ -320,3 +320,22 @@ describe("undo of pack_rows and unpack_rows", () => {
     expect(JSON.stringify(u)).toMatch(/moved since the operation/);
   });
 });
+
+describe("a partition wider than the packs' periods", () => {
+  it("create_table, alter_table and check_table warn, with a hint and the docs; a fine partition does not", async () => {
+    const v = createDbVault({}, {}, { host: "node" });
+    const created = await createTable(v.app, v.settings, described({ name: "feed", timeColumn: "started_at", options: { partition: "{started_at:YYYY}", pack: "{started_at:YYYY-MM}" }, columns: [{ name: "started_at", type: "datetime", required: true }] }));
+    expect(created.ok).toBe(true);
+    expect(created.warnings).toEqual([expect.objectContaining({ code: "pack_partition", table: TABLE, hint: expect.stringContaining('"partition": "{started_at:YYYY/MM}"'), docs: expect.stringMatching(/#choose-the-partition-with-git-in-mind$/) })]);
+    const { checkTable } = await import("../src/core/row-checks");
+    expect((await checkTable(v.app, v.settings, { table: TABLE })).warnings).toHaveLength(1);
+    expect((await checkTable(v.app, v.settings, {})).warnings).toHaveLength(1);
+    const fixed = await alterTable(v.app, v.settings, { table: TABLE, partition: "{started_at:YYYY/MM}" });
+    expect([fixed.ok, fixed.warnings]).toEqual([true, undefined]);
+    expect((await checkTable(v.app, v.settings, { table: TABLE })).warnings).toBeUndefined();
+    // flat, through alter_table: a warning again; the pack option gone: none
+    expect((await alterTable(v.app, v.settings, { table: TABLE, partition: "" })).warnings).toHaveLength(1);
+    expect((await alterTable(v.app, v.settings, { table: TABLE, pack: "" })).warnings).toBeUndefined();
+    expect((await alterTable(v.app, v.settings, { table: TABLE, pack: "{started_at:YYYY}" })).warnings).toHaveLength(1);
+  });
+});

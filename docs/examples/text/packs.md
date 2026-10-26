@@ -28,7 +28,7 @@ Chapter 4, the walk to Winthrop.
 - A field is `key:: value`, its value YAML on one line, as in front matter.
 - The row’s own text starts after the first empty line, with headings from `###` down.
 
-The engine lists each row at the path it would have as a note of its own, such as `datanotes/main/public/reading/2025/2025-03-02T2100.md`. That path doesn’t exist on disk, but every operation finds the row there.
+The engine lists each row at the path it would have as a note of its own, such as `datanotes/main/public/reading/2025/03/2025-03-02T2100.md`. That path doesn’t exist on disk, but every operation finds the row there.
 
 ## Know which rows stay notes of their own
 
