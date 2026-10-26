@@ -83,7 +83,7 @@ describe("a hand move of the database folder while the engine runs", () => {
     // at once, before the engine noticed: the request settles the vault first, so it waits for the move
     const check = await post(v.port, "operations/check_table/", { table: "task" });
     expect(Date.now() - t0).toBeLessThan(20_000);
-    expect(check.status).toBe(200);
+    expect(check.status, JSON.stringify(check.json).slice(0, 3000)).toBe(200);
     expect(JSON.stringify(check.json)).not.toContain("broken_link");
     expect(svc.settings.databaseFolder).toBe("Archive/Db");
     const rows = (await post(v.port, "operations/select_rows/", { table: "task", limit: 10_000 })).json.rows as { path: string; day_note: string }[];
