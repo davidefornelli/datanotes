@@ -182,6 +182,7 @@ export const PAGES: GuidePage[] = [
     include: "docs/examples/text/packs.md",
     examples: [
       ["packs", "Choose the period of a pack"],
+      ["packs", "Choose the partition with git in mind"],
       ["packs", "Pack and unpack rows"],
       ["packs", "Read and write a packed row"],
       ["packs", "Unpack before you change the table’s layout"],

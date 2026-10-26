@@ -52,6 +52,7 @@ import { TABLE_KEY, type TableLayout, type TableOptions } from "./types-table";
 import { assertIdentifier, databaseRoot, readDatabaseConfig } from "./database";
 import { catalogLayout, parseTableOptions } from "./table-loader";
 import { TABLE_META_KEYS } from "./reserved-keys";
+import { packPartitionWarning } from "./pack-layout";
 import type { OrderedFrontmatter } from "./types";
 import { isEmptyValue } from "./validate";
 import { basenameOf, claimFreeName, renderPathTemplate } from "./path-templates";
@@ -463,11 +464,16 @@ async function alterTableImpl(
     (input.partition !== undefined && (input.partition || undefined) !== cur.partition) ||
     (input.filename !== undefined && input.filename !== cur.filename);
   if (layoutChanges) assertNotPacked(app, t, "the table moves or its rows change folder or name");
-  return relocateTable(app, settings, t, { catalogRef: refOf(catalog, schema, name) }, changes, opts, {
+  // the layout after the change: a partition wider than the packs' periods is worth a warning
+  const partition = input.partition !== undefined ? input.partition.trim().replace(/^\/+|\/+$/g, "") || undefined : cur.partition;
+  const pack = packProps.pack !== undefined ? ((packProps.pack as string | null) ?? undefined) : own.pack;
+  const warning = packPartitionWarning(refOf(catalog, schema, name).full, partition, pack);
+  const result = await relocateTable(app, settings, t, { catalogRef: refOf(catalog, schema, name) }, changes, opts, {
     ...(input.history !== undefined ? { history: input.history } : {}),
     ...(input.autolinkTarget !== undefined ? { autolink_target: input.autolinkTarget } : {}),
     ...packProps,
   }, input.rowTemplate, tags, fields, input.instructions);
+  return warning ? { ...result, warnings: [warning] } : result;
 }
 
 export const alterTable = instrumented("alter_table", alterTableImpl, (i) => ({ table: i.table, schema: i.schema, name: i.name }));

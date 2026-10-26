@@ -5,6 +5,19 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.6.0
+
+Datanotes 3.6.0 warns about a table layout that makes a git repository of the vault grow fast. It only adds to 3.5: no operation, argument or setting goes away, and nothing is refused that 3.5 accepted.
+
+### Packs of rows
+
+- **`warnings`**: a new field of the answers of `create_table`, `alter_table` and `check_table`. It lists what is unwise in a table's layout, though allowed, each with a `hint` and a `docs` link.
+- **`pack_partition`**: the first warning. A table whose partition is wider than the periods of its packs, such as a year folder with packs per month, gets it. The folder of the open rows grows all period, and `pack_rows` empties it, so git stores a new version of that folder at every commit. In a simulation of one commit per row, a year of 10 rows a day took 21 MB of git history, against 1.8 MB with a folder per month. [Choose the partition with git in mind](/guides/database-objects/packs/#choose-the-partition-with-git-in-mind) explains it.
+
+### Before you update
+
+- **Check your packed tables**: `check_table` lists the tables with a wide partition. To change it, run `unpack_rows`, then `alter_table` with a `partition` as fine as the pack, then `pack_rows`.
+
 ## 3.5.0
 
 Datanotes 3.5.0 brings packs of rows: one note holds the rows of a closed period, such as a month, one `##` section per row. A table with thousands of small rows a year keeps a few files instead of thousands. The engine still sees one row at a time. It only adds to 3.4: no operation, argument or setting goes away, and a table without the new option works as before.

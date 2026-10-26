@@ -76,6 +76,7 @@ export const DOCS = {
   packOption: "/guides/database-objects/packs.md#choose-the-period-of-a-pack",
   packHost: "/guides/database-objects/packs.md#packs-need-the-engine-service",
   packRows: "/guides/database-objects/packs.md#pack-and-unpack-rows",
+  packPartition: "/guides/database-objects/packs.md#choose-the-partition-with-git-in-mind",
   unpackFirst: "/guides/database-objects/packs.md#unpack-before-you-change-the-tables-layout",
   databaseSettings: "/guides/database-objects/catalogs-and-schemas.md#configure-the-database-settings",
   history: "/guides/history/table-history.md#turn-history-on-for-a-table",

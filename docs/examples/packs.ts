@@ -17,7 +17,7 @@ const chapter: Chapter = {
             name: "reading",
             description: "Reading sessions: when I read, which book and for how long",
             time_column: "started_at",
-            partition: "{started_at:YYYY}",
+            partition: "{started_at:YYYY/MM}",
             pack: "{started_at:YYYY-MM}",
             pack_after_days: 3,
             columns: [
@@ -42,6 +42,42 @@ const chapter: Chapter = {
           refused: true,
         },
       ],
+    },
+    {
+      title: "Choose the partition with git in mind",
+      say: "Give a packed table a partition as fine as its packs, such as one folder per month for packs per month. A wider partition is allowed, but the engine warns:",
+      steps: [
+        {
+          op: "alter_table",
+          args: { table: "reading", partition: "{started_at:YYYY}" },
+          show: (v) => ({ ok: v.ok, warnings: v.warnings }),
+          check: (v) => (v.warnings?.[0]?.code === "pack_partition" ? undefined : "a pack_partition warning"),
+        },
+        {
+          say: "`check_table` lists the same warning while the layout stays:",
+          op: "check_table",
+          args: { table: "reading" },
+          show: (v) => ({ table: v.table, total: v.total, warnings: v.warnings }),
+          check: (v) => (v.warnings?.length === 1 ? undefined : "one warning"),
+        },
+        {
+          say: "Back to one folder per month, the warning goes:",
+          op: "alter_table",
+          args: { table: "reading", partition: "{started_at:YYYY/MM}" },
+          show: (v) => ({ ok: v.ok, warnings: v.warnings ?? [] }),
+          check: (v) => (v.warnings === undefined ? undefined : "no warning"),
+        },
+      ],
+      after: [
+        "With a year folder and packs per month, the folder of the open rows grows all month, and `pack_rows` empties it. Git stores a new version of that folder at every commit, and `git gc` finds no good base to compress those versions. We simulated one commit per row, as git sync makes them:",
+        "",
+        "| Rows | Partition per year | Partition per month | No packs |",
+        "| --- | --- | --- | --- |",
+        "| 10 a day for 1 year | 21 MB | 1.8 MB | 3.0 MB |",
+        "| 5 a day for 3 years | 17 MB | 2.7 MB | 2.6 MB |",
+        "",
+        "With one folder per month, each month's folder fills and goes whole, and the repository stays as small as without packs, or smaller.",
+      ].join("\n"),
     },
     {
       title: "Pack and unpack rows",
@@ -78,7 +114,7 @@ const chapter: Chapter = {
           say: "Nothing changes for the engine and its readers. `select_rows` gives each row at its own path, with its values and text:",
           op: "select_rows",
           args: { table: "reading", columns: ["started_at", "book", "minutes", "file_modified"], order_by: "started_at" },
-          check: (v) => (v.total === 4 && v.rows[0].path === `${FOLDER}/2025/2025-03-02T2100.md` ? undefined : "the four rows, at their paths"),
+          check: (v) => (v.total === 4 && v.rows[0].path === `${FOLDER}/2025/03/2025-03-02T2100.md` ? undefined : "the four rows, at their paths"),
         },
         {
           say: "`unpack_rows` takes rows out again, as notes of their own with the text and modification time they had. `where` picks some rows, `key` one pack:",
@@ -96,7 +132,7 @@ const chapter: Chapter = {
       steps: [
         {
           op: "update_row",
-          args: { table: "reading", path: `${FOLDER}/2025/2025-03-09T2130.md`, set: { minutes: 45 } },
+          args: { table: "reading", path: `${FOLDER}/2025/03/2025-03-09T2130.md`, set: { minutes: 45 } },
           show: (v) => ({ ok: v.ok, migration_id: v.migration_id, planned_edits: v.planned_edits }),
           showFile: PACK,
         },
@@ -106,9 +142,9 @@ const chapter: Chapter = {
       title: "Unpack before you change the table’s layout",
       say: "A packed row keeps the path its values give it. So the rows must be notes of their own before the table moves, before its rows change folder or name, and before its `pack` option changes:",
       steps: [
-        { op: "alter_table", args: { table: "reading", partition: "{started_at:YYYY/MM}" }, refused: true },
+        { op: "alter_table", args: { table: "reading", partition: "{started_at:YYYY/MM/DD}" }, refused: true },
         { op: "unpack_rows", args: { table: "reading" }, show: (v) => ({ ok: v.ok, packs: v.packs }) },
-        { op: "alter_table", args: { table: "reading", partition: "{started_at:YYYY/MM}" }, show: (v) => ({ ok: v.ok, planned_moves: v.planned_moves }) },
+        { op: "alter_table", args: { table: "reading", partition: "{started_at:YYYY/MM/DD}" }, show: (v) => ({ ok: v.ok, planned_moves: v.planned_moves }) },
       ],
     },
   ],

@@ -636,7 +636,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "create_table",
-    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `acyclic: true` (links to rows of its own table that never loop back, such as tasks blocked by tasks; with `inverse`, the rule holds on both sides), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n  `pack` (a template of a date column, such as `\"{occurred_at:YYYY-MM}\"`: once a period is over, one note\n  holds its rows, `##` section by section; select_rows still gives one row each) and `pack_after_days` (default 7):\n  see pack_rows.\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `instructions`: how to fill a row, for agents (Markdown); describe_table returns them.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nGenerated aggregates of a json column holding a list of objects (integer or number columns; avg: number): `count(feeds)`, `count(feeds.min)` (the items with a min), `sum(feeds.min)`, `avg(…)`, `min(…)`, `max(…)`, with an optional filter on one field: `count(feeds, side = \"left\")`, `sum(feeds.min, min > 0)` (=, !=, <, <=, >, >=; \"text\", a number, true or false). Recomputed on every write; no list: count and sum 0, avg/min/max empty; a field that is not a number: empty.\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `acyclic: true` (links to rows of its own table that never loop back, such as tasks blocked by tasks; with `inverse`, the rule holds on both sides), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n  `pack` (a template of a date column, such as `\"{occurred_at:YYYY-MM}\"`: once a period is over, one note\n  holds its rows, `##` section by section; select_rows still gives one row each) and `pack_after_days` (default 7):\n  see pack_rows. A partition wider than the packs' periods (a year folder, packs per month) is\n  allowed but answered with `warnings` (`pack_partition`): give the rows a partition as fine as their packs.\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `instructions`: how to fill a row, for agents (Markdown); describe_table returns them.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nGenerated aggregates of a json column holding a list of objects (integer or number columns; avg: number): `count(feeds)`, `count(feeds.min)` (the items with a min), `sum(feeds.min)`, `avg(…)`, `min(…)`, `max(…)`, with an optional filter on one field: `count(feeds, side = \"left\")`, `sum(feeds.min, min > 0)` (=, !=, <, <=, >, >=; \"text\", a number, true or false). Recomputed on every write; no list: count and sum 0, avg/min/max empty; a field that is not a number: empty.\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1274,6 +1274,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -1731,6 +1770,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -2179,6 +2257,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -2629,6 +2746,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -3076,6 +3232,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -3528,6 +3723,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -3552,7 +3786,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "alter_table",
-    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields, pack_after_days) rewrites the table entry alone: no row is moved or rewritten.\n`pack` sets the period of the table's packs of rows (`\"{occurred_at:YYYY-MM}\"`; \"\" removes it), `pack_after_days` the days\nafter a period's end before its rows go into a pack (\"default\": 7). While rows are in packs, changing `pack`,\n`partition`, `filename` or the table's name is refused: unpack_rows first. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table rewrites what names it in other\ndefinitions: the `ref` and `vocabulary` of the columns of other tables and bases (lists of links\nincluded) and the tables of views (`table`, `union[].table`, `join.table`); `schema_references`\nlists them. CHECKs and `ref_where` / `ref_by` that read it through a link follow the new `ref`. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields, pack_after_days) rewrites the table entry alone: no row is moved or rewritten.\n`pack` sets the period of the table's packs of rows (`\"{occurred_at:YYYY-MM}\"`; \"\" removes it), `pack_after_days` the days\nafter a period's end before its rows go into a pack (\"default\": 7). While rows are in packs, changing `pack`,\n`partition`, `filename` or the table's name is refused: unpack_rows first.\nA partition wider than the packs' periods is answered with `warnings` (`pack_partition`), with how to fix it. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table rewrites what names it in other\ndefinitions: the `ref` and `vocabulary` of the columns of other tables and bases (lists of links\nincluded) and the tables of views (`table`, `union[].table`, `join.table`); `schema_references`\nlists them. CHECKs and `ref_where` / `ref_by` that read it through a link follow the new `ref`. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -4208,6 +4442,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -4712,6 +4985,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -5161,6 +5473,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -6271,6 +6622,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -6725,6 +7115,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -7207,6 +7636,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -7693,6 +8161,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -8254,6 +8761,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -8733,6 +9279,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -9229,6 +9814,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -9737,6 +10361,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -9990,7 +10653,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "check_table",
-    "description": "Validate every row against the table (required, types, ranges, enums, links, unknown\ncolumns, CHECK constraints, those that follow links included, filtered link targets (ref_where / ref_by), stale generated/identity values, missing inverse links, cycles of hierarchy and acyclic columns, front matter that cannot be read: code `unreadable`, with no column, for a note whose `table` line names the table but whose YAML is broken, which every other read leaves out). A CHECK violation has code `check` and the CHECK's name as `constraint` (every other code names its `column`), as in the `violations` of list_changes. Use it to find rows edited by hand that break the schema. Without `table`, every table is checked: each row then names its `table`, `tables_checked` counts the tables checked, and a table that cannot be checked is listed in `errors` ({table, error}) while the others are. The rows with violations are paged: `limit` (default 500, at most 5000) from `offset`; `total` counts them all. (Hand edits are also checked as they happen: see `violations` in list_changes.)",
+    "description": "Validate every row against the table (required, types, ranges, enums, links, unknown\ncolumns, CHECK constraints, those that follow links included, filtered link targets (ref_where / ref_by), stale generated/identity values, missing inverse links, cycles of hierarchy and acyclic columns, front matter that cannot be read: code `unreadable`, with no column, for a note whose `table` line names the table but whose YAML is broken, which every other read leaves out). A CHECK violation has code `check` and the CHECK's name as `constraint` (every other code names its `column`), as in the `violations` of list_changes. Use it to find rows edited by hand that break the schema. Without `table`, every table is checked: each row then names its `table`, `tables_checked` counts the tables checked, and a table that cannot be checked is listed in `errors` ({table, error}) while the others are. The rows with violations are paged: `limit` (default 500, at most 5000) from `offset`; `total` counts them all. (Hand edits are also checked as they happen: see `violations` in list_changes.) `warnings` lists what is unwise in a table's layout, though allowed (`pack_partition`: a partition wider than the periods of its packs), each with a hint and a docs link.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -10151,6 +10814,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "Rows breaking the table's rules (this page of them)."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -10863,6 +11565,45 @@ export const OPERATIONS: OperationDef[] = [
                       ]
                     },
                     "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+                  },
+                  "warnings": {
+                    "type": "array",
+                    "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "pack_partition"
+                          ],
+                          "description": "Kind of warning."
+                        },
+                        "table": {
+                          "type": "string",
+                          "description": "The table, catalog.schema.table."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "What is unwise, and why."
+                        },
+                        "hint": {
+                          "type": "string",
+                          "description": "How to fix it."
+                        },
+                        "docs": {
+                          "type": "string",
+                          "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "table",
+                        "message",
+                        "hint",
+                        "docs"
+                      ]
+                    }
                   }
                 },
                 "required": [
@@ -11354,6 +12095,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -12620,6 +13400,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -14105,6 +14924,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -15169,6 +16027,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -15615,6 +16512,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -16128,6 +17064,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -16570,6 +17545,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -17043,6 +18057,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -17503,6 +18556,45 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -18009,6 +19101,45 @@ export const OPERATIONS: OperationDef[] = [
         "open_rows": {
           "type": "integer",
           "description": "pack_rows: rows whose period is not over yet (or ended less than pack_after_days ago): not listed."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [
@@ -18528,6 +19659,45 @@ export const OPERATIONS: OperationDef[] = [
         "open_rows": {
           "type": "integer",
           "description": "pack_rows: rows whose period is not over yet (or ended less than pack_after_days ago): not listed."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "pack_partition"
+                ],
+                "description": "Kind of warning."
+              },
+              "table": {
+                "type": "string",
+                "description": "The table, catalog.schema.table."
+              },
+              "message": {
+                "type": "string",
+                "description": "What is unwise, and why."
+              },
+              "hint": {
+                "type": "string",
+                "description": "How to fix it."
+              },
+              "docs": {
+                "type": "string",
+                "description": "Where to read more (a Markdown page of the docs, with its anchor)."
+              }
+            },
+            "required": [
+              "code",
+              "table",
+              "message",
+              "hint",
+              "docs"
+            ]
+          }
         }
       },
       "required": [

@@ -6,6 +6,7 @@ import {
   namedAsPack,
   packedTablesIn,
   packFilePath,
+  packPartitionWarning,
   packKeyOf,
   PackOptionError,
   periodClosed,
@@ -123,5 +124,28 @@ describe("the rest of the layout", () => {
     expect(databaseRootOfPack("a/b.md", "main.public.feed")).toBeNull();
     expect(databaseRootOfPack("db/x/y/z/feed 2026-10.md", "main.public.feed")).toBeNull();
     expect(databaseRootOfPack("db/main/public/feed/x.md", "feed")).toBeNull();
+  });
+});
+
+describe("packPartitionWarning", () => {
+  it("warns when the rows' folders are wider than the packs' periods, by the pack's column", () => {
+    const w = packPartitionWarning("main.public.feed", "{at:YYYY}", "{at:YYYY-MM}")!;
+    expect(w).toMatchObject({ code: "pack_partition", table: "main.public.feed" });
+    expect(w.message).toMatch(/wider than the periods of its packs/);
+    expect(w.hint).toContain('"partition": "{at:YYYY/MM}"');
+    expect(w.docs).toMatch(/packs\.md#choose-the-partition-with-git-in-mind$/);
+    expect(packPartitionWarning("t", undefined, "{at:YYYY-MM}")!.message).toContain("partition none");
+    expect(packPartitionWarning("t", "{other:YYYY/MM/DD}", "{at:YYYY-MM}")).not.toBeNull();
+    expect(packPartitionWarning("t", "{at:YYYY/MM}", "{at:YYYY-MM-DD}")!.hint).toContain("{at:YYYY/MM/DD}");
+    expect(packPartitionWarning("t", "{kind}", "{at:YYYY}")!.hint).toContain('"{at:YYYY}"');
+  });
+
+  it("no warning with a partition as fine as the pack or finer, or without a pack", () => {
+    expect(packPartitionWarning("t", "{at:YYYY/MM}", "{at:YYYY-MM}")).toBeNull();
+    expect(packPartitionWarning("t", "{kind}/{at:YYYY/MM/DD}", "{at:YYYY-MM}")).toBeNull();
+    expect(packPartitionWarning("t", "{at:YYYY}", "{at:YYYY}")).toBeNull();
+    expect(packPartitionWarning("t", "{at:[x]}", undefined)).toBeNull();
+    expect(packPartitionWarning("t", "{at:YYYY}", "no template")).toBeNull();
+    expect(packPartitionWarning("t", "{at:[week]}", "{at:YYYY}")).not.toBeNull();
   });
 });

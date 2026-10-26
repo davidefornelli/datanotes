@@ -9,7 +9,7 @@ import { catalogLayout, parseTableOptions } from "./table-loader";
 import { formatDateTokensOrNull } from "./datetime";
 import { renderPathTemplate, sanitizeFileName } from "./path-templates";
 import { isEmptyValue } from "./validate";
-import { guide, didYouMean } from "./hints";
+import { docsUrl, guide, didYouMean } from "./hints";
 import { GuidedError } from "./hints";
 import type { ColumnSpec } from "./types-table";
 
@@ -83,6 +83,52 @@ export function readPackTemplate(template: unknown, columns: readonly Pick<Colum
     throw new PackOptionError(`"pack": the template cannot hold a folder ("/")`, guide(`A pack's key names one file of the table's folder: pass ${example(col.name)}.`, "packOption"));
   }
   return { template: t, column: col.name, format, period: bare.includes("DD") ? "day" : bare.includes("MM") ? "month" : "year" };
+}
+
+/** How fine a period is: a day folder or pack is finer than a month's, a month's than a year's. */
+const FINENESS: Record<PackPeriod | "none", number> = { none: 0, year: 1, month: 2, day: 3 };
+
+/** The finest date token of a format (`YYYY/MM` → month); none without YYYY. */
+function periodOfFormat(format: string): PackPeriod | "none" {
+  const bare = format.replace(/\[[^\]]*\]/g, "");
+  return bare.includes("DD") ? "day" : bare.includes("MM") ? "month" : bare.includes("YYYY") ? "year" : "none";
+}
+
+/** A warning of a table's layout: what it is, how to fix it, where to read more. */
+export interface LayoutWarning {
+  code: "pack_partition";
+  table: string;
+  message: string;
+  hint: string;
+  docs: string;
+}
+
+/**
+ * The warning of a table whose rows' folders (its `partition`) are wider than the periods of its
+ * packs: the folder of the open rows grows all period long and `pack_rows` empties it, so git
+ * keeps a new version of that folder at every write, and its repository grows several times
+ * faster. Null when the partition splits the rows by the pack's column at least as finely as the
+ * pack, or the table has no pack.
+ */
+export function packPartitionWarning(table: string, partition: string | undefined, pack: string | undefined): LayoutWarning | null {
+  if (!pack) return null;
+  const t = looseTemplate(pack);
+  if (!t) return null;
+  let finest: PackPeriod | "none" = "none";
+  for (const [, col, fmt] of (partition ?? "").matchAll(PLACEHOLDER_RE)) {
+    if (col !== t.column || fmt === undefined) continue;
+    const p = periodOfFormat(fmt);
+    if (FINENESS[p] > FINENESS[finest]) finest = p;
+  }
+  if (FINENESS[finest] >= FINENESS[t.period]) return null;
+  const suggested = `{${t.column}:${t.period === "day" ? "YYYY/MM/DD" : t.period === "month" ? "YYYY/MM" : "YYYY"}}`;
+  return {
+    code: "pack_partition",
+    table,
+    message: `${table}: its rows' folders (partition ${partition ? JSON.stringify(partition) : "none"}) are wider than the periods of its packs (${JSON.stringify(pack)}): pack_rows empties a folder that keeps growing, and a git repository of the vault grows several times faster`,
+    hint: `Give the table a partition as fine as its packs, such as alter_table {"table": "${table}", "partition": "${suggested}"}, while no row is in a pack (unpack_rows first).`,
+    docs: docsUrl("packPartition"),
+  };
 }
 
 /** Read `pack_after_days`: a whole number of days, 0 or more. */

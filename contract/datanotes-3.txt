@@ -83,6 +83,13 @@ answer add_column.violations[].violations[].hint: string
 answer add_column.violations[].violations[].index: integer
 answer add_column.violations[].violations[].message: string
 answer add_column.violations[].violations[].value: any
+answer add_column.warnings: object[]
+answer add_column.warnings[].code = "pack_partition"
+answer add_column.warnings[].code: string
+answer add_column.warnings[].docs: string
+answer add_column.warnings[].hint: string
+answer add_column.warnings[].message: string
+answer add_column.warnings[].table: string
 answer add_constraint.ambiguous_mentions: object[]
 answer add_constraint.ambiguous_mentions[].candidates: string[]
 answer add_constraint.ambiguous_mentions[].context: string
@@ -165,6 +172,13 @@ answer add_constraint.violations[].violations[].hint: string
 answer add_constraint.violations[].violations[].index: integer
 answer add_constraint.violations[].violations[].message: string
 answer add_constraint.violations[].violations[].value: any
+answer add_constraint.warnings: object[]
+answer add_constraint.warnings[].code = "pack_partition"
+answer add_constraint.warnings[].code: string
+answer add_constraint.warnings[].docs: string
+answer add_constraint.warnings[].hint: string
+answer add_constraint.warnings[].message: string
+answer add_constraint.warnings[].table: string
 answer adopt_rows.ambiguous_mentions: object[]
 answer adopt_rows.ambiguous_mentions[].candidates: string[]
 answer adopt_rows.ambiguous_mentions[].context: string
@@ -247,6 +261,13 @@ answer adopt_rows.violations[].violations[].hint: string
 answer adopt_rows.violations[].violations[].index: integer
 answer adopt_rows.violations[].violations[].message: string
 answer adopt_rows.violations[].violations[].value: any
+answer adopt_rows.warnings: object[]
+answer adopt_rows.warnings[].code = "pack_partition"
+answer adopt_rows.warnings[].code: string
+answer adopt_rows.warnings[].docs: string
+answer adopt_rows.warnings[].hint: string
+answer adopt_rows.warnings[].message: string
+answer adopt_rows.warnings[].table: string
 answer align_relations.ambiguous_mentions: object[]
 answer align_relations.ambiguous_mentions[].candidates: string[]
 answer align_relations.ambiguous_mentions[].context: string
@@ -329,6 +350,13 @@ answer align_relations.violations[].violations[].hint: string
 answer align_relations.violations[].violations[].index: integer
 answer align_relations.violations[].violations[].message: string
 answer align_relations.violations[].violations[].value: any
+answer align_relations.warnings: object[]
+answer align_relations.warnings[].code = "pack_partition"
+answer align_relations.warnings[].code: string
+answer align_relations.warnings[].docs: string
+answer align_relations.warnings[].hint: string
+answer align_relations.warnings[].message: string
+answer align_relations.warnings[].table: string
 answer alter_column.ambiguous_mentions: object[]
 answer alter_column.ambiguous_mentions[].candidates: string[]
 answer alter_column.ambiguous_mentions[].context: string
@@ -411,6 +439,13 @@ answer alter_column.violations[].violations[].hint: string
 answer alter_column.violations[].violations[].index: integer
 answer alter_column.violations[].violations[].message: string
 answer alter_column.violations[].violations[].value: any
+answer alter_column.warnings: object[]
+answer alter_column.warnings[].code = "pack_partition"
+answer alter_column.warnings[].code: string
+answer alter_column.warnings[].docs: string
+answer alter_column.warnings[].hint: string
+answer alter_column.warnings[].message: string
+answer alter_column.warnings[].table: string
 answer alter_table.ambiguous_mentions: object[]
 answer alter_table.ambiguous_mentions[].candidates: string[]
 answer alter_table.ambiguous_mentions[].context: string
@@ -493,6 +528,13 @@ answer alter_table.violations[].violations[].hint: string
 answer alter_table.violations[].violations[].index: integer
 answer alter_table.violations[].violations[].message: string
 answer alter_table.violations[].violations[].value: any
+answer alter_table.warnings: object[]
+answer alter_table.warnings[].code = "pack_partition"
+answer alter_table.warnings[].code: string
+answer alter_table.warnings[].docs: string
+answer alter_table.warnings[].hint: string
+answer alter_table.warnings[].message: string
+answer alter_table.warnings[].table: string
 answer batch.dry_run: boolean
 answer batch.failed_at: integer
 answer batch.migration_id: string
@@ -588,6 +630,13 @@ answer batch.steps[].result.violations[].violations[].hint: string
 answer batch.steps[].result.violations[].violations[].index: integer
 answer batch.steps[].result.violations[].violations[].message: string
 answer batch.steps[].result.violations[].violations[].value: any
+answer batch.steps[].result.warnings: object[]
+answer batch.steps[].result.warnings[].code = "pack_partition"
+answer batch.steps[].result.warnings[].code: string
+answer batch.steps[].result.warnings[].docs: string
+answer batch.steps[].result.warnings[].hint: string
+answer batch.steps[].result.warnings[].message: string
+answer batch.steps[].result.warnings[].table: string
 answer batch.steps[].result: object
 answer check_table.errors: object[]
 answer check_table.errors[].error: string
@@ -624,6 +673,13 @@ answer check_table.violations[].violations[].hint: string
 answer check_table.violations[].violations[].index: integer
 answer check_table.violations[].violations[].message: string
 answer check_table.violations[].violations[].value: any
+answer check_table.warnings: object[]
+answer check_table.warnings[].code = "pack_partition"
+answer check_table.warnings[].code: string
+answer check_table.warnings[].docs: string
+answer check_table.warnings[].hint: string
+answer check_table.warnings[].message: string
+answer check_table.warnings[].table: string
 answer clone_table.ambiguous_mentions: object[]
 answer clone_table.ambiguous_mentions[].candidates: string[]
 answer clone_table.ambiguous_mentions[].context: string
@@ -706,6 +762,13 @@ answer clone_table.violations[].violations[].hint: string
 answer clone_table.violations[].violations[].index: integer
 answer clone_table.violations[].violations[].message: string
 answer clone_table.violations[].violations[].value: any
+answer clone_table.warnings: object[]
+answer clone_table.warnings[].code = "pack_partition"
+answer clone_table.warnings[].code: string
+answer clone_table.warnings[].docs: string
+answer clone_table.warnings[].hint: string
+answer clone_table.warnings[].message: string
+answer clone_table.warnings[].table: string
 answer comment_on.ambiguous_mentions: object[]
 answer comment_on.ambiguous_mentions[].candidates: string[]
 answer comment_on.ambiguous_mentions[].context: string
@@ -788,6 +851,13 @@ answer comment_on.violations[].violations[].hint: string
 answer comment_on.violations[].violations[].index: integer
 answer comment_on.violations[].violations[].message: string
 answer comment_on.violations[].violations[].value: any
+answer comment_on.warnings: object[]
+answer comment_on.warnings[].code = "pack_partition"
+answer comment_on.warnings[].code: string
+answer comment_on.warnings[].docs: string
+answer comment_on.warnings[].hint: string
+answer comment_on.warnings[].message: string
+answer comment_on.warnings[].table: string
 answer configure_database.bases: object[]
 answer configure_database.bases[].bases: string[]
 answer configure_database.bases[].columns: string[]
@@ -912,6 +982,13 @@ answer create_table.violations[].violations[].hint: string
 answer create_table.violations[].violations[].index: integer
 answer create_table.violations[].violations[].message: string
 answer create_table.violations[].violations[].value: any
+answer create_table.warnings: object[]
+answer create_table.warnings[].code = "pack_partition"
+answer create_table.warnings[].code: string
+answer create_table.warnings[].docs: string
+answer create_table.warnings[].hint: string
+answer create_table.warnings[].message: string
+answer create_table.warnings[].table: string
 answer create_view.ambiguous_mentions: object[]
 answer create_view.ambiguous_mentions[].candidates: string[]
 answer create_view.ambiguous_mentions[].context: string
@@ -994,6 +1071,13 @@ answer create_view.violations[].violations[].hint: string
 answer create_view.violations[].violations[].index: integer
 answer create_view.violations[].violations[].message: string
 answer create_view.violations[].violations[].value: any
+answer create_view.warnings: object[]
+answer create_view.warnings[].code = "pack_partition"
+answer create_view.warnings[].code: string
+answer create_view.warnings[].docs: string
+answer create_view.warnings[].hint: string
+answer create_view.warnings[].message: string
+answer create_view.warnings[].table: string
 answer create_webhook.columns: string[]
 answer create_webhook.created_at: string
 answer create_webhook.cursor: integer
@@ -1101,6 +1185,13 @@ answer define_base.violations[].violations[].hint: string
 answer define_base.violations[].violations[].index: integer
 answer define_base.violations[].violations[].message: string
 answer define_base.violations[].violations[].value: any
+answer define_base.warnings: object[]
+answer define_base.warnings[].code = "pack_partition"
+answer define_base.warnings[].code: string
+answer define_base.warnings[].docs: string
+answer define_base.warnings[].hint: string
+answer define_base.warnings[].message: string
+answer define_base.warnings[].table: string
 answer delete_rows.ambiguous_mentions: object[]
 answer delete_rows.ambiguous_mentions[].candidates: string[]
 answer delete_rows.ambiguous_mentions[].context: string
@@ -1183,6 +1274,13 @@ answer delete_rows.violations[].violations[].hint: string
 answer delete_rows.violations[].violations[].index: integer
 answer delete_rows.violations[].violations[].message: string
 answer delete_rows.violations[].violations[].value: any
+answer delete_rows.warnings: object[]
+answer delete_rows.warnings[].code = "pack_partition"
+answer delete_rows.warnings[].code: string
+answer delete_rows.warnings[].docs: string
+answer delete_rows.warnings[].hint: string
+answer delete_rows.warnings[].message: string
+answer delete_rows.warnings[].table: string
 answer delete_webhook.deleted: boolean
 answer describe_database.bases: object[]
 answer describe_database.bases[].bases: string[]
@@ -1392,6 +1490,13 @@ answer drop_column.violations[].violations[].hint: string
 answer drop_column.violations[].violations[].index: integer
 answer drop_column.violations[].violations[].message: string
 answer drop_column.violations[].violations[].value: any
+answer drop_column.warnings: object[]
+answer drop_column.warnings[].code = "pack_partition"
+answer drop_column.warnings[].code: string
+answer drop_column.warnings[].docs: string
+answer drop_column.warnings[].hint: string
+answer drop_column.warnings[].message: string
+answer drop_column.warnings[].table: string
 answer drop_constraint.ambiguous_mentions: object[]
 answer drop_constraint.ambiguous_mentions[].candidates: string[]
 answer drop_constraint.ambiguous_mentions[].context: string
@@ -1474,6 +1579,13 @@ answer drop_constraint.violations[].violations[].hint: string
 answer drop_constraint.violations[].violations[].index: integer
 answer drop_constraint.violations[].violations[].message: string
 answer drop_constraint.violations[].violations[].value: any
+answer drop_constraint.warnings: object[]
+answer drop_constraint.warnings[].code = "pack_partition"
+answer drop_constraint.warnings[].code: string
+answer drop_constraint.warnings[].docs: string
+answer drop_constraint.warnings[].hint: string
+answer drop_constraint.warnings[].message: string
+answer drop_constraint.warnings[].table: string
 answer drop_table.ambiguous_mentions: object[]
 answer drop_table.ambiguous_mentions[].candidates: string[]
 answer drop_table.ambiguous_mentions[].context: string
@@ -1556,6 +1668,13 @@ answer drop_table.violations[].violations[].hint: string
 answer drop_table.violations[].violations[].index: integer
 answer drop_table.violations[].violations[].message: string
 answer drop_table.violations[].violations[].value: any
+answer drop_table.warnings: object[]
+answer drop_table.warnings[].code = "pack_partition"
+answer drop_table.warnings[].code: string
+answer drop_table.warnings[].docs: string
+answer drop_table.warnings[].hint: string
+answer drop_table.warnings[].message: string
+answer drop_table.warnings[].table: string
 answer drop_view.ambiguous_mentions: object[]
 answer drop_view.ambiguous_mentions[].candidates: string[]
 answer drop_view.ambiguous_mentions[].context: string
@@ -1638,6 +1757,13 @@ answer drop_view.violations[].violations[].hint: string
 answer drop_view.violations[].violations[].index: integer
 answer drop_view.violations[].violations[].message: string
 answer drop_view.violations[].violations[].value: any
+answer drop_view.warnings: object[]
+answer drop_view.warnings[].code = "pack_partition"
+answer drop_view.warnings[].code: string
+answer drop_view.warnings[].docs: string
+answer drop_view.warnings[].hint: string
+answer drop_view.warnings[].message: string
+answer drop_view.warnings[].table: string
 answer graph_neighbors.nodes: object[]
 answer graph_neighbors.nodes[].counts: object
 answer graph_neighbors.nodes[].edges: object[]
@@ -1789,6 +1915,13 @@ answer insert_row.violations[].violations[].hint: string
 answer insert_row.violations[].violations[].index: integer
 answer insert_row.violations[].violations[].message: string
 answer insert_row.violations[].violations[].value: any
+answer insert_row.warnings: object[]
+answer insert_row.warnings[].code = "pack_partition"
+answer insert_row.warnings[].code: string
+answer insert_row.warnings[].docs: string
+answer insert_row.warnings[].hint: string
+answer insert_row.warnings[].message: string
+answer insert_row.warnings[].table: string
 answer list_changes.events: object[]
 answer list_changes.events[].actor.auth: string
 answer list_changes.events[].actor.harness: string
@@ -2011,6 +2144,13 @@ answer merge_rows.violations[].violations[].hint: string
 answer merge_rows.violations[].violations[].index: integer
 answer merge_rows.violations[].violations[].message: string
 answer merge_rows.violations[].violations[].value: any
+answer merge_rows.warnings: object[]
+answer merge_rows.warnings[].code = "pack_partition"
+answer merge_rows.warnings[].code: string
+answer merge_rows.warnings[].docs: string
+answer merge_rows.warnings[].hint: string
+answer merge_rows.warnings[].message: string
+answer merge_rows.warnings[].table: string
 answer move_rows.ambiguous_mentions: object[]
 answer move_rows.ambiguous_mentions[].candidates: string[]
 answer move_rows.ambiguous_mentions[].context: string
@@ -2093,6 +2233,13 @@ answer move_rows.violations[].violations[].hint: string
 answer move_rows.violations[].violations[].index: integer
 answer move_rows.violations[].violations[].message: string
 answer move_rows.violations[].violations[].value: any
+answer move_rows.warnings: object[]
+answer move_rows.warnings[].code = "pack_partition"
+answer move_rows.warnings[].code: string
+answer move_rows.warnings[].docs: string
+answer move_rows.warnings[].hint: string
+answer move_rows.warnings[].message: string
+answer move_rows.warnings[].table: string
 answer pack_rows.ambiguous_mentions: object[]
 answer pack_rows.ambiguous_mentions[].candidates: string[]
 answer pack_rows.ambiguous_mentions[].context: string
@@ -2183,6 +2330,13 @@ answer pack_rows.violations[].violations[].hint: string
 answer pack_rows.violations[].violations[].index: integer
 answer pack_rows.violations[].violations[].message: string
 answer pack_rows.violations[].violations[].value: any
+answer pack_rows.warnings: object[]
+answer pack_rows.warnings[].code = "pack_partition"
+answer pack_rows.warnings[].code: string
+answer pack_rows.warnings[].docs: string
+answer pack_rows.warnings[].hint: string
+answer pack_rows.warnings[].message: string
+answer pack_rows.warnings[].table: string
 answer read_note.content: string
 answer read_note.created_at: null
 answer read_note.created_at: string
@@ -2275,6 +2429,13 @@ answer recompute_columns.violations[].violations[].hint: string
 answer recompute_columns.violations[].violations[].index: integer
 answer recompute_columns.violations[].violations[].message: string
 answer recompute_columns.violations[].violations[].value: any
+answer recompute_columns.warnings: object[]
+answer recompute_columns.warnings[].code = "pack_partition"
+answer recompute_columns.warnings[].code: string
+answer recompute_columns.warnings[].docs: string
+answer recompute_columns.warnings[].hint: string
+answer recompute_columns.warnings[].message: string
+answer recompute_columns.warnings[].table: string
 answer rename_column.ambiguous_mentions: object[]
 answer rename_column.ambiguous_mentions[].candidates: string[]
 answer rename_column.ambiguous_mentions[].context: string
@@ -2357,6 +2518,13 @@ answer rename_column.violations[].violations[].hint: string
 answer rename_column.violations[].violations[].index: integer
 answer rename_column.violations[].violations[].message: string
 answer rename_column.violations[].violations[].value: any
+answer rename_column.warnings: object[]
+answer rename_column.warnings[].code = "pack_partition"
+answer rename_column.warnings[].code: string
+answer rename_column.warnings[].docs: string
+answer rename_column.warnings[].hint: string
+answer rename_column.warnings[].message: string
+answer rename_column.warnings[].table: string
 answer rename_value.ambiguous_mentions: object[]
 answer rename_value.ambiguous_mentions[].candidates: string[]
 answer rename_value.ambiguous_mentions[].context: string
@@ -2439,6 +2607,13 @@ answer rename_value.violations[].violations[].hint: string
 answer rename_value.violations[].violations[].index: integer
 answer rename_value.violations[].violations[].message: string
 answer rename_value.violations[].violations[].value: any
+answer rename_value.warnings: object[]
+answer rename_value.warnings[].code = "pack_partition"
+answer rename_value.warnings[].code: string
+answer rename_value.warnings[].docs: string
+answer rename_value.warnings[].hint: string
+answer rename_value.warnings[].message: string
+answer rename_value.warnings[].table: string
 answer restore_database.ambiguous_mentions: object[]
 answer restore_database.ambiguous_mentions[].candidates: string[]
 answer restore_database.ambiguous_mentions[].context: string
@@ -2615,6 +2790,13 @@ answer restore_table.violations[].violations[].hint: string
 answer restore_table.violations[].violations[].index: integer
 answer restore_table.violations[].violations[].message: string
 answer restore_table.violations[].violations[].value: any
+answer restore_table.warnings: object[]
+answer restore_table.warnings[].code = "pack_partition"
+answer restore_table.warnings[].code: string
+answer restore_table.warnings[].docs: string
+answer restore_table.warnings[].hint: string
+answer restore_table.warnings[].message: string
+answer restore_table.warnings[].table: string
 answer search.meaning = "failed"
 answer search.meaning = "off"
 answer search.meaning = "on"
@@ -2735,6 +2917,13 @@ answer set_table_bases.violations[].violations[].hint: string
 answer set_table_bases.violations[].violations[].index: integer
 answer set_table_bases.violations[].violations[].message: string
 answer set_table_bases.violations[].violations[].value: any
+answer set_table_bases.warnings: object[]
+answer set_table_bases.warnings[].code = "pack_partition"
+answer set_table_bases.warnings[].code: string
+answer set_table_bases.warnings[].docs: string
+answer set_table_bases.warnings[].hint: string
+answer set_table_bases.warnings[].message: string
+answer set_table_bases.warnings[].table: string
 answer sync_semantic_index.embedded: integer
 answer sync_semantic_index.failed: object[]
 answer sync_semantic_index.failed[].error: string
@@ -2853,6 +3042,13 @@ answer unpack_rows.violations[].violations[].hint: string
 answer unpack_rows.violations[].violations[].index: integer
 answer unpack_rows.violations[].violations[].message: string
 answer unpack_rows.violations[].violations[].value: any
+answer unpack_rows.warnings: object[]
+answer unpack_rows.warnings[].code = "pack_partition"
+answer unpack_rows.warnings[].code: string
+answer unpack_rows.warnings[].docs: string
+answer unpack_rows.warnings[].hint: string
+answer unpack_rows.warnings[].message: string
+answer unpack_rows.warnings[].table: string
 answer update_row.ambiguous_mentions: object[]
 answer update_row.ambiguous_mentions[].candidates: string[]
 answer update_row.ambiguous_mentions[].context: string
@@ -2935,6 +3131,13 @@ answer update_row.violations[].violations[].hint: string
 answer update_row.violations[].violations[].index: integer
 answer update_row.violations[].violations[].message: string
 answer update_row.violations[].violations[].value: any
+answer update_row.warnings: object[]
+answer update_row.warnings[].code = "pack_partition"
+answer update_row.warnings[].code: string
+answer update_row.warnings[].docs: string
+answer update_row.warnings[].hint: string
+answer update_row.warnings[].message: string
+answer update_row.warnings[].table: string
 answer update_rows.ambiguous_mentions: object[]
 answer update_rows.ambiguous_mentions[].candidates: string[]
 answer update_rows.ambiguous_mentions[].context: string
@@ -3017,6 +3220,13 @@ answer update_rows.violations[].violations[].hint: string
 answer update_rows.violations[].violations[].index: integer
 answer update_rows.violations[].violations[].message: string
 answer update_rows.violations[].violations[].value: any
+answer update_rows.warnings: object[]
+answer update_rows.warnings[].code = "pack_partition"
+answer update_rows.warnings[].code: string
+answer update_rows.warnings[].docs: string
+answer update_rows.warnings[].hint: string
+answer update_rows.warnings[].message: string
+answer update_rows.warnings[].table: string
 answer vacuum_table.deleted: string[]
 answer vacuum_table.dry_run: boolean
 answer vacuum_table.retained_from: integer
