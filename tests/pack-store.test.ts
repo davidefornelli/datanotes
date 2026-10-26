@@ -255,3 +255,19 @@ describe("notes named like packs", () => {
     expect(renames).toHaveLength(2);
   });
 });
+
+describe("a note turned into a pack by hand", () => {
+  it("its rows take its place once the host reads it again", async () => {
+    const v = await feeds();
+    const note = `${FOLDER}/feed 2026-12.md`;
+    v.write(note, "---\ntitle: soon a pack\n---\n");
+    vaultOf(v).syncPaths([note]);
+    expect(vaultOf(v).getAbstractFileByPath(note)).not.toBeNull();
+    fs.writeFileSync(v.abs(note), writePack({ table: TABLE, key: "2026-12" }, [{ heading: "2026-12-01T1000", ordered: [["table", TABLE], ["id", "01a0f000-0000-7000-8000-0000000000f1"], ["started_at", "2026-12-01T10:00:00+02:00"]], body: "" }]));
+    fs.utimesSync(v.abs(note), new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+    vaultOf(v).syncPaths([note]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(vaultOf(v).getAbstractFileByPath(note)).toBeNull();
+    expect(v.app.packs!.packsOf(TABLE).map((p) => p.rows)).toEqual([[`${FOLDER}/2026/12/2026-12-01T1000.md`]]);
+  });
+});

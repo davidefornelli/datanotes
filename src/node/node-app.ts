@@ -50,6 +50,7 @@ import { readVaultConfig, type VaultConfig } from "./vault-config";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./private-files";
 import { NodePackStore } from "./pack-store";
 import { namedAsPack } from "../core/pack-layout";
+import { isPackFrontmatter } from "../core/pack-format";
 
 /** A file's stat on the Node host: FileStats and its change time. */
 export interface NodeFileStats extends FileStats {
@@ -677,7 +678,7 @@ export class NodeVault implements Vault {
       this.emit("modify", f);
       return "modified";
     }
-    if (this.packs.isPack(rel) || (seen !== "unlisted" && this.packs.handles(rel))) {
+    if (this.packs.isPack(rel) || (seen !== "unlisted" && this.newPack(rel))) {
       const r = this.packs.sync(rel);
       // a file that stopped being a pack is a note of the vault again (below)
       if (r !== "deleted" || !this.present(rel)) return r;
@@ -765,7 +766,21 @@ export class NodeVault implements Vault {
    * matter (read only for a file named `<folder> <key>.md`; a note of that name is no pack).
    */
   private packish(rel: string): boolean {
-    return this.packs.isPack(rel) || (namedAsPack(rel) && this.packs.handles(rel));
+    return this.packs.isPack(rel) || this.newPack(rel);
+  }
+
+  /**
+   * Whether a file the index does not have yet is a pack (named `<folder> <key>.md`, with `pack` in
+   * its front matter). A note the index has is read again by the metadata cache when it changes,
+   * which finds a note turned into a pack ({@link NodeMetadataCache.changed}): no read here.
+   */
+  private newPack(rel: string): boolean {
+    return !this.files.has(rel) && namedAsPack(rel) && this.packs.handles(rel);
+  }
+
+  /** A note of the index turned into a pack (its new text names a table in `pack`): its rows instead of it. */
+  becamePack(rel: string): void {
+    if (namedAsPack(rel) && !this.packs.isPack(rel)) this.packs.sync(rel);
   }
 
   /**
@@ -1093,8 +1108,9 @@ export class NodeVault implements Vault {
       return;
     }
     if (this.folders.has(rel)) {
-      // the rows of packs under it come out first, as the notes the folder holds
-      await this.packs.extractUnder(rel);
+      // the rows of packs under it come out first, as the notes the folder holds (no pause without any:
+      // the watcher's events of the folder's files must not run between the listing and the removal)
+      if (this.packs.holdsRows(rel)) await this.packs.extractUnder(rel);
       const gone = [...this.files.values()].filter((f) => f.path.startsWith(`${rel}/`));
       await fsp.rm(this.abs(rel), { recursive: force === true });
       this.packs.forgetUnder(rel);
@@ -1129,7 +1145,7 @@ export class NodeVault implements Vault {
     const gone = isFolder ? [...this.files.values()].filter((f) => f.path.startsWith(`${file.path}/`)) : [];
     await fsp.mkdir(this.abs(".trash"), { recursive: true });
     // the rows of packs under it come out first, as the notes the folder takes to the trash
-    if (isFolder) await this.packs.extractUnder(file.path);
+    if (isFolder && this.packs.holdsRows(file.path)) await this.packs.extractUnder(file.path);
     await renameRetrying(this.abs(file.path), this.abs(target));
     if (isFolder) {
       this.packs.forgetUnder(file.path);
@@ -1610,6 +1626,11 @@ export class NodeMetadataCache implements MetadataCache {
         return;
       }
       const r = this.read(text);
+      // a note turned into a pack by hand: once this change is announced, its rows take its place
+      if (isPackFrontmatter(r.meta.cache.frontmatter) && namedAsPack(file.path)) {
+        const p = file.path;
+        queueMicrotask(() => this.vault.becamePack(p));
+      }
       this.meta.set(file.path, r.meta);
       this.keeper?.noteRead(file.path, r.record, text);
       this.resolveOne(file.path);
