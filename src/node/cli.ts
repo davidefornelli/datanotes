@@ -7,6 +7,7 @@
  *   datanotes store path | new-id --vault <folder>       where the store is; a new id for a copied database
  *   datanotes extension install | update | rollback | remove | list | check   extensions (src/node/extension-command.ts)
  *   datanotes mcp [--vault <folder> | --url <url> | serve] the MCP server for agents (src/mcp)
+ *   datanotes pack-merge <base> <ours> <theirs> [<path>]  git's merge driver of packs of rows
  *
  * Without a command, options alone mean `serve` (how the service has always been started). The MCP
  * server is its own process, a client of this HTTP API: `datanotes mcp` never starts the engine in
@@ -38,6 +39,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (command === "status") return void (process.exitCode = await status(rest));
   if (command === "stop") return void (process.exitCode = await stop(rest));
   if (command === "store") return void (process.exitCode = await store(rest));
+  if (command === "pack-merge") {
+    // git's merge driver of packs of rows (src/node/pack-merge.ts): git sync registers it
+    const { packMergeMain } = await import("./pack-merge");
+    return void (process.exitCode = packMergeMain(rest));
+  }
   if (command === "extension") {
     // loaded only for this command, like mcp
     const { extensionMain } = await import("./extension-command");

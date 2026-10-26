@@ -44,6 +44,7 @@ import {
 import { addConstraint, cloneTable, commentOn, createView, defineBase, dropConstraint, dropView, setTableBases } from "./catalog-ops";
 import { configureDatabase, describeDatabase } from "./database";
 import { describeHistory, restoreTable, tableChanges, vacuumTable } from "./history";
+import { packRows, unpackRows } from "./pack-rows";
 import { describeDatabaseHistory, restoreDatabase } from "./database-history";
 import { listMigrations } from "./journal";
 import { catalogViews, constraintHints, loadMetastore, tableInstructions, tableTags } from "./metastore";
@@ -152,6 +153,8 @@ export interface DatanotesPublicApi {
   /** Every logged table back to a time, or to just before an operation, as one undoable operation. */
   restoreDatabase(input: In<typeof restoreDatabase>, opts?: RunOptions): Promise<Out<typeof restoreDatabase>>;
   vacuumTable(input: In<typeof vacuumTable>, opts?: RunOptions): Promise<Out<typeof vacuumTable>>;
+  packRows(input: In<typeof packRows>, opts?: RunOptions): Promise<Out<typeof packRows>>;
+  unpackRows(input: In<typeof unpackRows>, opts?: RunOptions): Promise<Out<typeof unpackRows>>;
 
   // --- link graph ---
   graphNeighbors(input: NeighborsInput): ReturnType<typeof graphNeighbors>;
@@ -224,8 +227,8 @@ export interface DescribedTableAnswer {
   aliases?: readonly string[];
   /** Where the rows go: the table folder, the folder pattern of new rows, the archive folder. */
   layout: { folder: string; row_folder: string; archive: string };
-  /** The table options set on it: partition, filename, archive, exclude. */
-  options: { partition?: string; filename?: string; archive?: string; exclude?: readonly string[] };
+  /** The table options set on it: partition, filename, archive, exclude, pack, pack_after_days. */
+  options: { partition?: string; filename?: string; archive?: string; exclude?: readonly string[]; pack?: string; pack_after_days?: number };
   columns: TableColumn[];
   /** Front matter keys every new row gets without a column (`fields`), and `table`. */
   untyped_fields: readonly string[];
@@ -282,6 +285,8 @@ export async function describeTable(app: App, settings: DatanotesSettings, table
       ...(o.filename !== undefined ? { filename: o.filename } : {}),
       ...(o.archive !== undefined ? { archive: o.archive } : {}),
       ...(o.exclude !== undefined ? { exclude: o.exclude } : {}),
+      ...(typeof e.options?.pack === "string" ? { pack: e.options.pack } : {}),
+      ...(typeof e.options?.pack_after_days === "number" ? { pack_after_days: e.options.pack_after_days } : {}),
     },
     columns: [...def.columns],
     untyped_fields: def.untypedFields,
@@ -375,6 +380,8 @@ export function createPublicApi(
     describeDatabaseHistory: (input = {}) => describeDatabaseHistory(app, s(), input),
     restoreDatabase: (input, opts) => restoreDatabase(app, s(), input, opts),
     vacuumTable: (input, opts) => vacuumTable(app, s(), input, opts),
+    packRows: (input, opts) => packRows(app, s(), input, opts),
+    unpackRows: (input, opts) => unpackRows(app, s(), input, opts),
 
     graphNeighbors: (input) => graphNeighbors(app, s(), input),
     graphTraverse: (input) => graphTraverse(app, s(), input),

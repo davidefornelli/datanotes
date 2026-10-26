@@ -356,7 +356,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "describe_table",
-    "description": "Describe a table (`catalog.schema.table` or a shorter unambiguous name): `qualified`, `name`,\n`catalog`, `schema`, `description`, `aliases`, `layout` (`folder`, `row_folder`: the folder pattern\nof new rows, `archive`), `options` (`partition`, `filename`, `archive`, `exclude`), typed `columns`\nwith label/aliases/description and the dense flag, `untyped_fields`, `row_count`, and when set:\n`tags`, `bases` (the bases it inherits from, in order), `constraints` (its CHECKs, name → where), `constraint_hints` (their own hints, name → hint), `instructions` (how to fill a row: follow them before you write one), `row_template`, `history`,\n`autolink_target`, `fields` (their values).\n\nBefore adding a column (e.g. a new metric), read `columns` and match your concept against\n`name`, `label`, `aliases` and `description`; reuse an existing column when it means the same.\n\n`missing_descriptions` (`{table, columns}`), present only when something has no description (a table\ndefined before descriptions were required), names what lacks one: write them with alter_table\n`description` and alter_column `changes.description`, asking the user when the meaning is unclear.",
+    "description": "Describe a table (`catalog.schema.table` or a shorter unambiguous name): `qualified`, `name`,\n`catalog`, `schema`, `description`, `aliases`, `layout` (`folder`, `row_folder`: the folder pattern\nof new rows, `archive`), `options` (`partition`, `filename`, `archive`, `exclude`, `pack`, `pack_after_days`), typed `columns`\nwith label/aliases/description and the dense flag, `untyped_fields`, `row_count`, and when set:\n`tags`, `bases` (the bases it inherits from, in order), `constraints` (its CHECKs, name → where), `constraint_hints` (their own hints, name → hint), `instructions` (how to fill a row: follow them before you write one), `row_template`, `history`,\n`autolink_target`, `fields` (their values).\n\nBefore adding a column (e.g. a new metric), read `columns` and match your concept against\n`name`, `label`, `aliases` and `description`; reuse an existing column when it means the same.\n\n`missing_descriptions` (`{table, columns}`), present only when something has no description (a table\ndefined before descriptions were required), names what lacks one: write them with alter_table\n`description` and alter_column `changes.description`, asking the user when the meaning is unclear.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -425,7 +425,7 @@ export const OPERATIONS: OperationDef[] = [
         },
         "options": {
           "type": "object",
-          "description": "The table options set on it: partition, filename, archive, exclude.",
+          "description": "The table options set on it: partition, filename, archive, exclude, pack, pack_after_days.",
           "additionalProperties": true
         },
         "columns": {
@@ -636,7 +636,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "create_table",
-    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `acyclic: true` (links to rows of its own table that never loop back, such as tasks blocked by tasks; with `inverse`, the rule holds on both sides), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `instructions`: how to fill a row, for agents (Markdown); describe_table returns them.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nGenerated aggregates of a json column holding a list of objects (integer or number columns; avg: number): `count(feeds)`, `count(feeds.min)` (the items with a min), `sum(feeds.min)`, `avg(…)`, `min(…)`, `max(…)`, with an optional filter on one field: `count(feeds, side = \"left\")`, `sum(feeds.min, min > 0)` (=, !=, <, <=, >, >=; \"text\", a number, true or false). Recomputed on every write; no list: count and sum 0, avg/min/max empty; a field that is not a number: empty.\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Create a table: `name`, in `catalog` and `schema` (default: the database's defaults); the definition\ngoes in metastore.yaml, the rows in `<root>/<catalog>/<schema>/<name>/`. Names: lowercase letters,\ndigits, `_` (no dots: pass the catalog and the schema as their own arguments).\n- `description` (required): what a row of the table records. Every column needs its own `description`\n  too, what it holds: the table is refused otherwise, with every missing one listed. Descriptions are how\n  agents and people understand the schema, so write them for a reader who never saw the notes. The\n  engine writes those of `id` and of `identity` \"uuid\" / \"created\" columns.\n- `columns`: specs like `{\"name\": \"kind\", \"type\": \"enum\", \"values\": [\"a\",\"b\"], \"required\": true,\n  \"description\": \"What kind of entry the row is\"}`.\n  Types: string, integer, number, boolean, date, datetime, enum, link, list (+ `items`), json.\n  Attributes: required, default (`\"{now}\"`/`\"{today}\"`), min, max, step, values, `ordered` (enum in\n  order: filters/avg use the position), ref (link target, full `catalog.schema.table` or \"self\"),\n  unique, label, description, aliases, `generated` (e.g. `\"date(occurred_at)\"`, `\"{name} {surname}\"`),\n  `identity` (\"filename\" | \"created\"), `vocabulary` (allowed values = names of another table's rows),\n  `hierarchy: true` (one parent link to its own table), `acyclic: true` (links to rows of its own table that never loop back, such as tasks blocked by tasks; with `inverse`, the rule holds on both sides), `dense` (written on every row),\n  `inverse` on a link column: the column of the `ref` table that links back (`friends` ↔\n  `friends`, `children` ↔ `parents`, `partner` ↔ `partner`); writes keep both sides in step.\n- `time_column`: rows named by that date/datetime; otherwise `filename` (e.g. `\"{name}\"`).\n- The table's options, as alter_table names them: `aliases` (how agents find it, with the\n  description), `partition`, `exclude`, `archive`, `history` (keep its versions; default: the\n  database's setting), `autolink_target` (true / false: may automatic links link its rows? default:\n  yes, unless its rows are named by a date or a time, as with `time_column`).\n  `pack` (a template of a date column, such as `\"{occurred_at:YYYY-MM}\"`: once a period is over, one note\n  holds its rows, `##` section by section; select_rows still gives one row each) and `pack_after_days` (default 7):\n  see pack_rows.\n- `row_template`: markdown body of new rows. Shared columns come from bases: `set_table_bases`.\n- `instructions`: how to fill a row, for agents (Markdown); describe_table returns them.\n- `tags`: key/value labels of the table, strings (`{\"domain\": \"health\"}`); list_tables and\n  describe_table return them, alter_table changes them.\nEnum columns: `values` and, for each, its meaning in `value_descriptions` (`{\"stated\": \"the user said it\", …}`): describe_table shows them and a refused value lists them.\nGenerated link columns: `generated: \"link({occurred_at:YYYY-MM-DD})\"` with `ref` = the days table links each row to the row of `ref` named by the template (its folder read from the schema; the target may not exist yet).\nGenerated aggregates of a json column holding a list of objects (integer or number columns; avg: number): `count(feeds)`, `count(feeds.min)` (the items with a min), `sum(feeds.min)`, `avg(…)`, `min(…)`, `max(…)`, with an optional filter on one field: `count(feeds, side = \"left\")`, `sum(feeds.min, min > 0)` (=, !=, <, <=, >, >=; \"text\", a number, true or false). Recomputed on every write; no list: count and sum 0, avg/min/max empty; a field that is not a number: empty.\nFiltered link targets (link columns): `ref_where` (a `where` every target must match) and `ref_by` (a column of the row picks the target level: `{\"column\": \"kind\", \"levels\": [\"area\", \"project\", \"workstream\"]}` or `{\"column\": \"kind\", \"map\": {\"area\": null, \"project\": [\"area\"]}}`; null = top level, no link; `target_column` when the target names it differently: an enum target column must have every value the map allows, a string one takes any value). A link to no row of the table, or to the row itself, is refused too. Existing rows that break them refuse the change; `list_link_targets` lists the valid targets of a row.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -718,6 +718,31 @@ export const OPERATIONS: OperationDef[] = [
           ],
           "default": null,
           "description": "Sub-folder pattern of the rows, e.g. \"{occurred_at:YYYY/MM}\"; \"\" = flat."
+        },
+        "pack": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Packs of rows: a template of a date column, the period of each pack, e.g. \"{occurred_at:YYYY-MM}\": once a month is over, one note holds its rows (pack_rows, or the engine on its own). Needs the engine service."
+        },
+        "pack_after_days": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Days after the end of a period before its rows go into a pack (default 7)."
         },
         "exclude": {
           "anyOf": [
@@ -3527,7 +3552,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "alter_table",
-    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields) rewrites the table entry alone: no row is moved or rewritten. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table rewrites what names it in other\ndefinitions: the `ref` and `vocabulary` of the columns of other tables and bases (lists of links\nincluded) and the tables of views (`table`, `union[].table`, `join.table`); `schema_references`\nlists them. CHECKs and `ref_where` / `ref_by` that read it through a link follow the new `ref`. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields, pack_after_days) rewrites the table entry alone: no row is moved or rewritten.\n`pack` sets the period of the table's packs of rows (`\"{occurred_at:YYYY-MM}\"`; \"\" removes it), `pack_after_days` the days\nafter a period's end before its rows go into a pack (\"default\": 7). While rows are in packs, changing `pack`,\n`partition`, `filename` or the table's name is refused: unpack_rows first. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table rewrites what names it in other\ndefinitions: the `ref` and `vocabulary` of the columns of other tables and bases (lists of links\nincluded) and the tables of views (`table`, `union[].table`, `join.table`); `schema_references`\nlists them. CHECKs and `ref_where` / `ref_by` that read it through a link follow the new `ref`. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3577,6 +3602,37 @@ export const OPERATIONS: OperationDef[] = [
             }
           ],
           "default": null
+        },
+        "pack": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Packs of rows: a template of a date column, e.g. \"{occurred_at:YYYY-MM}\"; \"\" removes it (only while no row is in a pack)."
+        },
+        "pack_after_days": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "default"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Days after the end of a period before its rows go into a pack, or \"default\" (7)."
         },
         "filename": {
           "anyOf": [
@@ -17470,6 +17526,1031 @@ export const OPERATIONS: OperationDef[] = [
     }
   },
   {
+    "name": "pack_rows",
+    "description": "Put the rows of a table's closed periods into packs: one note per period (`<table> <key>.md` in the\ntable's folder), a `##` section per row, `key:: value` lines for its values. The table needs a `pack`\noption (create_table / alter_table, e.g. `\"{occurred_at:YYYY-MM}\"`). A period is closed\n`pack_after_days` days after it ends (default 7); `key` packs only that period.\nNothing changes for the engine and its readers: select_rows, links, the graph and the change feed\nstill see each row at its path, with its values, text and file_modified (no change event, no new\nversion). Links from other notes to a packed row become `[[pack#row]]`, which Obsidian follows too.\nA row stays a note of its own (`excluded`, with the reason) when it changed in the last 24 hours, has a\n`#` or `##` heading in its text, is not at the path its values give, or its note is not in the form\nthe engine writes. The engine also packs on its own once a day (setting `autoPack`). Needs the engine\nservice. Journaled: undo_migration takes the rows out again. Use `dry_run` to see `packs` first.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "table": {
+          "type": "string"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only the period of this key (e.g. \"2026-10\"); every closed period when absent."
+        },
+        "dry_run": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "table"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "title": "Pack Rows",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "responseSchema": {
+      "title": "PackRowsResult",
+      "type": "object",
+      "description": "Result of a write operation. A refusal (ok false) is answered with HTTP 422, a failed write with 500, so a 2xx body has ok true.",
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "True when the operation was applied (or, on a dry run, would be)."
+        },
+        "op": {
+          "type": "string",
+          "description": "The operation, by the name it was called with (e.g. insert_row, create_table, recompute_columns)."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "True when nothing was written (preview)."
+        },
+        "migration_id": {
+          "type": "string",
+          "description": "Journal id of the applied operation: pass it to undo_migration. Absent on a dry run."
+        },
+        "notes_changed": {
+          "type": "integer",
+          "description": "Notes whose front matter or body were written."
+        },
+        "files_created": {
+          "type": "integer",
+          "description": "Files created."
+        },
+        "files_moved": {
+          "type": "integer",
+          "description": "Files moved or renamed."
+        },
+        "files_deleted": {
+          "type": "integer",
+          "description": "Files deleted or archived."
+        },
+        "references_updated": {
+          "type": "integer",
+          "description": "Links rewritten in other notes."
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Note or file path."
+              },
+              "message": {
+                "type": "string",
+                "description": "Why the operation cannot proceed."
+              }
+            },
+            "required": [
+              "path",
+              "message"
+            ]
+          },
+          "description": "Reasons the operation was refused (empty on success)."
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "title": "RowViolations",
+            "type": "object",
+            "description": "The violations of one row.",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Row note path."
+              },
+              "violations": {
+                "type": "array",
+                "items": {
+                  "title": "Violation",
+                  "type": "object",
+                  "properties": {
+                    "column": {
+                      "type": "string",
+                      "description": "The column the violation is about (every code but check and unreadable)."
+                    },
+                    "index": {
+                      "type": "integer",
+                      "description": "The item of a list column that breaks the rule, from 0."
+                    },
+                    "constraint": {
+                      "type": "string",
+                      "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "required",
+                        "inverse",
+                        "type",
+                        "min",
+                        "max",
+                        "step",
+                        "enum",
+                        "broken_link",
+                        "ref",
+                        "unique",
+                        "unknown_column",
+                        "check",
+                        "generated",
+                        "cycle",
+                        "vocabulary",
+                        "unreadable"
+                      ],
+                      "description": "Kind of violation."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Agent-readable explanation."
+                    },
+                    "value": {
+                      "description": "The offending value, when there is one."
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                },
+                "description": "What is wrong with this row."
+              }
+            },
+            "required": [
+              "path",
+              "violations"
+            ]
+          },
+          "description": "Rows that would break the table's rules (empty on success)."
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Vault path."
+              },
+              "error": {
+                "type": "string",
+                "description": "What went wrong."
+              }
+            },
+            "required": [
+              "path",
+              "error"
+            ]
+          },
+          "description": "Files that could not be written (empty on success)."
+        },
+        "rolled_back": {
+          "type": "boolean",
+          "description": "Set when a write failed partway (`failed`): true when the engine put back what it had written, so nothing is left written; false when that rollback failed too (`failed` names the files left, and undo_migration on `migration_id` retries it)."
+        },
+        "planned_edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Note path."
+              },
+              "set": {
+                "type": "object",
+                "description": "Front matter keys set, with their new values.",
+                "additionalProperties": true
+              },
+              "remove": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Front matter keys removed."
+              },
+              "body": {
+                "type": "boolean",
+                "description": "True when the note body changes too."
+              }
+            },
+            "required": [
+              "path",
+              "set",
+              "remove"
+            ]
+          },
+          "description": "Front matter edits per note (planned, or made)."
+        },
+        "planned_creates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths of notes created."
+        },
+        "planned_moves": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          },
+          "description": "Files moved: from → to."
+        },
+        "planned_deletes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths deleted (or archived)."
+        },
+        "planned_texts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files rewritten whole, e.g. metastore.yaml for DDL."
+        },
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "Qualified table."
+              },
+              "version": {
+                "type": "integer",
+                "description": "New log version."
+              },
+              "operation": {
+                "type": "string",
+                "description": "Log operation, e.g. WRITE."
+              }
+            },
+            "required": [
+              "table",
+              "version",
+              "operation"
+            ]
+          },
+          "description": "Transaction-log commits written (tables with history on)."
+        },
+        "links_added": {
+          "type": "array",
+          "items": {
+            "title": "LinkAdded",
+            "type": "object",
+            "description": "A link the write added in place of a mention.",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "The note the link was written into."
+              },
+              "text": {
+                "type": "string",
+                "description": "The mention, as written."
+              },
+              "target": {
+                "type": "string",
+                "description": "Vault path of the note it links."
+              },
+              "link": {
+                "type": "string",
+                "description": "The link written in place of the mention."
+              }
+            },
+            "required": [
+              "path",
+              "text",
+              "target",
+              "link"
+            ]
+          },
+          "description": "Links the write added to the text it wrote: the notes the text mentions by name (automatic links). Present when there is one."
+        },
+        "ambiguous_mentions": {
+          "type": "array",
+          "items": {
+            "title": "LinkAmbiguous",
+            "type": "object",
+            "description": "A mention left as text: more than one note could be meant.",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "The note the mention is in."
+              },
+              "text": {
+                "type": "string",
+                "description": "The mention, as written."
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "same_name",
+                  "adjacent",
+                  "overlap",
+                  "part_of_name",
+                  "sentence_start"
+                ],
+                "description": "same_name: several notes have this name; adjacent: names of different notes side by side, which may be one name; overlap: names of notes overlap; part_of_name: a capitalized word next to it suggests a longer name; sentence_start: a one-word name at the start of a sentence, a line, a list item or a label, where its capital says nothing."
+              },
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Vault paths of the notes it may name."
+              },
+              "context": {
+                "type": "string",
+                "description": "The line around the mention."
+              },
+              "hint": {
+                "type": "string",
+                "description": "What to do: read the candidates, then link the right one with update_row and autolink: false, or leave the text."
+              }
+            },
+            "required": [
+              "path",
+              "text",
+              "reason",
+              "candidates",
+              "context",
+              "hint"
+            ]
+          },
+          "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "packs": {
+          "type": "array",
+          "description": "The packs written (or, on a dry run, to write): each pack's file, its key and the rows that go in or come out.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pack": {
+                "type": "string",
+                "description": "The pack's file."
+              },
+              "key": {
+                "type": "string",
+                "description": "The period of its rows, as the table's pack option writes it."
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The rows' paths (each keeps its path in a pack)."
+              }
+            },
+            "required": [
+              "pack",
+              "key",
+              "rows"
+            ]
+          }
+        },
+        "excluded": {
+          "type": "array",
+          "description": "pack_rows: rows of closed periods that stay notes of their own, with the reason (changed in the last 24 hours, a # or ## heading in their text, not where their values put them, another YAML style).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "reason"
+            ]
+          }
+        },
+        "open_rows": {
+          "type": "integer",
+          "description": "pack_rows: rows whose period is not over yet (or ended less than pack_after_days ago): not listed."
+        }
+      },
+      "required": [
+        "ok",
+        "op",
+        "dry_run",
+        "notes_changed",
+        "files_created",
+        "files_moved",
+        "files_deleted",
+        "references_updated",
+        "conflicts",
+        "violations",
+        "failed",
+        "planned_edits",
+        "planned_creates",
+        "planned_moves",
+        "planned_deletes",
+        "planned_texts"
+      ]
+    }
+  },
+  {
+    "name": "unpack_rows",
+    "description": "Take rows out of their packs as notes of their own, at their paths, with the text and the modification\ntime they had (the opposite of pack_rows): every pack of the table, the pack of `key`, or only the\nrows `where` matches (as select_rows filters). A pack left without rows goes. Links `[[pack#row]]`\nfrom other notes become links to the notes. Needed before alter_table changes the table's `pack`,\n`partition`, `filename` or name. Silent for the rows, journaled (undo_migration packs them again).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "table": {
+          "type": "string"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only the pack of this key (e.g. \"2026-10\")."
+        },
+        "where": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only the rows that match, as select_rows' where."
+        },
+        "dry_run": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "table"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "title": "Unpack Rows",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "responseSchema": {
+      "title": "PackRowsResult",
+      "type": "object",
+      "description": "Result of a write operation. A refusal (ok false) is answered with HTTP 422, a failed write with 500, so a 2xx body has ok true.",
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "True when the operation was applied (or, on a dry run, would be)."
+        },
+        "op": {
+          "type": "string",
+          "description": "The operation, by the name it was called with (e.g. insert_row, create_table, recompute_columns)."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "True when nothing was written (preview)."
+        },
+        "migration_id": {
+          "type": "string",
+          "description": "Journal id of the applied operation: pass it to undo_migration. Absent on a dry run."
+        },
+        "notes_changed": {
+          "type": "integer",
+          "description": "Notes whose front matter or body were written."
+        },
+        "files_created": {
+          "type": "integer",
+          "description": "Files created."
+        },
+        "files_moved": {
+          "type": "integer",
+          "description": "Files moved or renamed."
+        },
+        "files_deleted": {
+          "type": "integer",
+          "description": "Files deleted or archived."
+        },
+        "references_updated": {
+          "type": "integer",
+          "description": "Links rewritten in other notes."
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Note or file path."
+              },
+              "message": {
+                "type": "string",
+                "description": "Why the operation cannot proceed."
+              }
+            },
+            "required": [
+              "path",
+              "message"
+            ]
+          },
+          "description": "Reasons the operation was refused (empty on success)."
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "title": "RowViolations",
+            "type": "object",
+            "description": "The violations of one row.",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Row note path."
+              },
+              "violations": {
+                "type": "array",
+                "items": {
+                  "title": "Violation",
+                  "type": "object",
+                  "properties": {
+                    "column": {
+                      "type": "string",
+                      "description": "The column the violation is about (every code but check and unreadable)."
+                    },
+                    "index": {
+                      "type": "integer",
+                      "description": "The item of a list column that breaks the rule, from 0."
+                    },
+                    "constraint": {
+                      "type": "string",
+                      "description": "The CHECK's name (code check)."
+                    },
+                    "hint": {
+                      "type": "string",
+                      "description": "The CHECK's own hint (code check), when the constraint has one: how to fix the row."
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "required",
+                        "inverse",
+                        "type",
+                        "min",
+                        "max",
+                        "step",
+                        "enum",
+                        "broken_link",
+                        "ref",
+                        "unique",
+                        "unknown_column",
+                        "check",
+                        "generated",
+                        "cycle",
+                        "vocabulary",
+                        "unreadable"
+                      ],
+                      "description": "Kind of violation."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Agent-readable explanation."
+                    },
+                    "value": {
+                      "description": "The offending value, when there is one."
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                },
+                "description": "What is wrong with this row."
+              }
+            },
+            "required": [
+              "path",
+              "violations"
+            ]
+          },
+          "description": "Rows that would break the table's rules (empty on success)."
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Vault path."
+              },
+              "error": {
+                "type": "string",
+                "description": "What went wrong."
+              }
+            },
+            "required": [
+              "path",
+              "error"
+            ]
+          },
+          "description": "Files that could not be written (empty on success)."
+        },
+        "rolled_back": {
+          "type": "boolean",
+          "description": "Set when a write failed partway (`failed`): true when the engine put back what it had written, so nothing is left written; false when that rollback failed too (`failed` names the files left, and undo_migration on `migration_id` retries it)."
+        },
+        "planned_edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Note path."
+              },
+              "set": {
+                "type": "object",
+                "description": "Front matter keys set, with their new values.",
+                "additionalProperties": true
+              },
+              "remove": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Front matter keys removed."
+              },
+              "body": {
+                "type": "boolean",
+                "description": "True when the note body changes too."
+              }
+            },
+            "required": [
+              "path",
+              "set",
+              "remove"
+            ]
+          },
+          "description": "Front matter edits per note (planned, or made)."
+        },
+        "planned_creates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths of notes created."
+        },
+        "planned_moves": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          },
+          "description": "Files moved: from → to."
+        },
+        "planned_deletes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths deleted (or archived)."
+        },
+        "planned_texts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files rewritten whole, e.g. metastore.yaml for DDL."
+        },
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "Qualified table."
+              },
+              "version": {
+                "type": "integer",
+                "description": "New log version."
+              },
+              "operation": {
+                "type": "string",
+                "description": "Log operation, e.g. WRITE."
+              }
+            },
+            "required": [
+              "table",
+              "version",
+              "operation"
+            ]
+          },
+          "description": "Transaction-log commits written (tables with history on)."
+        },
+        "links_added": {
+          "type": "array",
+          "items": {
+            "title": "LinkAdded",
+            "type": "object",
+            "description": "A link the write added in place of a mention.",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "The note the link was written into."
+              },
+              "text": {
+                "type": "string",
+                "description": "The mention, as written."
+              },
+              "target": {
+                "type": "string",
+                "description": "Vault path of the note it links."
+              },
+              "link": {
+                "type": "string",
+                "description": "The link written in place of the mention."
+              }
+            },
+            "required": [
+              "path",
+              "text",
+              "target",
+              "link"
+            ]
+          },
+          "description": "Links the write added to the text it wrote: the notes the text mentions by name (automatic links). Present when there is one."
+        },
+        "ambiguous_mentions": {
+          "type": "array",
+          "items": {
+            "title": "LinkAmbiguous",
+            "type": "object",
+            "description": "A mention left as text: more than one note could be meant.",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "The note the mention is in."
+              },
+              "text": {
+                "type": "string",
+                "description": "The mention, as written."
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "same_name",
+                  "adjacent",
+                  "overlap",
+                  "part_of_name",
+                  "sentence_start"
+                ],
+                "description": "same_name: several notes have this name; adjacent: names of different notes side by side, which may be one name; overlap: names of notes overlap; part_of_name: a capitalized word next to it suggests a longer name; sentence_start: a one-word name at the start of a sentence, a line, a list item or a label, where its capital says nothing."
+              },
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Vault paths of the notes it may name."
+              },
+              "context": {
+                "type": "string",
+                "description": "The line around the mention."
+              },
+              "hint": {
+                "type": "string",
+                "description": "What to do: read the candidates, then link the right one with update_row and autolink: false, or leave the text."
+              }
+            },
+            "required": [
+              "path",
+              "text",
+              "reason",
+              "candidates",
+              "context",
+              "hint"
+            ]
+          },
+          "description": "Mentions left as text because the engine is not sure which note they name. Present when there is one: read the candidates and the context, then link the right one with update_row and autolink: false, or leave the text."
+        },
+        "schema_references": {
+          "type": "array",
+          "items": {
+            "title": "SchemaReference",
+            "type": "object",
+            "description": "A name of the moved table in another definition, rewritten to the new name.",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table whose column names it (full name)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The base whose column names it."
+              },
+              "view": {
+                "type": "string",
+                "description": "The view whose query names it (full name)."
+              },
+              "column": {
+                "type": "string",
+                "description": "The column of the table or base."
+              },
+              "key": {
+                "type": "string",
+                "description": "Where the name is: ref or vocabulary of the column, or table, union[N].table or join.table of the view's query."
+              },
+              "from": {
+                "type": "string",
+                "description": "The name as written before."
+              },
+              "to": {
+                "type": "string",
+                "description": "The name written in its place."
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to"
+            ]
+          },
+          "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "packs": {
+          "type": "array",
+          "description": "The packs written (or, on a dry run, to write): each pack's file, its key and the rows that go in or come out.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pack": {
+                "type": "string",
+                "description": "The pack's file."
+              },
+              "key": {
+                "type": "string",
+                "description": "The period of its rows, as the table's pack option writes it."
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The rows' paths (each keeps its path in a pack)."
+              }
+            },
+            "required": [
+              "pack",
+              "key",
+              "rows"
+            ]
+          }
+        },
+        "excluded": {
+          "type": "array",
+          "description": "pack_rows: rows of closed periods that stay notes of their own, with the reason (changed in the last 24 hours, a # or ## heading in their text, not where their values put them, another YAML style).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "reason"
+            ]
+          }
+        },
+        "open_rows": {
+          "type": "integer",
+          "description": "pack_rows: rows whose period is not over yet (or ended less than pack_after_days ago): not listed."
+        }
+      },
+      "required": [
+        "ok",
+        "op",
+        "dry_run",
+        "notes_changed",
+        "files_created",
+        "files_moved",
+        "files_deleted",
+        "references_updated",
+        "conflicts",
+        "violations",
+        "failed",
+        "planned_edits",
+        "planned_creates",
+        "planned_moves",
+        "planned_deletes",
+        "planned_texts"
+      ]
+    }
+  },
+  {
     "name": "graph_neighbors",
     "description": "Direct neighbours of notes: what they link to (`out`) and what links to them (`in`,\nbacklinks), with counts per edge label. `direction`: out, in or both (default).\n\n`from_nodes` selects the notes: `{\"paths\": [...]}`, `{\"table\": ..., \"where\": {...}}` and/or\n`{\"tables\": [...]}`: the rows of several tables, by name or pattern (`[\"*\"]` every table, `[\"personal.*\"]` a\ncatalog's). The whole vault's graph in one call: `{\"tables\": [\"*\"]}` with direction `out` (at most 5000\nstart notes). Edges are labelled with their link column (`people`, `event`, …) or `link` for other links.",
     "inputSchema": {
@@ -17992,4 +19073,6 @@ export const OPERATION_KIND: Readonly<Record<string, OperationKind>> = {
   infer_table: "auxiliary",
   describe_semantic_index: "auxiliary",
   sync_semantic_index: "auxiliary",
+  pack_rows: "auxiliary",
+  unpack_rows: "auxiliary",
 };

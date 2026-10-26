@@ -613,7 +613,8 @@ export function linkedTargets(app: App, text: string, source: string): Set<strin
     const dest = app.metadataCache.getFirstLinkpathDest(p, source);
     if (dest) out.add(dest.path);
   };
-  for (const m of text.matchAll(/\[\[([^\]|#\n]*)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)) add(m[1]!);
+  // a row of a pack is [[pack#row]]: its heading too, on a host with packs
+  for (const m of text.matchAll(/\[\[([^\]|#\n]*)(#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)) add(app.packs !== undefined && m[1]!.trim() !== "" && (m[2] ?? "").trim().length > 1 ? `${m[1]}${m[2]!.trim()}` : m[1]!);
   for (const m of text.matchAll(/\[[^\]\n]*\]\(<?([^)\s>#]+\.md)(?:#[^)\s]*)?>?\)/gi)) {
     try {
       add(decodeURI(m[1]!));

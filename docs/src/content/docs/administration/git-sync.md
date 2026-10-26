@@ -70,6 +70,23 @@ A pull can also succeed and still leave files in conflict. This happens when the
 
 The next sync commits and pushes again.
 
+## Merge packs row by row
+
+A [pack of rows](/guides/database-objects/packs/) is one note that holds many rows. Two copies that add rows to the same pack would get a conflict from a plain text merge. So git sync registers a merge driver that merges a pack row by row, by `id`. A conflict then stays in the one row changed on both sides.
+
+At each start, git sync writes two things:
+
+- **In the repository’s config**: `merge.datanotes-pack.driver`, the engine’s own `datanotes pack-merge` command.
+- **In `.gitattributes`** at the vault’s root: the line `*.md merge=datanotes-pack`. Git sync commits it with the vault.
+
+The driver merges any note that isn’t a pack as text, as git does. Every copy that pulls should register the driver too. Start its engine with `--git-sync`, or set it by hand:
+
+```bash
+git config merge.datanotes-pack.name "Datanotes packs of rows"
+git config merge.datanotes-pack.driver \
+  "npx -y datanotes pack-merge %O %A %B %P"
+```
+
 ## Keep every copy on the same version
 
 Each copy of the vault that runs an engine reads the notes that git brings in as hand edits: the engine checks them against the tables’ rules and reports what they break on the change feed. Run the same version of Datanotes on every copy, and upgrade them together. The [release notes](/release-notes/) list what each version changes.

@@ -39,7 +39,7 @@ import type {
   StoreAdapter,
   VaultAdapter,
 } from "../core/host";
-import { addLinkLookupNames, basename, dirname, fileLookupNames, LinkResolver, linkLookupNames, linkText, parseLinks, rewriteLinks } from "./links";
+import { addLinkLookupNames, basename, dirname, fileLookupNames, LinkResolver, linkLookupNames, linkText, linkWritten, parseLinks, rewriteLinks } from "./links";
 import { eachLimit, MOVE_WRITES } from "../core/database-move";
 import { contentHash, primeFiles, setTextSource } from "../core/file-cache";
 import { intern, internAll } from "../core/intern";
@@ -48,6 +48,9 @@ import { IndexDb, IndexKeeper, RACY_MS, type FileRecord, type IndexSource, type 
 import type { OrderedFrontmatter } from "../core/types";
 import { readVaultConfig, type VaultConfig } from "./vault-config";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./private-files";
+import { NodePackStore } from "./pack-store";
+import { namedAsPack } from "../core/pack-layout";
+import { isPackFrontmatter } from "../core/pack-format";
 
 /** A file's stat on the Node host: FileStats and its change time. */
 export interface NodeFileStats extends FileStats {
@@ -187,6 +190,8 @@ class NodeAdapter implements VaultAdapter {
   constructor(
     private readonly root: string,
     private readonly modes?: FileModes,
+    /** The text of a row of a pack at a path (the vault's: rows are not on disk); undefined for another path. */
+    private readonly packed?: (rel: string) => string | undefined,
   ) {}
   private dirOpts(): { recursive: true; mode?: number } {
     return { recursive: true, ...(this.modes ? { mode: this.modes.dir } : {}) };
@@ -195,10 +200,11 @@ class NodeAdapter implements VaultAdapter {
     return resolveInVault(this.root, p);
   }
   async exists(p: string): Promise<boolean> {
-    return fs.existsSync(this.abs(p));
+    return this.packed?.(p) !== undefined || fs.existsSync(this.abs(p));
   }
   read(p: string): Promise<string> {
-    return fsp.readFile(this.abs(p), "utf8");
+    const row = this.packed?.(p);
+    return row !== undefined ? Promise.resolve(row) : fsp.readFile(this.abs(p), "utf8");
   }
   write(p: string, data: string): Promise<void> {
     return atomicWrite(this.abs(p), data, this.modes);
@@ -252,6 +258,8 @@ export interface IndexListener {
   renamed(oldPath: string, newPath: string): void;
   /** The hash of a note's text as last read (to recognize it under another name); undefined when unknown. */
   hashOf(path: string): string | undefined;
+  /** Packs whose files came, went or moved (their paths): the links to them resolve again. */
+  packsChanged?(paths: readonly string[]): void;
 }
 
 /** Whether a vault path is a Markdown note. */
@@ -294,13 +302,49 @@ export class NodeVault implements Vault {
   /** The file ids the last walk ({@link scan}) saw, by path (for the persistent index). */
   walkIds: Map<string, string> | null = null;
 
+  /** Packs of rows (pack-store.ts): their rows are listed in the index, the packs' files are not. */
+  readonly packs: NodePackStore;
+
   constructor(
     readonly basePath: string,
     readonly config: VaultConfig,
   ) {
-    this.adapter = new NodeAdapter(basePath);
+    this.adapter = new NodeAdapter(basePath, undefined, (p) => this.packs.textOf(p.replace(/^\/+|\/+$/g, "")));
     this.events.setMaxListeners(0);
     this.folders.set("", this.root);
+    this.packs = new NodePackStore({
+      abs: (rel) => this.abs(rel),
+      indexed: (rel) => this.files.get(rel),
+      addFile: (rel, stat) => this.addFile(rel, stat),
+      dropFile: (rel) => this.dropFile(rel),
+      repath: (file, to) => this.repath(file, to),
+      emit: (name, file, old) => (old === undefined ? this.emit(name, file) : this.emit(name, file, old)),
+      guarded: (paths, fn) => this.guarded(paths, fn),
+      writeAtomic: async (rel, data) => {
+        await atomicWrite(this.abs(rel), data);
+      },
+      packsChanged: (paths) => this.listener?.packsChanged?.(paths),
+    });
+  }
+
+  /** List the rows of the packs among the vault's files instead of the packs (the start, after the walk; silent). */
+  loadPacks(): void {
+    this.packs.loadAll(this.getFiles().map((f) => f.path));
+  }
+
+  /** The text of a file: a row of a pack from its section, any other from the disk. */
+  textSync(rel: string): string {
+    return this.packs.textOf(rel) ?? fs.readFileSync(this.abs(rel), "utf8");
+  }
+
+  /** An indexed file at another path, folders made as needed (no event). */
+  private repath(file: NodeFile, to: string): void {
+    this.detach(file);
+    this.files.delete(file.path);
+    file.path = intern(to);
+    this.files.set(file.path, file);
+    this.filesChanged();
+    this.parentOf(to).children.push(file);
   }
 
   abs(rel: string): string {
@@ -398,11 +442,15 @@ export class NodeVault implements Vault {
         }
         const st = stats.get(p);
         const f = this.files.get(p);
-        // a file gone between its listing and its stat is reported by the OS, or the next check
-        if (st && (!f || f.stat.mtime !== st.mtimeMs || f.stat.size !== st.size)) out.push(p);
+        // a file gone between its listing and its stat is reported by the OS, or the next check;
+        // a pack is no file of the index: as the host last read or wrote it, no change
+        if (st && (!f || f.stat.mtime !== st.mtimeMs || f.stat.size !== st.size) && !this.packs.unchanged(p, { mtime: st.mtimeMs, size: st.size })) out.push(p);
       }
     }
-    for (const p of [...this.files.keys(), ...this.folders.keys()]) if (p !== "" && !listed.has(p)) out.push(p);
+    // rows of packs are not on disk, nor the folders that hold only them
+    for (const p of [...this.files.keys(), ...this.folders.keys(), ...this.packs.packPaths()]) {
+      if (p !== "" && !listed.has(p) && !this.packs.isRow(p) && !(this.folders.has(p) && this.packs.holdsRows(p))) out.push(p);
+    }
     return out;
   }
 
@@ -620,6 +668,21 @@ export class NodeVault implements Vault {
   syncPath(rel: string, seen: "listed" | "unlisted" | "unknown" = "unknown"): "created" | "modified" | "deleted" | "renamed" | null {
     if (rel === "" || hidden(rel)) return null;
     if (this.isBusy(rel)) return null; // the vault's own write in progress: the next scan sees it settled
+    if (this.packs.isRow(rel)) {
+      // a row of a pack is not on disk; a note of its own written at its path wins over it
+      const st = seen === "unlisted" ? null : this.present(rel);
+      if (!st?.isFile()) return null;
+      this.packs.noteAt(rel);
+      const f = this.files.get(rel)!;
+      f.stat = statsOf(st);
+      this.emit("modify", f);
+      return "modified";
+    }
+    if (this.packs.isPack(rel) || (seen !== "unlisted" && this.newPack(rel))) {
+      const r = this.packs.sync(rel);
+      // a file that stopped being a pack is a note of the vault again (below)
+      if (r !== "deleted" || !this.present(rel)) return r;
+    }
     // Where the file system ignores case (Windows, macOS), a path renamed in case only still stats
     // under its old spelling: the path counts only as the folder listing spells it.
     const st = seen === "unlisted" ? null : seen === "listed" ? this.statOf(rel) : this.present(rel);
@@ -629,9 +692,21 @@ export class NodeVault implements Vault {
       if (file) {
         this.dropFile(rel);
         this.emit("delete", file);
+        // a row of a pack left aside for this note takes its place again
+        this.packs.noteGone(rel);
         return "deleted";
       }
       if (folder) {
+        if (this.packs.holdsRows(rel)) {
+          // rows of packs are listed there (not on disk): the folder stays, the notes of its own under it go
+          const gone = [...this.files.values()].filter((f) => f.path.startsWith(`${rel}/`) && !this.packs.isRow(f.path));
+          for (const f of gone) {
+            this.dropFile(f.path);
+            this.emit("delete", f);
+            this.packs.noteGone(f.path);
+          }
+          return gone.length > 0 ? "deleted" : null;
+        }
         const gone = [...this.files.values()].filter((f) => f.path.startsWith(`${rel}/`));
         this.dropFolder(rel);
         for (const f of gone) this.emit("delete", f);
@@ -678,12 +753,46 @@ export class NodeVault implements Vault {
       // a new folder: its notes may be moved ones
       if (rel !== "" && !hidden(rel) && !this.folders.has(rel) && this.present(rel)?.isDirectory()) for (const p of this.listTree(rel)) list.add(p);
     }
-    const paths = [...list].filter((p) => p !== "" && !hidden(p) && !this.isBusy(p));
+    const paths = [...list].filter((p) => p !== "" && !hidden(p) && !this.isBusy(p) && !this.packs.isRow(p) && !this.packish(p));
     const gone = paths.filter((p) => isNote(p) && this.files.has(p) && !this.present(p) && this.present(dirname(p)) !== null);
     const born = paths.filter((p) => isNote(p) && !this.files.has(p) && this.present(p)?.isFile() === true);
     const changed = this.pairMoves(gone, born);
-    for (const p of list) if (this.syncPath(p)) changed.push(p);
+    for (const p of this.packsLast(list)) if (this.syncPath(p)) changed.push(p);
     return [...new Set(changed)];
+  }
+
+  /**
+   * Whether a path is a pack's: a pack known, or a file named as one with `pack` in its front
+   * matter (read only for a file named `<folder> <key>.md`; a note of that name is no pack).
+   */
+  private packish(rel: string): boolean {
+    return this.packs.isPack(rel) || this.newPack(rel);
+  }
+
+  /**
+   * Whether a file the index does not have yet is a pack (named `<folder> <key>.md`, with `pack` in
+   * its front matter). A note the index has is read again by the metadata cache when it changes,
+   * which finds a note turned into a pack ({@link NodeMetadataCache.changed}): no read here.
+   */
+  private newPack(rel: string): boolean {
+    return !this.files.has(rel) && namedAsPack(rel) && this.packs.handles(rel);
+  }
+
+  /** A note of the index turned into a pack (its new text names a table in `pack`): its rows instead of it. */
+  becamePack(rel: string): void {
+    if (namedAsPack(rel) && !this.packs.isPack(rel)) this.packs.sync(rel);
+  }
+
+  /**
+   * Paths in the order to sync them: the packs' last (a note gone in the same batch frees its row's
+   * path first), the packs on disk before those gone (a pack renamed by hand takes its rows over).
+   */
+  private packsLast(paths: Iterable<string>): string[] {
+    const all = [...paths];
+    const packs = new Set(all.filter((p) => this.packish(p)));
+    if (packs.size === 0) return all;
+    const onDisk = (p: string) => this.statOf(p) !== null;
+    return [...all.filter((p) => !packs.has(p)), ...[...packs].filter(onDisk), ...[...packs].filter((p) => !onDisk(p))];
   }
 
   /** Every path under the folder `rel` (dot entries left out), parents before their children. */
@@ -796,7 +905,7 @@ export class NodeVault implements Vault {
   private staleVariant(rel: string): string | undefined {
     const lower = rel.toLowerCase();
     for (const c of this.folders.get(dirname(rel))?.children ?? []) {
-      if (c instanceof NodeFile && c.path !== rel && c.path.length === rel.length && c.path.toLowerCase() === lower && !this.isBusy(c.path) && !this.present(c.path)) return c.path;
+      if (c instanceof NodeFile && c.path !== rel && c.path.length === rel.length && c.path.toLowerCase() === lower && !this.isBusy(c.path) && !this.packs.isRow(c.path) && !this.present(c.path)) return c.path;
     }
     return undefined;
   }
@@ -880,11 +989,11 @@ export class NodeVault implements Vault {
     walk("");
     const seen = new Set(listed);
     const kept = (p: string) => dirname(p) === "" || folders.has(dirname(p));
-    const gone = [...this.files.keys()].filter((p) => isNote(p) && !seen.has(p) && kept(p) && !this.isBusy(p));
-    const born = listed.filter((p) => isNote(p) && !folders.has(p) && !this.files.has(p) && !this.isBusy(p));
+    const gone = [...this.files.keys()].filter((p) => isNote(p) && !seen.has(p) && kept(p) && !this.isBusy(p) && !this.packs.isRow(p));
+    const born = listed.filter((p) => isNote(p) && !folders.has(p) && !this.files.has(p) && !this.isBusy(p) && !this.packish(p));
     const changed = this.pairMoves(gone, born);
-    for (const rel of listed) if (this.syncPath(rel, "listed")) changed.push(rel);
-    for (const p of [...this.files.keys(), ...this.folders.keys()]) {
+    for (const rel of this.packsLast(listed)) if (this.syncPath(rel, "listed")) changed.push(rel);
+    for (const p of [...this.files.keys(), ...this.folders.keys(), ...this.packs.packPaths()]) {
       if (p !== "" && !seen.has(p) && this.syncPath(p, "unlisted")) changed.push(p);
     }
     return changed;
@@ -926,15 +1035,19 @@ export class NodeVault implements Vault {
   }
 
   read(file: TFile): Promise<string> {
-    return fsp.readFile(this.abs(file.path), "utf8");
+    const row = this.packs.textOf(file.path);
+    return row !== undefined ? Promise.resolve(row) : fsp.readFile(this.abs(file.path), "utf8");
   }
 
   /** Write a file's text (internal: also used by the file manager). */
   async writeText(file: NodeFile, data: string): Promise<void> {
-    await this.guarded([file.path], async () => {
-      await atomicWrite(this.abs(file.path), data);
-      await this.refreshStat(file);
-    });
+    // a row of a pack: its section, or a note of its own when it cannot stay (pack-store.ts)
+    if (this.packs.isRow(file.path)) await this.packs.write(file, data);
+    else
+      await this.guarded([file.path], async () => {
+        await atomicWrite(this.abs(file.path), data);
+        await this.refreshStat(file);
+      });
     // the metadata cache parses the text just written instead of reading it back from the disk
     this.written = { path: file.path, data };
     try {
@@ -957,7 +1070,7 @@ export class NodeVault implements Vault {
 
   async create(p: string, data: string): Promise<TFile> {
     const rel = p.replace(/^\/+/, "");
-    if (fs.existsSync(this.abs(rel))) throw new Error(`File already exists: ${rel}`);
+    if (fs.existsSync(this.abs(rel)) || this.packs.isRow(rel)) throw new Error(`File already exists: ${rel}`);
     const f = await this.guarded([rel], async () => {
       await this.ensureFolder(dirname(rel));
       await atomicWrite(this.abs(rel), data);
@@ -987,9 +1100,20 @@ export class NodeVault implements Vault {
 
   private async deleteNow(file: TAbstractFile, force?: boolean): Promise<void> {
     const rel = file.path;
+    if (this.packs.isRow(rel)) {
+      const f = this.files.get(rel)!;
+      await this.packs.remove(f);
+      this.dropFile(rel);
+      this.emit("delete", f);
+      return;
+    }
     if (this.folders.has(rel)) {
+      // the rows of packs under it come out first, as the notes the folder holds (no pause without any:
+      // the watcher's events of the folder's files must not run between the listing and the removal)
+      if (this.packs.holdsRows(rel)) await this.packs.extractUnder(rel);
       const gone = [...this.files.values()].filter((f) => f.path.startsWith(`${rel}/`));
       await fsp.rm(this.abs(rel), { recursive: force === true });
+      this.packs.forgetUnder(rel);
       const folder = this.dropFolder(rel)!;
       for (const f of gone) this.emit("delete", f);
       this.emit("delete", folder);
@@ -1008,11 +1132,23 @@ export class NodeVault implements Vault {
 
   private async trashNow(file: TAbstractFile, _system: boolean): Promise<void> {
     const target = await this.freeName(`.trash/${basename(file.path)}`);
+    if (this.packs.isRow(file.path)) {
+      // a row of a pack goes to the trash as the note it is
+      const f = this.files.get(file.path)!;
+      await atomicWrite(this.abs(target), this.packs.textOf(f.path)!);
+      await this.packs.remove(f);
+      this.dropFile(f.path);
+      this.emit("delete", f);
+      return;
+    }
     const isFolder = this.folders.has(file.path);
     const gone = isFolder ? [...this.files.values()].filter((f) => f.path.startsWith(`${file.path}/`)) : [];
     await fsp.mkdir(this.abs(".trash"), { recursive: true });
+    // the rows of packs under it come out first, as the notes the folder takes to the trash
+    if (isFolder && this.packs.holdsRows(file.path)) await this.packs.extractUnder(file.path);
     await renameRetrying(this.abs(file.path), this.abs(target));
     if (isFolder) {
+      this.packs.forgetUnder(file.path);
       const folder = this.dropFolder(file.path)!;
       for (const f of gone) this.emit("delete", f);
       this.emit("delete", folder);
@@ -1050,6 +1186,17 @@ export class NodeVault implements Vault {
     const isFolder = this.folders.has(from);
     if (!isFolder && !this.files.has(from)) throw new Error(`file not found: ${from}`);
     await this.ensureFolder(dirname(to));
+    if (!isFolder && this.packs.isRow(from)) {
+      // a row of a pack moves out of it, a note of its own at its new path
+      const f = this.files.get(from)!;
+      if (this.packs.isRow(to)) throw new Error(`Destination exists: ${to}`);
+      await this.packs.extractTo(f, to);
+      this.repath(f, to);
+      this.emit("rename", f, from);
+      return new Map([[from, to]]);
+    }
+    // a folder that holds only rows of packs may not be on disk
+    if (isFolder && this.packs.holdsRows(from) && !fs.existsSync(this.abs(from))) await fsp.mkdir(this.abs(from), { recursive: true });
     if (caseOnly) await this.renameThroughTemporary(from, to);
     else await renameRetrying(this.abs(from), this.abs(to));
     const moved = new Map<string, string>();
@@ -1080,6 +1227,8 @@ export class NodeVault implements Vault {
         moved.set(old, f.path);
         renamed.push([f, old]);
       }
+      // the packs moved with the folder on disk
+      this.packs.moved(from, to);
     } else {
       const f = this.files.get(from)!;
       this.detach(f);
@@ -1215,6 +1364,13 @@ function internRecord(r: NoteRecord): void {
   internAll(r.links);
 }
 
+/** The paths a link looks up: its own, and the heading of a link into a pack (`[[pack#row]]`: the row's name). */
+function lookups(l: NoteLink): string[] {
+  if (l.linkpath === "") return [];
+  const heading = l.subpath.replace(/^#/, "").split("#")[0]!.trim();
+  return heading === "" ? [l.linkpath] : [l.linkpath, heading];
+}
+
 // A tag starts after whitespace or at the start of a line (not after "(") and is not all digits.
 const TAG_RE = /(?:^|\s)#([\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*)/gu;
 
@@ -1291,7 +1447,7 @@ export class NodeMetadataCache implements MetadataCache {
     this.meta.clear();
     const texts = new Map<NodeFile, StartText>();
     for (const f of this.vault.getMarkdownFiles()) {
-      const r = this.read(fs.readFileSync(this.vault.abs(f.path), "utf8"));
+      const r = this.read(this.vault.textSync(f.path));
       texts.set(f as NodeFile, r.text);
       this.meta.set(f.path, r.meta);
     }
@@ -1345,7 +1501,8 @@ export class NodeMetadataCache implements MetadataCache {
       const f = files[i]!;
       let text: string;
       try {
-        text = await fsp.readFile(this.vault.listedAbs(f.path), "utf8");
+        // a row of a pack from its section, any other note from the disk
+        text = this.vault.packs.textOf(f.path) ?? (await fsp.readFile(this.vault.listedAbs(f.path), "utf8"));
       } catch {
         return; // removed since the walk: the watcher reports it
       }
@@ -1464,11 +1621,16 @@ export class NodeMetadataCache implements MetadataCache {
       let text: string;
       try {
         const w = this.vault.written;
-        text = w && w.path === file.path ? w.data : fs.readFileSync(this.vault.abs(file.path), "utf8");
+        text = w && w.path === file.path ? w.data : this.vault.textSync(file.path);
       } catch {
         return;
       }
       const r = this.read(text);
+      // a note turned into a pack by hand: once this change is announced, its rows take its place
+      if (isPackFrontmatter(r.meta.cache.frontmatter) && namedAsPack(file.path)) {
+        const p = file.path;
+        queueMicrotask(() => this.vault.becamePack(p));
+      }
       this.meta.set(file.path, r.meta);
       this.keeper?.noteRead(file.path, r.record, text);
       this.resolveOne(file.path);
@@ -1500,8 +1662,36 @@ export class NodeMetadataCache implements MetadataCache {
     this.announceResolved();
   }
 
+  /** The paths links resolve among: the vault's files and the packs (a link `[[pack#row]]` leads to a row). */
   private fileIndex() {
-    return { paths: () => this.vault.getFiles().map((f) => f.path) };
+    return { paths: () => [...this.vault.getFiles().map((f) => f.path), ...this.vault.packs.packPaths()] };
+  }
+
+  /**
+   * Packs came, went or moved (`paths`, old and new): the resolver follows, and the notes whose
+   * links look up their names resolve again.
+   */
+  packsChanged(paths: readonly string[]): void {
+    for (const p of paths) {
+      if (this.vault.packs.isPack(p)) this.linkResolver.add(p);
+      else this.linkResolver.remove(p);
+      this.reresolve(fileLookupNames(p));
+    }
+    this.announceResolved();
+  }
+
+  /**
+   * Where a link leads from `source` (`resolver`: the vault's, or a fresh one): a link into a pack
+   * leads to the row its `#heading` names (`[[milk_feed 2026-10#2026-10-23T142214]]`), or to the
+   * note of that name when the row came out of the pack; a link to a pack alone leads nowhere (a
+   * pack is no note of the vault).
+   */
+  private dest(resolver: LinkResolver, linkpath: string, subpath: string, source: string): string | null {
+    const d = resolver.resolve(linkpath, source);
+    if (d === null || !this.vault.packs.isPack(d)) return d;
+    const heading = subpath.replace(/^#/, "").split("#")[0]!.trim();
+    if (heading === "") return null;
+    return this.vault.packs.rowAt(d, heading) ?? resolver.resolve(heading, source);
   }
 
   /** A file the vault has now: the links that look up its name may resolve to it. */
@@ -1528,7 +1718,7 @@ export class NodeMetadataCache implements MetadataCache {
     const unresolved: Record<string, number> = {};
     for (const l of this.meta.get(p)!.links) { // only notes read are resolved
       if (l.linkpath === "") continue;
-      const dest = this.linkResolver.resolve(l.linkpath, p);
+      const dest = this.dest(this.linkResolver, l.linkpath, l.subpath, p);
       if (dest) resolved[dest] = (resolved[dest] ?? 0) + 1;
       else unresolved[l.linkpath] = (unresolved[l.linkpath] ?? 0) + 1;
     }
@@ -1540,7 +1730,7 @@ export class NodeMetadataCache implements MetadataCache {
   private keep(p: string, resolved: Record<string, number>, unresolved: Record<string, number>): void {
     this.unregister(p);
     const names = new Set<string>();
-    for (const l of this.meta.get(p)!.links) if (l.linkpath !== "") addLinkLookupNames(names, l.linkpath, p);
+    for (const l of this.meta.get(p)!.links) for (const lp of lookups(l)) addLinkLookupNames(names, lp, p);
     this.resolved[p] = resolved;
     this.unresolved[p] = unresolved;
     for (const [dest, n] of Object.entries(resolved)) {
@@ -1606,7 +1796,7 @@ export class NodeMetadataCache implements MetadataCache {
       const unresolved: Record<string, number> = {};
       for (const l of this.meta.get(p)!.links) {
         if (l.linkpath === "") continue;
-        const dest = fresh.resolve(l.linkpath, p);
+        const dest = this.dest(fresh, l.linkpath, l.subpath, p);
         if (dest) resolved[dest] = (resolved[dest] ?? 0) + 1;
         else unresolved[l.linkpath] = (unresolved[l.linkpath] ?? 0) + 1;
       }
@@ -1622,7 +1812,7 @@ export class NodeMetadataCache implements MetadataCache {
     // the names each note looks up, and the notes looking up each name
     const lookers = new Map<string, Set<string>>();
     for (const p of notes) {
-      const names = new Set(this.meta.get(p)!.links.flatMap((l) => (l.linkpath === "" ? [] : linkLookupNames(l.linkpath, p))));
+      const names = new Set(this.meta.get(p)!.links.flatMap((l) => lookups(l).flatMap((lp) => linkLookupNames(lp, p))));
       for (const n of names) {
         if (!lookers.has(n)) lookers.set(n, new Set());
         lookers.get(n)!.add(p);
@@ -1654,6 +1844,51 @@ export class NodeMetadataCache implements MetadataCache {
     }, 20);
   }
 
+  /**
+   * The notes linking to `rows` (but those rows), each with its text now and with those links
+   * rewritten (see `PackStore.relinks`): `to: "pack"`, a link to a row becomes `[[pack#row]]`
+   * (its own `#heading` kept after it); `to: "note"`, a link `[[pack#row]]` becomes the link to the
+   * row's note. A link already in its form is left as written. Nothing is written.
+   */
+  async packRelinks(rows: readonly string[], to: "pack" | "note", targets: ReadonlyMap<string, { pack: string; heading: string }>): Promise<LinkRewrite[]> {
+    const set = new Set(rows);
+    const sources = new Set<string>();
+    for (const r of rows) for (const src of Object.keys(this.backlinksOf(r))) if (!set.has(src)) sources.add(src);
+    const format = this.vault.config.newLinkFormat;
+    const out: LinkRewrite[] = [];
+    for (const src of [...sources].sort()) {
+      const f = this.vault.getAbstractFileByPath(src);
+      if (!(f instanceof NodeFile)) continue;
+      const text = await this.vault.read(f);
+      let after = "";
+      let last = 0;
+      for (const l of parseLinks(text)) {
+        if (l.linkpath === "") continue;
+        const dest = this.dest(this.linkResolver, l.linkpath, l.subpath, src);
+        if (dest === null || !set.has(dest)) continue;
+        // through a pack: the link names the pack, its first #heading the row
+        const named = this.linkResolver.resolve(l.linkpath, src);
+        const viaPack = named !== null && named !== dest && this.vault.packs.isPack(named);
+        const md = l.kind === "md" || l.kind === "mdembed";
+        let next: string;
+        if (to === "pack") {
+          if (viaPack) continue;
+          const t = targets.get(dest)!;
+          const heading = md ? `#${encodeURI(t.heading)}` : `#${t.heading}`;
+          next = linkWritten(l, linkText(this.resolver, t.pack, src, format, true), `${heading}${l.subpath}`, true);
+        } else {
+          if (!viaPack) continue;
+          const rest = l.subpath.replace(/^#/, "").split("#").slice(1);
+          next = linkWritten(l, linkText(this.resolver, dest, src, format, true), rest.length > 0 ? `#${rest.join("#")}` : "", true);
+        }
+        after += text.slice(last, l.start) + next;
+        last = l.end;
+      }
+      if (last > 0) out.push({ path: src, before: text, after: after + text.slice(last) });
+    }
+    return out;
+  }
+
   /** Links of a note (for the file manager's rewrites). */
   linksOf(p: string): NoteLink[] {
     return this.meta.get(p)?.links ?? [];
@@ -1664,12 +1899,17 @@ export class NodeMetadataCache implements MetadataCache {
   }
 
   getFirstLinkpathDest(linkpath: string, sourcePath: string): TFile | null {
-    const dest = this.resolver.resolve(linkpath, sourcePath);
+    // `pack#row` names a row of a pack; another `#heading` is the note's
+    const hash = linkpath.indexOf("#");
+    const dest = hash < 0 ? this.resolver.resolve(linkpath, sourcePath) : hash === 0 ? null : this.dest(this.resolver, linkpath.slice(0, hash), linkpath.slice(hash), sourcePath);
     const f = dest ? this.vault.getAbstractFileByPath(dest) : null;
     return f && "extension" in f ? (f as TFile) : null;
   }
 
+  /** A link to `file` from `sourcePath`, in the vault's format; to a row of a pack, `pack#row` (Obsidian finds it too). */
   fileToLinktext(file: TFile, sourcePath: string, omitMdExtension = true): string {
+    const packed = this.vault.packs.locate(file.path);
+    if (packed) return `${linkText(this.resolver, packed.pack, sourcePath, this.vault.config.newLinkFormat, true)}#${packed.heading}`;
     return linkText(this.resolver, file.path, sourcePath, this.vault.config.newLinkFormat, omitMdExtension);
   }
 
@@ -1857,6 +2097,7 @@ export interface NodeHost {
 export function openNodeVault(root: string, config?: Partial<VaultConfig>, opts: { store?: string } = {}): NodeHost {
   const host = createNodeHost(root, config, opts);
   host.vault.scanSync();
+  host.vault.loadPacks();
   host.metadataCache.indexAll();
   following(host);
   return host;
@@ -1881,7 +2122,10 @@ export function createNodeHost(root: string, config?: Partial<VaultConfig>, opts
   const vault = new NodeVault(path.resolve(root), { ...readVaultConfig(root), ...(config ?? {}) });
   const metadataCache = new NodeMetadataCache(vault);
   const fileManager = new NodeFileManager(vault, metadataCache);
-  const app: App = { vault, metadataCache, fileManager, ...(opts.store ? { store: nodeStoreAdapter(opts.store) } : {}) };
+  const app: App = { vault, metadataCache, fileManager, packs: vault.packs, ...(opts.store ? { store: nodeStoreAdapter(opts.store) } : {}) };
+  // the stats of the rows of packs are kept in the store; the links to them follow them in and out
+  if (opts.store) vault.packs.useStore(opts.store);
+  vault.packs.relinker = (rows, to, targets) => metadataCache.packRelinks(rows, to, targets);
   return { app, vault, metadataCache, fileManager };
 }
 
@@ -1891,9 +2135,13 @@ export function createNodeHost(root: string, config?: Partial<VaultConfig>, opts
  * index-db.ts) for an engine of this version: the notes it records unchanged are not read, and
  * the host keeps it up to date; a text the engine's file cache no longer keeps comes from it, and
  * a search reads only the notes the index's search table names.
- * `hold`: nothing is written until `host.index.release()`.
+ * `hold`: nothing is written until `host.index.release()`. `packs`: the store that keeps the stats of
+ * the rows of packs (`packs.json`).
  */
-export async function indexNodeHost(host: NodeHost, o: { index?: { store: string; version: string } | null; hold?: boolean } = {}): Promise<IndexedVault & { rebuilt: string | null; indexed: boolean }> {
+export async function indexNodeHost(host: NodeHost, o: { index?: { store: string; version: string } | null; hold?: boolean; packs?: string } = {}): Promise<IndexedVault & { rebuilt: string | null; indexed: boolean }> {
+  // the packs' rows listed instead of the packs, before the notes are read (`packs`: the store that keeps their stats)
+  if (o.packs) host.vault.packs.useStore(o.packs);
+  host.vault.loadPacks();
   const opened = o.index ? IndexDb.open(o.index.store, { vault: host.vault.basePath, version: o.index.version }) : null;
   const keeper = opened ? new IndexKeeper(opened.db, host.metadataCache.indexSource()) : null;
   // `hold`: what the start found is written once the caller releases the keeper (the service: once it listens)
@@ -1914,6 +2162,7 @@ export async function indexNodeHost(host: NodeHost, o: { index?: { store: string
 
 /** Stop a host: the index on disk written and closed, the metadata cache's timers cleared. */
 export function closeNodeHost(host: NodeHost): void {
+  host.vault.packs.flush();
   host.index?.close();
   host.index = null;
   setTextSource(host.app, null);

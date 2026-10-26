@@ -66,6 +66,10 @@ export interface TableProperties {
    * a date or a time; autolink.ts).
    */
   autolink_target?: boolean;
+  /** Packs of rows: a template of a date column (`{started_at:YYYY-MM}`), the period of each pack. */
+  pack?: string;
+  /** Days after the end of a period before its rows go into a pack (absent: 7). */
+  pack_after_days?: number;
   [key: string]: unknown;
 }
 

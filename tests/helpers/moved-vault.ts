@@ -9,6 +9,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -28,9 +29,31 @@ export function freePort(): Promise<number> {
   });
 }
 
-export async function post(port: number, route: string, body: unknown = {}): Promise<{ status: number; json: Record<string, any> }> {
-  const r = await fetch(`http://127.0.0.1:${port}/datanotes/${route}`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  return { status: r.status, json: (await r.json()) as Record<string, any> };
+/**
+ * One call, on a connection of its own: the tests stop an engine and start another on the same
+ * port, and a kept-alive connection to the stopped one would be reset (ECONNRESET) when reused.
+ */
+export function post(port: number, route: string, body: unknown = {}): Promise<{ status: number; json: Record<string, any> }> {
+  const data = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: `/datanotes/${route}`, method: "POST", agent: false, headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => (text += c));
+        res.on("end", () => {
+          try {
+            resolve({ status: res.statusCode!, json: JSON.parse(text) as Record<string, any> });
+          } catch (e) {
+            reject(e);
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end(data);
+  });
 }
 
 export interface MovedVault {

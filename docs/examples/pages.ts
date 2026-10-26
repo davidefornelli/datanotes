@@ -169,6 +169,24 @@ export const PAGES: GuidePage[] = [
       ["relations", "See the relations in `metastore.yaml`"],
     ],
   },
+  {
+    path: `${DB}/packs`,
+    title: "Packs of rows",
+    description: "Keep the rows of a closed period in one note, a section per row: fewer files on disk and in git, the same rows for the engine.",
+    order: 7,
+    intro: [
+      "A table can hold thousands of small rows a year, such as a reading log or a sleep log. Each row is a note, so the table folder holds thousands of files. A pack is one note that holds the rows of one period, such as a month, one `##` section per row.",
+      "The engine still sees one row at a time. `select_rows`, links, the link graph, the change feed and the Model Context Protocol (MCP) tools give each row at its own path, with its values, text and modification time. Only the files on disk change.",
+      "The examples on this page keep a log of reading sessions.",
+    ].join("\n\n"),
+    include: "docs/examples/text/packs.md",
+    examples: [
+      ["packs", "Choose the period of a pack"],
+      ["packs", "Pack and unpack rows"],
+      ["packs", "Read and write a packed row"],
+      ["packs", "Unpack before you change the table’s layout"],
+    ],
+  },
 
   // --- Data quality ------------------------------------------------------------------------------
   {

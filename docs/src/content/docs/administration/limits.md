@@ -51,6 +51,35 @@ The first `select_rows` waits until the engine has compared the vault with its i
 - From 10,000 to 50,000 notes, start it before your agents and keep it running
 - Above about 20,000 notes, run it as a service, and give it 2 GB of memory
 
+## Keep fewer files with packs of rows
+
+A table with many small rows, such as a log, can keep the rows of each closed month in one note. [Packs of rows](/guides/database-objects/packs/) explains how. We measured 50,000 rows of one table, from 2014 to 2018, as notes of their own and then in 118 monthly packs. The machine:
+
+- Linux on an Intel Core i7-13700HX, with 32 GB of memory
+- the vault on a RAM disk (`tmpfs`)
+- Node.js 26.12
+
+| Measure | 50,000 notes | 118 packs |
+| --- | --- | --- |
+| Files in the vault | 50,001 | 119 |
+| First start | 2.9 s | 4.1 s |
+| Restart | 0.9 s | 1.3 s |
+| First `select_rows` after a restart | 0.72 s | 0.24 s |
+| `select_rows` of one month (419 rows) | 1 ms | 12 ms |
+| Memory (resident set size) when idle | 670 MB | 671 MB |
+| Vault index on disk | 48 MB | 46 MB |
+| `git add` and `git commit` of the whole vault | 684 ms | 47 ms |
+| `git status` | 27 ms | 2.7 ms |
+
+`pack_rows` packed the 50,000 rows in 35 seconds. A restart reads every pack, but takes the values of a section it read before from the store’s `packs.json`. The first start parses every section, so it takes longer.
+
+To measure on your machine, build the engine and run the benchmark on a folder of its own:
+
+```bash
+npm run build:service
+node bench/scale/packs.mjs --rows 50000 --out /tmp/packs-bench
+```
+
 ## Start faster with the vault index
 
 The engine keeps a vault index in its store, in `index/vault.sqlite`. It records what the engine read from each note: its properties, tags, links and text. It also indexes the words of each note, so `search_notes` reads only the notes that can match. It keeps each text compressed. At the next start, the engine reads only the notes that changed since.

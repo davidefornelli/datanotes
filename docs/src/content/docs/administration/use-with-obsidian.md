@@ -45,6 +45,18 @@ A note at the vault's root is `intro.md`. Operations take and return paths in th
 
 With `--database`, paths start from the database folder instead: the same row is `main/public/film/Metropolis.md`. When you open that folder in Obsidian, its root is the vault root, so links resolve there too.
 
+## Follow links into packs of rows
+
+A table with [packs of rows](/guides/database-objects/packs/) keeps the rows of a closed period in one note, one `##` section per row. Obsidian shows each pack as one note. The engine still lists every row at its own path.
+
+A link to a packed row names the pack and the row's heading:
+
+```markdown
+[[reading 2025-03#2025-03-02T2100]]
+```
+
+Obsidian follows it to the row's section, and the engine to the row. Inside a row's text, use headings from `###` down: a `#` or `##` heading would end the row's section, so such a row stays a note of its own.
+
 ## Move between a vault and a database folder
 
 [`configure_database`](/reference/operations/auxiliary/#configure_database) with `root` moves the database within the folder the engine serves. The move rewrites every link in one operation, as for any [move of the database folder](/start/how-it-works/#move-the-vault-or-the-database-folder).

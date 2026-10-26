@@ -11,6 +11,7 @@
 import type { App, EventRef, TAbstractFile, TFile } from "../core/host";
 import { adoptCreatedNote } from "../core/auto-adopt";
 import { AutoRecompute } from "../core/auto-recompute";
+import { AUTO_PACK, AutoPack } from "../core/auto-pack";
 import type { Transport } from "../core/embeddings";
 import { emptyResult, engineWriting, logExternalEdits } from "../core/engine";
 import { bumpVaultGeneration, invalidateFiles } from "../core/file-cache";
@@ -130,6 +131,9 @@ export class EngineRuntime {
   private logCheckTimer: ReturnType<typeof setInterval> | null = null;
   /** The store's housekeeping, once a day ({@link maintainStore}). */
   private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
+  /** The day's packing of closed periods (auto-pack.ts), looked at every minute on a host with packs. */
+  readonly autoPack: AutoPack;
+  private autoPackTimer: ReturnType<typeof setInterval> | null = null;
   /** Checkpoints of the transaction log waiting to be written (a job runs them after the writes that made them due). */
   private checkpointsQueued = false;
   /** Background work started without a caller to wait for it: `stop()` waits for it. */
@@ -173,6 +177,7 @@ export class EngineRuntime {
       (a, settings, input) => (this.relocation ? Promise.resolve(emptyResult("recompute_columns", false)) : recomputeColumns(a, settings, input)),
       (path, e) => telemetry().log("WARN", "datanotes recompute failed", { path, error: messageOf(e) }),
     );
+    this.autoPack = new AutoPack(app, o.getSettings);
     this.inverse = new InverseWatcher(app, o.getSettings, async (changes) => {
       if (this.relocation) return;
       try {
@@ -681,6 +686,13 @@ export class EngineRuntime {
     this.track(job("job store_maintenance", () => this.maintainStore()), "store maintenance");
     this.maintenanceTimer = setInterval(() => this.track(job("job store_maintenance", () => this.maintainStore()), "store maintenance"), MAINTENANCE_EVERY_MS);
     this.maintenanceTimer.unref?.();
+    // the closed periods go into packs once a day, when the engine is quiet (a host with packs only)
+    if (app.packs) {
+      this.autoPackTimer = setInterval(() => {
+        if (!this.relocation) this.track(job("job auto_pack", () => this.autoPack.tick().then(() => undefined)), "auto pack");
+      }, AUTO_PACK.checkEveryMs);
+      this.autoPackTimer.unref?.();
+    }
     // a checkpoint a write makes due is written after it, as work of its own (the write does not wait)
     setCheckpointRunner(app, () => this.checkpointSoon());
     // The safety net of the log's current states kept between syncs: compared with every row
@@ -882,6 +894,8 @@ export class EngineRuntime {
     this.logCheckTimer = null;
     if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
     this.maintenanceTimer = null;
+    if (this.autoPackTimer) clearInterval(this.autoPackTimer);
+    this.autoPackTimer = null;
     // writes from here on write their checkpoints themselves (the jobs end with the others below)
     setCheckpointRunner(this.o.app, null);
     this.checkpointsQueued = false;

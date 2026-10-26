@@ -311,6 +311,20 @@ function encodeMd(path: string): string {
  * `resolveOld` resolves a link path as the vault was before the rename; `moved` maps old paths to
  * new ones; `textFor` gives the new link text for a new path from this note.
  */
+/**
+ * A link written again as `l` was (its kind and alias) with another target text and subpath: a
+ * wikilink `[[text#sub|alias]]`, an embed, or a Markdown link `[alias](text.md#sub)` (`toNote`:
+ * the target is a note, its `.md` written).
+ */
+export function linkWritten(l: LinkRef, linkTxt: string, subpath: string, toNote: boolean): string {
+  if (l.kind === "md" || l.kind === "mdembed") {
+    const md = toNote && !/\.md$/i.test(linkTxt) ? `${linkTxt}.md` : linkTxt;
+    return `${l.kind === "mdembed" ? "!" : ""}[${l.alias!}](${encodeMd(md)}${subpath})`; // a Markdown link always has its text
+  }
+  const bang = l.kind === "embed" ? "!" : "";
+  return `${bang}[[${linkTxt}${subpath}${l.alias !== undefined ? `|${l.alias}` : ""}]]`;
+}
+
 export function rewriteLinks(
   text: string,
   sourcePath: string,
@@ -334,14 +348,7 @@ export function rewriteLinks(
     if (!to && (oldSourcePath === sourcePath || resolveNew(l.linkpath, sourcePath) === target)) continue;
     const dest = to ?? target;
     const linkTxt = dest === sourcePath && l.subpath && l.kind !== "md" && l.kind !== "mdembed" ? "" : textFor(dest, sourcePath, l.kind);
-    let replacement: string;
-    if (l.kind === "md" || l.kind === "mdembed") {
-      const md = /\.md$/i.test(dest) && !/\.md$/i.test(linkTxt) ? `${linkTxt}.md` : linkTxt;
-      replacement = `${l.kind === "mdembed" ? "!" : ""}[${l.alias!}](${encodeMd(md)}${l.subpath})`; // a Markdown link always has its text
-    } else {
-      const bang = l.kind === "embed" ? "!" : "";
-      replacement = `${bang}[[${linkTxt}${l.subpath}${l.alias !== undefined ? `|${l.alias}` : ""}]]`;
-    }
+    const replacement = linkWritten(l, linkTxt, l.subpath, /\.md$/i.test(dest));
     const original = text.slice(l.start, l.end);
     if (replacement === original) continue;
     out += text.slice(last, l.start) + replacement;

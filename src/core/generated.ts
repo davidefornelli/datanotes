@@ -21,7 +21,7 @@
  *   `count(feeds, side = "left")`, `sum(feeds.min, min > 0)`.
  */
 
-import { parseWikilink } from "./validate";
+import { linkNoteName } from "./validate";
 import { formatDateTokensOrNull } from "./datetime";
 import { GuidedError, guide, type Guidance } from "./hints";
 
@@ -192,8 +192,8 @@ function display(value: unknown): string {
   if (typeof value === "string") {
     const alias = value.match(/^\[\[[^\]|]*\|([^\]]+)\]\]$/);
     if (alias) return alias[1]!.trim();
-    const link = parseWikilink(value);
-    if (link != null) return link.split("/").pop()!.replace(/\.md$/i, "");
+    const link = linkNoteName(value);
+    if (link != null) return link;
     return value;
   }
   return String(value);

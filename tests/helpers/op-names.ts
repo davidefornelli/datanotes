@@ -16,6 +16,8 @@ export const JOURNALED_WRITES: readonly string[] = [
   "undo_migration",
   "restore_table",
   "restore_database",
+  "pack_rows",
+  "unpack_rows",
 ];
 
 /**

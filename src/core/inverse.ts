@@ -71,7 +71,7 @@ function buildInverseSpecs(model: Metastore): Map<string, InverseSpec[]> {
   return out;
 }
 
-const LINK_RE = /^\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]$/;
+const LINK_RE = /^\[\[([^\]|#]+)(#[^\]|]*)?(?:\|[^\]]*)?\]\]$/;
 
 /** Vault paths a link value (one link or a list) points to, resolved from `source`. */
 export function linkTargets(app: App, value: unknown, source: string): string[] {
@@ -80,7 +80,9 @@ export function linkTargets(app: App, value: unknown, source: string): string[] 
   for (const v of items) {
     const m = typeof v === "string" ? LINK_RE.exec(v.trim()) : null;
     if (!m) continue;
-    const dest = app.metadataCache.getFirstLinkpathDest(m[1]!.trim(), source)?.path;
+    // a row of a pack is [[pack#row]]: its heading too, on a host with packs
+    const heading = app.packs !== undefined && m[2] !== undefined && m[2].trim().length > 1 ? m[2].trim() : "";
+    const dest = app.metadataCache.getFirstLinkpathDest(`${m[1]!.trim()}${heading}`, source)?.path;
     if (dest && !out.includes(dest)) out.push(dest);
   }
   return out;

@@ -10,6 +10,7 @@ import columns from "./columns";
 import history from "./history";
 import importing from "./importing";
 import linking from "./linking";
+import packs from "./packs";
 import { PAGES, type GuidePage } from "./pages";
 import queries from "./queries";
 import relations from "./relations";
@@ -19,7 +20,7 @@ import vault from "./vault";
 import writing from "./writing";
 import type { Chapter } from "./types";
 
-export const CHAPTERS: Chapter[] = [tables, columns, relations, writing, linking, queries, importing, structure, history, vault];
+export const CHAPTERS: Chapter[] = [tables, columns, relations, writing, linking, queries, importing, structure, history, vault, packs];
 
 export { PAGES, pageOfExample, type GuidePage, type ExampleRef } from "./pages";
 export { runChapter, type ChapterRun } from "./run";

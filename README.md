@@ -14,7 +14,7 @@ Datanotes is the open-source database engine for Markdown: it runs a folder of n
 
 - **Agents can't write garbage.** Every write is checked against its table: types, links, unique values and CHECK constraints. A refused write changes nothing. Its answer says which value broke which rule and how to fix it.
 - **Every change can be undone.** The engine journals every write it makes. It records who made it: the agent, its session and its token. `undo_migration` takes any change back.
-- **It's still just Markdown.** A row is a note, and its front matter keys are the columns. Read it, edit it, grep it or commit it to Git. The engine reads your hand edits and checks them too.
+- **It's still just Markdown.** A row is a note, or a section of a pack note, and its front matter keys are the columns. Read it, edit it, grep it or commit it to Git. The engine reads your hand edits and checks them too.
 - **Extensions.** Install tables and MCP tools from a git repository, pinned and confirmed (`datanotes extension install`).
 - **Local first.** Datanotes is Apache-2.0 and runs on your machine. Nothing leaves it unless you turn that feature on.
 

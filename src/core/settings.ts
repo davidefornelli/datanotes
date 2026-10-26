@@ -58,6 +58,12 @@ export interface DatanotesSettings {
    */
   autoRecompute: boolean;
   /**
+   * Once a day, after 10 minutes without writes, put the rows of closed periods into packs
+   * (`pack_rows` on every table with a `pack` option; the engine service only). Off: tables are
+   * packed only by `pack_rows`.
+   */
+  autoPack: boolean;
+  /**
    * Rewrite the links to a note renamed or moved by hand (in a file manager, with git or a sync
    * tool), across the vault, once the vault has been quiet for 4 s and not while git pulls,
    * rebases or merges. The repair is one journaled `repair_links` operation that undo takes back.
@@ -163,6 +169,7 @@ export const DEFAULT_SETTINGS: DatanotesSettings = {
   telemetrySlowSpanMs: 0,
   telemetryEnvironment: "",
   autoRecompute: true,
+  autoPack: true,
   repairLinksOnHandMove: true,
   semanticEnabled: false,
   semanticProvider: "ollama",
@@ -207,6 +214,7 @@ const KEYS: (keyof DatanotesSettings)[] = [
   "telemetrySlowSpanMs",
   "telemetryEnvironment",
   "autoRecompute",
+  "autoPack",
   "repairLinksOnHandMove",
   "semanticEnabled",
   "semanticProvider",
@@ -376,6 +384,7 @@ export function mergeWithDefaults(
       case "fileLogEnabled":
       case "semanticEnabled":
       case "autoRecompute":
+      case "autoPack":
       case "writePriority":
       case "vaultIndexEnabled":
       case "repairLinksOnHandMove": {

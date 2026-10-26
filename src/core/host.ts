@@ -155,6 +155,54 @@ export interface LinkRewrite {
  */
 export type StoreAdapter = VaultAdapter;
 
+/** A pack of rows as the host keeps it: its file, its table and key, the paths of its rows. */
+export interface PackInfo {
+  /** The pack's file (`family/babycare/milk_feed/milk_feed 2026-10.md`). */
+  path: string;
+  table: string;
+  key: string;
+  /** Its rows, by the path each would have as a note of its own (the vault lists them there). */
+  rows: string[];
+}
+
+/**
+ * Packs of rows (a table's `pack` option): one note holding many rows of a table, one `##`
+ * section per row (pack-format.ts). The host lists each row of a pack as a note of its own, at
+ * the path its values give it (its logical path): the engine reads, writes, links and deletes it
+ * as any note, and never sees the pack's file. A host without packs leaves `App.packs` out, and
+ * the `pack` option is refused.
+ *
+ * Packing and unpacking are silent: the rows keep their paths, their text and their stat (no
+ * vault event, no change of `file_modified`).
+ */
+export interface PackStore {
+  /** Whether `path` is the file of a pack. */
+  isPack(path: string): boolean;
+  /** The pack holding the row at `path` and the row's heading in it; null for a note of its own. */
+  locate(path: string): { pack: string; heading: string } | null;
+  /** The packs of a table (`catalog.schema.table`), by path. */
+  packsOf(table: string): PackInfo[];
+  /**
+   * Put rows of `table` that are notes of their own (`rows`: their paths) into the pack of `key`
+   * (made at `path` when there is none yet): each note's text becomes a section, and the note's
+   * file goes. `tableKey`: the property that names a row's table. Returns the pack's path.
+   */
+  pack(input: { table: string; key: string; path: string; rows: readonly string[]; tableKey: string }): Promise<string>;
+  /**
+   * Take rows out of the pack at `pack` (`rows`: their paths; all when absent) as notes of their
+   * own at their paths, with the text and the modification time they had in it; a pack left
+   * without rows goes. Returns the rows' paths.
+   */
+  unpack(pack: string, rows?: readonly string[]): Promise<string[]>;
+  /**
+   * The notes whose links lead to `rows`, each with its text now and with those links rewritten:
+   * `to: "pack"` (the rows go into packs; `targets` gives each its pack and heading) writes
+   * `[[pack#row]]`, the form Obsidian follows too; `to: "note"` (they come out) writes the link to
+   * the note. The notes among `rows` are left as they are. Nothing is written.
+   */
+  relinks(rows: readonly string[], to: "pack" | "note", targets: ReadonlyMap<string, { pack: string; heading: string }>): Promise<LinkRewrite[]>;
+}
+
 /** The environment the engine runs in. Named `App` so engine code reads like plugin code. */
 export interface App {
   vault: Vault;
@@ -165,4 +213,6 @@ export interface App {
    * folder, through `vault.adapter`.
    */
   store?: StoreAdapter;
+  /** Packs of rows (see {@link PackStore}); absent on a host without them (Obsidian). */
+  packs?: PackStore;
 }
