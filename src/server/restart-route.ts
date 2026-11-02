@@ -119,7 +119,7 @@ export function restartHandler(deps: RestartDeps): Handler {
     };
     if (dry_run) return { status: 200, json: answer };
     if (check.restarting) {
-      return fail(409, "the engine is already restarting", 'Wait until it is back (POST /datanotes/restart/ with "dry_run": true answers with a new started_at), then ask again.');
+      return fail(409, "the engine is already restarting", 'Wait until it is back (POST /datanotes/restart/ with "dry_run": true answers "restarting": false), then ask again.');
     }
     if (check.problems.length > 0) {
       const first = check.problems[0]!;

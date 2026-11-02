@@ -1,6 +1,8 @@
 /**
  * ChangeFeed.sessions orders two sessions whose last events share a time by their sequence number:
- * the later event comes first (R1w2-6; it made tests/sessions-route.test.ts flaky).
+ * the later event comes first (R1w2-6). The ordering failures of tests/sessions-route.test.ts on CI
+ * had another cause: sessions() read the day files before the feed had recorded the events of a
+ * write already answered (fixed by waiting for the feed's queue; tested there).
  */
 
 import { describe, expect, it } from "vitest";

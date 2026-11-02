@@ -76,13 +76,17 @@ function post(port: number, route: string, body: unknown = {}, token = TOKEN, he
 
 const dry = async (port: number, token = TOKEN) => (await post(port, "/restart/", { dry_run: true }, token)).json;
 
-/** Poll the dry run every 100 ms until it answers another started_at (at most 30 s). */
+/**
+ * Poll the dry run every 100 ms until it answers another started_at and is no longer restarting
+ * (at most 30 s): the new engine answers a moment before the run has finished the restart, with a
+ * new started_at and `restarting: true`.
+ */
 async function waitBack(port: number, before: string, token = TOKEN): Promise<Json> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {
       const r = await post(port, "/restart/", { dry_run: true }, token);
-      if (r.status === 200 && r.json.started_at !== before) return r.json;
+      if (r.status === 200 && r.json.started_at !== before && r.json.restarting === false) return r.json;
     } catch {
       // not listening yet
     }

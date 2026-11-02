@@ -186,3 +186,31 @@ describe("sessions/ without a change feed", () => {
     }
   });
 });
+
+describe("sessions/ right after a write", () => {
+  it("counts a write already answered, even while the change feed is still recording its events", async () => {
+    const r = await startReadEngine();
+    try {
+      const feed = r.runtime.changeFeed!;
+      const ownerOf = async () => sessionsOf(await r.route("owner", "/sessions/", {})).find((x) => x.token === "owner")!;
+      const before = await ownerOf();
+      // a slow store (CI runners sync their disks slowly): the operation answers before the feed
+      // has recorded its events, as it always may
+      const slowed = feed as unknown as { fromEngine(e: unknown): Promise<void> };
+      const record = slowed.fromEngine.bind(feed);
+      slowed.fromEngine = async (e) => {
+        await new Promise((res) => setTimeout(res, 100));
+        await record(e);
+      };
+      const seq = feed.lastSeq;
+      expect((await r.op("owner", "insert_row", { table: PANTRY, values: { item: "salt", qty: 1 } })).status).toBe(200);
+      expect(feed.lastSeq).toBe(seq); // not recorded yet
+      const after = await ownerOf();
+      expect(after.row_change_count).toBe(before.row_change_count + 1);
+      expect(after.last_seq).toBe(feed.lastSeq);
+      expect(after.last_seq).toBeGreaterThan(seq);
+    } finally {
+      await r.dispose();
+    }
+  });
+});

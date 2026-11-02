@@ -128,12 +128,23 @@ describe("waitForRestart", () => {
       { status: 200, json: { started_at: BEFORE } },
       { status: 503, json: { error: "the engine is restarting" } },
       "throw",
-      { status: 200, json: { started_at: "2026-11-02T10:05:03.000Z" } },
+      { status: 200, json: { started_at: "2026-11-02T10:05:03.000Z", restarting: false } },
     ]);
     expect(RESTART_TIMEOUT_MS).toBe(180_000);
     await expect(waitForRestart(f.deps, { before: BEFORE, requestedAt: REQ, newToken: false })).resolves.toEqual({ kind: "back", startedAt: "2026-11-02T10:05:03.000Z" });
     expect(f.phases).toEqual(["stopping", "stopping", "starting"]);
     expect(f.elapsed).toEqual([0, 1000, 2000]);
+  });
+  it("a new started_at while still restarting keeps waiting: the new engine answers before its start is finished", async () => {
+    const f = fakes([
+      { status: 200, json: { started_at: BEFORE, restarting: true } },
+      { status: 200, json: { started_at: "2026-11-02T10:05:03.000Z", restarting: true } },
+      { status: 200, json: { started_at: "2026-11-02T10:05:03.000Z" } },
+      { status: 200, json: { started_at: "2026-11-02T10:05:03.000Z", restarting: false } },
+    ]);
+    await expect(waitForRestart(f.deps, { before: BEFORE, requestedAt: REQ, newToken: false })).resolves.toEqual({ kind: "back", startedAt: "2026-11-02T10:05:03.000Z" });
+    expect(f.calls()).toBe(4);
+    expect(f.phases).toEqual(["stopping", "stopping", "stopping"]);
   });
   it("cancelled for this restart; another cancel keeps waiting", async () => {
     const f = fakes([
@@ -163,7 +174,7 @@ describe("waitForRestart", () => {
       { status: 200, json: null },
       { status: 200, json: [1] },
       { status: 200, json: {} },
-      { status: 200, json: { started_at: "new" } },
+      { status: 200, json: { started_at: "new", restarting: false } },
     ]);
     delete f.deps.progress;
     await expect(waitForRestart(f.deps, { before: BEFORE, requestedAt: REQ, newToken: false })).resolves.toEqual({ kind: "back", startedAt: "new" });

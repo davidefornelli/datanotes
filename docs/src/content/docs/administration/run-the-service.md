@@ -273,6 +273,8 @@ The engine restarts in its own process:
 3. It keeps its lock, so no other engine takes the store meanwhile.
 4. It starts again with the same options, and reads the settings file again.
 
+To know when the restart is over, poll the dry run until `restarting` is `false`. A new `started_at` then means the restart is done. The new engine answers a moment before it has finished starting: its `started_at` is new, but `restarting` is still `true`.
+
 The process, its pid and its terminal stay the same, so whatever supervises the engine sees no change. A restart runs the same version: to update Datanotes, stop the engine and start the new version.
 
 The engine cancels a restart when a request still runs after 30 seconds, so a restart never cuts a write. The engine then serves again with its current settings and logs a warning. Its next dry run reports the cancellation in `last_cancelled`.

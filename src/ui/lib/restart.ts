@@ -142,7 +142,10 @@ export async function retryOnce<T>(f: () => Promise<T>, sleep: (ms: number) => P
   }
 }
 
-/** Polls the dry run until the engine is back (a new started_at), refuses, cancels, or the time is up. */
+/**
+ * Polls the dry run until the engine is back (a new started_at, and no longer restarting: the new
+ * engine answers a moment before its start is finished), refuses, cancels, or the time is up.
+ */
 export async function waitForRestart(deps: WaitDeps, o: WaitOptions): Promise<WaitOutcome> {
   const every = o.everyMs ?? 1000;
   const timeout = o.timeoutMs ?? RESTART_TIMEOUT_MS;
@@ -161,10 +164,11 @@ export async function waitForRestart(deps: WaitDeps, o: WaitOptions): Promise<Wa
     if (a) {
       const j = (typeof a.json === "object" && a.json !== null && !Array.isArray(a.json) ? a.json : {}) as {
         started_at?: unknown;
+        restarting?: unknown;
         last_cancelled?: { requested_at?: unknown; reason?: unknown };
       };
       if (a.status === 401) return o.newToken ? { kind: "new-token" } : { kind: "refused" };
-      if (a.status === 200 && typeof j.started_at === "string" && j.started_at !== o.before) return { kind: "back", startedAt: j.started_at };
+      if (a.status === 200 && typeof j.started_at === "string" && j.started_at !== o.before && j.restarting === false) return { kind: "back", startedAt: j.started_at };
       if (a.status === 200 && j.last_cancelled?.requested_at === o.requestedAt) return { kind: "cancelled", reason: String(j.last_cancelled.reason) };
     }
     deps.progress?.(phase, elapsed);

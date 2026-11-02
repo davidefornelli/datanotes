@@ -1168,8 +1168,13 @@ export class ChangeFeed {
    * The agent sessions (and each credential's work without a session) seen since `since` (ms), the
    * most recent first: read from the day files, so every event is counted, not only the ones kept
    * in memory. Events without a credential (hand edits, background work) are left out.
+   *
+   * An operation answers before the feed has recorded its events (they are computed and appended
+   * after, in order): the changes already queued are recorded first, so every write answered
+   * before this call is counted.
    */
   async sessions(since: number, opts: { auth?: string; limit: number }): Promise<SessionSummary[]> {
+    await this.queue;
     const fromDay = new Date(since).toISOString().slice(0, 10);
     const groups = new Map<string, SessionGroup>();
     for (const f of (await storeList(this.app, this.dir())).files.filter((x) => x.endsWith(".jsonl")).sort()) {
