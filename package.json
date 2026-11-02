@@ -126,7 +126,7 @@
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/markdown-it": "14.2.0",
     "@types/node": "^22.10.0",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^5.1.0",
     "esbuild": "0.25.5",
     "markdown-it": "14.3.3",
     "playwright-core": "1.64.1",
