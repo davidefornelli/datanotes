@@ -1,6 +1,6 @@
 ---
 title: Run the engine as a service
-description: "Start datanotes serve on a database folder or a vault, find its store, choose its address, its port and how it sees file changes, keep one engine per database, and stop it cleanly with datanotes stop."
+description: "Start datanotes serve on a database folder or a vault. Find its store, choose its address and port, and pick how it sees file changes. Keep one engine per database, and stop it cleanly with datanotes stop."
 sidebar:
   label: Run the Service
   order: 1
@@ -20,7 +20,7 @@ The folder is the database: `metastore.yaml` sits at its root, and a new databas
 
 When an app such as Obsidian opens a whole vault, start the engine on the vault with `--vault your_vault_folder` instead. The database is then a subfolder of the vault, and paths start from the vault root. [Use Datanotes with Obsidian](/administration/use-with-obsidian/) explains this mode. Give one of the two options: the engine refuses both together.
 
-The first start creates the engine’s store and its settings file, `settings.json`, with the port `27150` and a random owner token. The engine then serves the HTTP API on `http://127.0.0.1:27150`. To see where the store is, run:
+The first start creates the engine’s store and its settings file, `settings.json`. The file holds the port `27150` and a random owner token. The engine then serves the HTTP API on `http://127.0.0.1:27150`. To see where the store is, run:
 
 ```bash
 npx -y datanotes store path --database your_database_folder
@@ -64,7 +64,7 @@ Each database has its own store, named after its id: `<data home>/<database id>/
 | macOS | `~/Library/Application Support/Datanotes` |
 | Linux | `$XDG_DATA_HOME/datanotes`, by default `~/.local/share/datanotes` |
 
-Everything the engine keeps is in that one folder, so you can back it up or archive it as a whole. The [store backup](/guides/history/back-up/) does it for you: it pushes the journal and the history to a private git repository. Your folder holds only your notes and `metastore.yaml`: sync tools and git see no engine files.
+The engine keeps everything in that one folder. You can back it up or archive it as a whole. The [store backup](/guides/history/back-up/) does it for you: it pushes the journal and the history to a private git repository. Your folder holds only your notes and `metastore.yaml`: sync tools and git see no engine files.
 
 You can place the store elsewhere:
 
@@ -96,7 +96,7 @@ Each option has an environment variable, which applies when the command line doe
 | None | `DATANOTES_GIT_NETWORK_TIMEOUT_S` | Seconds a git fetch, pull or push of git sync and the store backup may take; default 600 |
 | `--log your_log_file` | None | Appends the console output to a file |
 
-The port and the owner token live in the settings file, with every other setting: [Configure the engine and the database](/administration/configuration/) explains them.
+The port and the owner token live in the settings file, with every other setting. [Configure the engine and the database](/administration/configuration/) explains them.
 
 ## Choose the port
 
@@ -108,7 +108,7 @@ npx -y datanotes serve --database your_database_folder --port 27180
 
 With `--port 0`, the system picks a free port. The engine prints the port at start, writes it in its lock and reports it in `datanotes status`. Tools such as `datanotes mcp --database` read the port from the lock, so they find the engine on any port. `--port` doesn’t change the settings file.
 
-When the port is in use, the engine waits up to 45 seconds for it, because an engine that restarts may still be closing. It prints a line while it waits. When the engine can’t listen, it exits with code 1 and says why and what to do:
+When the port is in use, the engine waits up to 45 seconds. An engine that restarts may still be closing. It prints a line while it waits. When the engine can’t listen, it exits with code 1 and says why and what to do:
 
 - **The port is in use**: another program holds it, often another engine. Stop that program, or pass another `--port`.
 - **The system reserves the port**: choose another port from 1024 to 65535. On Windows, `netsh interface ipv4 show excludedportrange protocol=tcp` lists the reserved ports.
@@ -132,28 +132,28 @@ To rename or move the database folder, call `configure_database` with `root`, or
 
 ## Run a copy of a vault
 
-A copy of a vault holds the same database id as the original. Two databases can’t share a store, so the engine refuses to start on the copy while the original vault still exists. Give the copy its own id, with the engine stopped:
+A copy of a vault holds the same database id as the original. Two databases can’t share a store. The engine refuses to start on the copy while the original vault still exists. Give the copy its own id, with the engine stopped:
 
 ```bash
 npx -y datanotes store new-id --vault your_copy_folder
 ```
 
-The copy then gets a new, empty store at its next start: new settings, a new owner token, an empty journal and no history. To run both engines at once, start the copy with `--port 0`, or set its `httpServerPort`. To keep the original’s history in the copy, copy the original’s store too and start the copy with `--store`.
+The copy then gets a new, empty store at its next start. It has new settings, a new owner token, an empty journal and no history. To run both engines at once, start the copy with `--port 0`, or set its `httpServerPort`. To keep the original’s history in the copy, copy the original’s store too and start the copy with `--store`.
 
 `new-id` changes `metastore.yaml`, and git or a sync tool carries that change to every copy of the vault. For a second clone of a synced vault on the same machine, start the clone with its own `--store` instead.
 
-Moving a vault isn’t a copy. When the vault recorded in the store no longer exists, or no longer holds the database, the engine follows the vault to its new place.
+Moving a vault isn’t a copy. The engine follows the vault to its new place. This happens when the vault recorded in the store no longer exists, or no longer holds the database.
 
 ## Choose how the engine sees file changes
 
 The engine reads hand edits, from an editor, git or a sync tool, as soon as it sees them:
 
-- **`events`**: the operating system reports each change, and the engine reacts within a fraction of a second; use it on a local disk
-- **`poll`**: the engine scans the vault every `--poll-ms` milliseconds; use it where file events don’t arrive, such as network shares and bind mounts from Windows and macOS hosts
+- **`events`**: the operating system reports each change. The engine reacts within a fraction of a second. Use it on a local disk
+- **`poll`**: the engine scans the vault every `--poll-ms` milliseconds. Use it where file events don’t arrive, such as network shares and bind mounts from Windows and macOS hosts
 
 A scan of a large vault over a slow share takes seconds. The engine then scans less often, and doesn’t scan before each operation. [Limits](/administration/limits/#keep-a-docker-vault-on-a-linux-volume) explains this, and how to keep a large vault on a Linux volume.
 
-In both modes, the engine reads a note you rename or move as a rename, and [repairs the links to it](/start/how-it-works/#the-engine-repairs-links-after-a-hand-move).
+In both modes, the engine reads a note you rename or move as a rename. It [repairs the links to it](/start/how-it-works/#the-engine-repairs-links-after-a-hand-move).
 
 ## Run one engine per database
 
@@ -169,7 +169,7 @@ If the refusal names a process that isn’t a Datanotes engine, delete the `engi
 
 Two engines started at once on the same vault take turns. The first writes the database’s id. The second waits up to 60 seconds, then refuses because the first holds the database.
 
-The lock lives in the store, not in the database folder. So it refuses only a second engine that uses the same store. An engine with a store of its own doesn’t see it and starts, and the two engines then lose each other’s writes. That happens in three cases:
+The lock lives in the store, not in the database folder. So it refuses only a second engine that uses the same store. An engine with a store of its own doesn’t see it and starts. The two engines then lose each other’s writes. That happens in three cases:
 
 - an engine started with another `--store` or `DATANOTES_STORE`
 - the engine in Docker next to an engine on the host, on the same folder
@@ -179,7 +179,7 @@ Run one engine per database folder. Never run the host engine and the Docker eng
 
 ## Keep the engine local
 
-The engine listens on `127.0.0.1` unless you start it with `--host`, and it answers no Cross-Origin Resource Sharing (CORS) preflight, so web pages can’t call it. To reach it from another device, put a reverse proxy or a tunnel in front of it, over HTTPS, as the [security model](/guides/security/security-model/) explains, and give each device its own [named token](/guides/security/tokens/).
+The engine listens on `127.0.0.1` unless you start it with `--host`. It answers no Cross-Origin Resource Sharing (CORS) preflight, so web pages can’t call it. To reach it from another device, put a reverse proxy or a tunnel in front of it, over HTTPS. The [security model](/guides/security/security-model/) explains how. Give each device its own [named token](/guides/security/tokens/).
 
 ## Stop the engine
 
@@ -208,7 +208,7 @@ The exit code says what happened:
 | `0` | The engine stopped |
 | `1` | The engine didn’t stop: it didn’t answer, or still runs after the timeout |
 | `2` | No engine runs on the folder |
-| `3` | The engine runs but `datanotes stop` couldn’t ask it: it runs on another machine, is still starting, or refused the request |
+| `3` | The engine runs but `datanotes stop` couldn’t ask it. It runs on another machine, is still starting, or refused the request |
 
 Ctrl+C and the `SIGINT`, `SIGTERM` and `SIGBREAK` signals stop the engine the same way. A program can call the route itself, `POST /datanotes/stop/`, with the owner token. The route takes POST only: a `GET` gets status 405 and stops nothing. A named token can’t stop the engine.
 
@@ -218,6 +218,94 @@ A forced stop, such as `kill -9` or `Stop-Process -Force`, has two costs:
 - **Writes**: a write it interrupts may stay half applied. The engine writes the notes first and records the write in the journal last, so `undo_migration` can’t revert that part. Run `check_table` after the next start to find the rows it left.
 
 So use `datanotes stop` first, with a longer `--timeout-s` when the engine is busy. Outside Windows, `kill <pid>` sends `SIGTERM`, which stops the engine gracefully too. Force the stop only as a last resort.
+
+## Restart the engine
+
+The owner restarts the engine from the Engine settings page of the [database browser](/administration/database-browser/#change-the-engines-settings), or with `POST /datanotes/restart/`. A restart applies the settings that wait for one, and the hand edits of the settings file.
+
+Ask first what a restart would do, with `"dry_run": true`:
+
+```bash
+curl -X POST http://127.0.0.1:27150/datanotes/restart/ \
+  -H "Authorization: Bearer your_owner_token" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run": true}'
+```
+
+The engine answers:
+
+```json
+{
+  "ok": true,
+  "dry_run": true,
+  "restarting": false,
+  "ready": true,
+  "problems": [],
+  "will_apply": ["storeBackupIntervalSeconds"],
+  "still_overridden": [],
+  "warnings": [],
+  "port": 27150,
+  "port_after": 27150,
+  "started_at": "2026-11-02T08:41:16.884Z",
+  "pid": 413356,
+  "started_by": "unknown"
+}
+```
+
+The answer has these fields:
+
+- **`ready`**: `true` when a restart may start now
+- **`problems`**: why the next start would fail, each with a hint
+- **`will_apply`**: the settings whose value changes at the restart, by name
+- **`still_overridden`**: settings that changed, but that a start option keeps overriding
+- **`port_after`**: the port after the restart
+- **`started_at`**: when this run started; a restart changes it
+- **`started_by`**: how the engine was started, as far as it can tell: `systemd`, `container`, `terminal` or `unknown`
+
+Send `{}` to restart. The answer comes at once, with `restarting: true`. Only the owner token may restart the engine. The route takes POST only: a `GET` gets status 405.
+
+### What a restart does
+
+The engine restarts in its own process:
+
+1. It answers new requests with status 503, `the engine is restarting`. It finishes the requests under way, for up to 30 seconds.
+2. It stops writing and makes the last store backup and git sync pushes, as `datanotes stop` does.
+3. It keeps its lock, so no other engine takes the store meanwhile.
+4. It starts again with the same options, and reads the settings file again.
+
+The process, its pid and its terminal stay the same, so whatever supervises the engine sees no change. A restart runs the same version: to update Datanotes, stop the engine and start the new version.
+
+The engine cancels a restart when a request still runs after 30 seconds, so a restart never cuts a write. The engine then serves again with its current settings and logs a warning. Its next dry run reports the cancellation in `last_cancelled`.
+
+Clients of the change feed reconnect once the engine is back. Long polls end at once, and the change stream closes. Clients resume from their cursor, `since` or `Last-Event-ID`. Webhooks resume from their stored cursor.
+
+During a restart, `datanotes status` and `datanotes stop` may report the engine as starting.
+
+### The checks before a restart
+
+Before it stops, the engine checks that it will start again. It refuses the restart with status 409 when one check fails, and nothing stops:
+
+- **The folder**: the database folder must still exist.
+- **The settings file**: it must exist, hold one JSON object and pass the loader’s rules.
+- **The owner token**: the file must hold `httpServerToken`. Without it, the next start would make a new token.
+- **The port**: a new port must be free.
+
+The refusal lists every problem in `problems`. A restart already under way gets 409 too.
+
+### The port and the owner token
+
+After a restart, the engine listens on `--port` when you gave it, else on `httpServerPort`. When that is `0`, any free port, the restart keeps the port it has. Start options such as `--port` and the store backup’s options keep winning over the settings. The answer lists them in `still_overridden`.
+
+A new port means a new address: point your programs, proxies and published ports at it. A new owner token means the old one stops working: every program that uses it needs the new one.
+
+### When the new start fails
+
+The checks can’t see every cause, such as a second `metastore.yaml` in the vault. When the new start fails, the engine prints the guided error and exits with code 1. A failed `datanotes serve` does the same. What happens next depends on how you run it:
+
+- **In a terminal**: the engine stays stopped. The terminal shows why; start it again there.
+- **Under systemd**: systemd starts it again only with `Restart=on-failure` or `Restart=always`. `journalctl` shows why.
+- **In Docker**: the container ends too. The Datanotes compose file has `restart: unless-stopped`, so Docker starts it again. `docker logs` shows why.
+- **With `npm run dev`**: the dev script ends with the engine.
 
 ## Stop the engine as a Windows service
 
@@ -238,4 +326,4 @@ if ($report.exit_code -eq 1 -and $report.pid) {
 exit 0
 ```
 
-Set the script as the stop command of your service wrapper, and give the wrapper a stop timeout longer than `$Timeout`. Exit code 2 needs nothing more: no engine runs.
+Set the script as the stop command of your service wrapper. Give the wrapper a stop timeout longer than `$Timeout`. Exit code 2 needs nothing more: no engine runs.

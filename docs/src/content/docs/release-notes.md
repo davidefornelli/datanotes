@@ -5,6 +5,42 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.7.0
+
+Datanotes 3.7.0 brings a database browser, served by the engine at `/datanotes/ui/`. It only adds to 3.6: no operation, argument or setting goes away.
+
+### The database browser
+
+[Browse and administer the database](/administration/database-browser/) explains it.
+
+- **The browser**: sign in with a token, then browse and edit rows, change the structure and manage tokens. Read the history and undo, administer the engine, and change its settings.
+- **Inside the engine**: it ships in the package and needs nothing else. Every call it makes needs a token.
+
+### New routes and arguments
+
+- **`tokens/permissions/`**: what each named token may read and write in every table and view, as the engine applies it. Owner only.
+- **`sessions/`**: the agent sessions of each credential, with their harness, model, tool calls and row changes. Owner only.
+- **`settings/`** and **`settings/update/`**: read and change the engine’s settings while it runs. Owner only; [Change the settings over HTTP](/administration/configuration/#change-the-settings-over-http) explains them.
+- **`restart/`**: restart the engine in its own process, after it checks that it will start again. Owner only; [Restart the engine](/administration/run-the-service/#restart-the-engine) explains it.
+- **`list_changes`**: new arguments `auth` and `session`, to keep one credential’s or one session’s changes.
+- **`list_migrations`**: a new answer field `actor` and arguments `auth` and `before`. Entries of `set_engine_settings` also have `settings`, the values before and after.
+- **`update_row`**: a new argument `expect_body`, which refuses the write when the body changed since you read it.
+- **`X-Datanotes-View-As`**: a header that lets the owner read as a named token, without its secret.
+- **`set_engine_settings`**: a new journal operation that records each change of the engine’s settings. Undo refuses it.
+
+### Webhooks with a user and password
+
+- **They deliver**: `create_webhook` keeps taking an address such as `https://user:password@host/hook`. The engine now sends the user and password as HTTP Basic authentication, to the address without them. Before, every delivery of such a webhook failed.
+- **They stay hidden**: answers, `datanotes status`, logs, traces and the change feed’s tool calls show the address without them. The store’s `webhooks.json` keeps them, next to the webhook’s secret.
+
+### Before you update
+
+- **Programs**: nothing changes for them.
+- **An engine other machines reach**: it now also serves the browser’s page. The page holds no data, and every call needs a token.
+- **The owner token**: it can now change the engine’s settings and restart the engine over HTTP. Keep it for administration.
+- **Webhooks whose address holds a user and password**: they failed every delivery until now. After the update they deliver from their cursor, so the receiver gets the changes it missed. Delete the ones you no longer want before you update.
+- **Going back to 3.6 on the same store**: don’t undo a `set_engine_settings` entry there. 3.6 answers `ok: true`, but the setting keeps its new value.
+
 ## 3.6.0
 
 Datanotes 3.6.0 warns about a table layout that makes a git repository of the vault grow fast. It only adds to 3.5: no operation, argument or setting goes away, and nothing is refused that 3.5 accepted.

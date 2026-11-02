@@ -219,6 +219,42 @@ describe("OpenAPI document", () => {
     expect(doc.components.schemas.EngineStatus).toMatchObject({ required: ["healthy", "problems", "engine", "database", "git_sync", "store_backup", "change_feed", "webhooks", "tokens", "hand_edits", "logs"] });
   });
 
+  it("documents the database browser, the permission matrix, the sessions and the view-as header", () => {
+    const ui = doc.paths["/datanotes/ui"]!.get!;
+    expect([ui.operationId, ui.tags, ui.security]).toEqual(["ui", ["service"], []]);
+    expect(ui.responses["200"]).toMatchObject({ content: { "text/html": { schema: { type: "string" } } } });
+    // owner only: the generic 403
+    const perms = doc.paths["/datanotes/tokens/permissions/"]!.post!;
+    expect([perms.operationId, perms.tags]).toEqual(["tokens_permissions", ["tokens"]]);
+    expect(Object.keys(perms.responses)).toEqual(["200", "400", "401", "403", "500"]);
+    const sessions = doc.paths["/datanotes/sessions/"]!.post!;
+    expect([sessions.operationId, sessions.tags]).toEqual(["list_sessions", ["tokens"]]);
+    expect(Object.keys(sessions.responses)).toEqual(["200", "400", "401", "403", "500", "503"]);
+    expect(doc.components.parameters.ViewAs).toMatchObject({ name: "X-Datanotes-View-As", in: "header", required: false });
+    const params = (p: string) => (doc.paths[p]!.post as { parameters?: unknown[] }).parameters;
+    expect(params("/datanotes/operations/select_rows/")).toContainEqual({ $ref: "#/components/parameters/ViewAs" });
+    expect(params("/datanotes/operations/insert_row/")).not.toContainEqual({ $ref: "#/components/parameters/ViewAs" });
+    expect(params("/datanotes/tokens/permissions/")).toBeUndefined();
+  });
+
+  it("documents the engine settings routes", () => {
+    const read = doc.paths["/datanotes/settings/"]!.post!;
+    expect([read.operationId, Object.keys(read.responses)]).toEqual(["engine_settings", ["200", "400", "401", "403", "500"]]);
+    const update = doc.paths["/datanotes/settings/update/"]!.post!;
+    expect(update.operationId).toBe("update_engine_settings");
+    expect(Object.keys(update.responses).sort()).toEqual(["200", "400", "401", "403", "409", "500", "503"]);
+    expect(update.responses["400"]).toMatchObject({ content: { "application/json": { schema: { properties: { refused: { type: "array" } } } } } });
+    expect(doc.components.schemas.SettingView).toMatchObject({ required: ["name", "type", "changed", "expected", "applies", "editable", "restart_pending"] });
+  });
+
+  it("documents the restart route", () => {
+    const restart = doc.paths["/datanotes/restart/"]!.post!;
+    expect(restart.operationId).toBe("restart_engine");
+    expect(Object.keys(restart.responses)).toEqual(expect.arrayContaining(["200", "400", "401", "403", "409"]));
+    expect(restart.responses["200"]).toMatchObject({ content: { "application/json": { schema: { $ref: "#/components/schemas/EngineRestart" } } } });
+    expect(doc.components.schemas.EngineRestart).toMatchObject({ type: "object", required: expect.arrayContaining(["started_at", "will_apply", "ready"]) });
+  });
+
   it("documents every route the running engine serves", async () => {
     const port = await new Promise<number>((resolve) => {
       const srv = net.createServer();

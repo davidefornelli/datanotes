@@ -4,8 +4,10 @@
 // values of its own.
 
 /**
- * @param {{ outfile: string, version: string, swaggerCss?: string, swaggerJs?: string }} o
+ * @param {{ outfile: string, version: string, swaggerCss?: string, swaggerJs?: string, uiJs?: string, uiCss?: string }} o
  *   swaggerCss / swaggerJs: Swagger UI's stylesheet and script as JSON strings (empty in tests)
+ *   uiJs / uiCss: the database browser's script and stylesheet (scripts/ui-build.mjs) as JSON
+ *   strings (`'""'` by default: empty in tests)
  * @returns {import("esbuild").BuildOptions}
  */
 export function serviceBuildOptions(o) {
@@ -16,9 +18,14 @@ export function serviceBuildOptions(o) {
     target: "node22",
     format: "cjs",
     outfile: o.outfile,
-    define: { SERVICE_VERSION: JSON.stringify(o.version), SWAGGER_UI_CSS: o.swaggerCss ?? '""', SWAGGER_UI_JS: o.swaggerJs ?? '""' },
-    // only the unbundled fallback (docs-ui.ts) resolves it, at run time; the bundle never reaches it
-    external: ["swagger-ui-dist/package.json"],
+    define: {
+      SERVICE_VERSION: JSON.stringify(o.version), SWAGGER_UI_CSS: o.swaggerCss ?? '""', SWAGGER_UI_JS: o.swaggerJs ?? '""',
+      DATANOTES_UI_JS: o.uiJs ?? '""',
+      DATANOTES_UI_CSS: o.uiCss ?? '""',
+    },
+    // only the unbundled fallbacks (docs-ui.ts, ui.ts) resolve them, at run time; the bundle never
+    // reaches them (and esbuild must not try to bundle itself)
+    external: ["swagger-ui-dist/package.json", "esbuild"],
     // src/api/docs.ts finds dist/docs with __dirname here; import.meta.url is for its ES module build
     logOverride: { "empty-import-meta": "silent" },
     banner: { js: "#!/usr/bin/env node" },

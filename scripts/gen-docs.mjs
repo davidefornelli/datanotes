@@ -28,13 +28,13 @@ const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf
 // the sources, bundled the way the service is (no TypeScript loader needed)
 const entry = `export { OPERATIONS as MCP_TOOLS, OPERATION_KINDS, OPERATION_KIND } from "./src/api/catalog";
 export { DOCS, VIOLATION_GUIDANCE } from "./src/core/hints";
-export { DEFAULT_SETTINGS } from "./src/core/settings";
+export { DEFAULT_SETTINGS, SETTING_RULES } from "./src/core/settings";
 export { openApiDocument } from "./src/server/openapi";
 export { help } from "./src/node/help";`;
 const out = await esbuild.build({ stdin: { contents: entry, resolveDir: root, loader: "ts" }, bundle: true, platform: "node", format: "cjs", write: false, logLevel: "error" });
 const mod = { exports: {} };
 new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, createRequire(import.meta.url));
-const { MCP_TOOLS, OPERATION_KINDS, OPERATION_KIND, DOCS, VIOLATION_GUIDANCE, DEFAULT_SETTINGS, openApiDocument, help } = mod.exports;
+const { MCP_TOOLS, OPERATION_KINDS, OPERATION_KIND, DOCS, VIOLATION_GUIDANCE, DEFAULT_SETTINGS, SETTING_RULES, openApiDocument, help } = mod.exports;
 
 // the examples and the engine that runs them
 const exOut = await esbuild.build({
@@ -44,7 +44,7 @@ const exOut = await esbuild.build({
   format: "cjs",
   write: false,
   logLevel: "error",
-  external: ["swagger-ui-dist/package.json", "typescript"],
+  external: ["swagger-ui-dist/package.json", "typescript", "esbuild"],
 });
 const exMod = { exports: {} };
 new Function("module", "exports", "require", exOut.outputFiles[0].text)(exMod, exMod.exports, createRequire(path.join(root, "package.json")));
@@ -177,7 +177,9 @@ write(
       const name = m.name.getText(sf);
       const doc = (m.jsDoc ?? []).map((d) => ts.getTextOfJSDocComment(d.comment) ?? "").join(" ").replace(/\s+/g, " ").trim();
       if (/^Internal|^Legacy/.test(doc)) continue;
-      rows.push(`| \`${name}\` | \`${cell(JSON.stringify(DEFAULT_SETTINGS[name]))}\` | ${cell(doc)} |`);
+      const rule = SETTING_RULES[name];
+      const applies = rule.fileOnly ? "Settings file only" : rule.applies === "restart" ? "After a restart" : "At once";
+      rows.push(`| \`${name}\` | \`${cell(JSON.stringify(DEFAULT_SETTINGS[name]))}\` | ${applies} | ${cell(doc)} |`);
     }
   });
   write(
@@ -194,9 +196,11 @@ write(
       "",
       "The headless engine reads `settings.json` in its store, outside the vault (`datanotes store path` shows where), or the file given with `--settings`. Missing keys take their default.",
       "",
-      "| Key | Default | Meaning |",
-      "| --- | --- | --- |",
+      "| Key | Default | Applies | Meaning |",
+      "| --- | --- | --- | --- |",
       ...rows,
+      "",
+      "The engine's settings screen and `POST /datanotes/settings/update/` change them while the engine runs: see [Configuration](/administration/configuration/#change-the-settings-over-http).",
       "",
     ].join("\n"),
   );

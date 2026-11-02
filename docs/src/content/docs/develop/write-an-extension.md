@@ -7,6 +7,8 @@ sidebar:
 
 An extension is a git repository that adds tables, views, bases and MCP tools to a Datanotes database. You install it with `datanotes extension install`. [Install extensions](/administration/extensions/) covers the user's side.
 
+To share an extension as a starting point that agents adapt to other databases, make it a recipe: [Write a recipe](/develop/write-a-recipe/).
+
 This page builds a small extension, `acme/datanotes-ext-reading`. It keeps a reading list: books, their authors and what you read now.
 
 ## Lay out the repository

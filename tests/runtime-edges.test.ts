@@ -432,6 +432,33 @@ describe("runtime: its own routes", () => {
     expect(events[0]).toMatchObject({ summary: { rows: 300, total: 300, note: `${"n".repeat(200)}…`, secret: "[redacted]" } });
     expect(events.slice(-3).map((c) => c!.summary)).toEqual([{ id: "w2", secret: "[redacted]", rows: 2 }, undefined, { total: 2 }]);
   });
+
+  it("a webhook address with a password longer than the cut: no part of it is recorded, whole or cut (R4w5-1)", async () => {
+    const e = engine();
+    await e.runtime.start({ http: false });
+    const h = e.runtime.handlers();
+    const password = `SENTINELTC2${"p".repeat(300)}`;
+    const url = `https://u:${password}@127.0.0.1:9/hook`;
+    const c = { tool: "create_webhook", args: { url }, ok: true, value: { id: "w1", url, note: "w".repeat(1200) } };
+    const whole = { ...c, duration_ms: 5, served_by: "engine", ...redactToolCall(c.tool, c.args, c.value) };
+    // the MCP server: the whole call, then the call cut by cutToolCall, user info gone before the cut
+    await h["/tool-calls/record/"]!(whole);
+    const sent = { ...whole, ...cutToolCall(whole) };
+    expect(sent.args.url).toBe("https://127.0.0.1:9/hook");
+    expect(JSON.stringify(sent)).not.toContain("SENTINEL");
+    await h["/tool-calls/record/"]!(sent);
+    // an older reporter cuts first: the engine drops the authority its cut ends in
+    const older = { ...whole, args: { url: `${url.slice(0, 300)}…` }, value: `${JSON.stringify(c.value).slice(0, 1000)}…` };
+    expect(older.args.url).not.toContain("@");
+    await h["/tool-calls/record/"]!(older);
+    const events = (await e.runtime.changeFeed!.read({ since: 0, ops: ["tool_call"] })).events.map((ev) => ev.call);
+    expect(events).toHaveLength(3);
+    expect(JSON.stringify(events)).not.toContain("SENTINEL");
+    expect(events.map((ev) => ev!.args.url)).toEqual(["https://127.0.0.1:9/hook", "https://127.0.0.1:9/hook", "https://…"]);
+    const day = fs.readdirSync(e.abs("store:changes")).filter((f) => f.endsWith(".jsonl"));
+    expect(day.length).toBeGreaterThan(0);
+    for (const f of day) expect(fs.readFileSync(path.join(e.abs("store:changes"), f), "utf8")).not.toContain("SENTINEL");
+  });
 });
 
 describe("runtime: telemetry", () => {

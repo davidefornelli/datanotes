@@ -23,6 +23,7 @@ import type { DatanotesSettings } from "./settings";
 import { storePath, storeRead, storeWrite } from "./store";
 import { OperationInputError } from "./engine";
 import { messageOf } from "./message";
+import { redactUrlCredentials, stripLeadingUserinfo } from "./url-credentials";
 import { assertTableReadable, currentReadScope, pathReadable } from "./read-scope";
 
 const SHARDS = 16;
@@ -208,9 +209,13 @@ export function embeddingConfig(s: DatanotesSettings, apiKey: string | undefined
   return { provider: s.semanticProvider, baseUrl: s.semanticBaseUrl, model: s.semanticModel, ...(apiKey ? { apiKey } : {}) };
 }
 
-/** Identity of the vector space: vectors from another provider/model are not comparable. */
+/**
+ * Identity of the vector space: vectors from another provider/model are not comparable.
+ * The address without credentials: the key is written to the shards and to docs.json. An address
+ * without credentials keeps its key, so no index is rebuilt.
+ */
 export function vectorSpaceKey(c: EmbeddingConfig): string {
-  return `${c.provider}|${resolvedBaseUrl(c)}|${c.model.trim()}`;
+  return `${c.provider}|${stripLeadingUserinfo(resolvedBaseUrl(c))}|${c.model.trim()}`;
 }
 
 /** Why semantic search cannot run: it is off in the settings. */
@@ -406,7 +411,7 @@ export class SemanticIndex {
           staged.get(x.path)!.vectors[x.i] = normalize(vectors[j]!);
         });
       } catch (e) {
-        const error = messageOf(e);
+        const error = redactUrlCredentials(messageOf(e));
         for (const x of new Set(items.map((y) => y.path))) {
           staged.delete(x);
           result.failed.push({ path: x, error });
@@ -438,7 +443,7 @@ export class SemanticIndex {
       this.commit(staged, result);
       this.lastError = result.failed[0]?.error;
     } catch (e) {
-      this.lastError = messageOf(e);
+      this.lastError = redactUrlCredentials(messageOf(e));
       throw e;
     } finally {
       await this.save();

@@ -54,6 +54,7 @@ export const DOCS = {
   updateRows: "/guides/read-and-write/write-rows.md#update-many-rows",
   merge: "/guides/read-and-write/write-rows.md#insert-or-update-rows-with-merge_rows",
   undo: "/guides/history/journal-and-undo.md#undo-a-write",
+  journalPaging: "/guides/history/journal-and-undo.md#page-back-through-the-journal",
   undoConflict: "/guides/history/journal-and-undo.md#undo-refuses-to-overwrite-later-changes",
   failedWrite: "/guides/history/journal-and-undo.md#the-engine-rolls-back-a-write-it-cannot-finish",
   rollbackFailed: "/guides/history/journal-and-undo.md#when-the-rollback-cant-finish-either",
@@ -100,6 +101,11 @@ export const DOCS = {
   tokenRead: "/guides/security/tokens.md#limit-what-a-token-can-read",
   tokenWrite: "/guides/security/tokens.md#a-write-into-another-table-needs-write-too",
   reportAgents: "/guides/security/who-did-what.md#report-what-an-agent-does",
+  tokenPermissions: "/guides/security/tokens.md#see-what-each-token-can-reach",
+  listSessions: "/guides/security/who-did-what.md#list-the-agent-sessions",
+  engineSettings: "/administration/configuration.md#read-the-settings-over-http",
+  changeSettings: "/administration/configuration.md#change-the-settings-over-http",
+  viewAs: "/guides/security/tokens.md#browse-as-another-token",
   sessionOwner: "/guides/security/who-did-what.md#a-session-belongs-to-one-token",
   auth: "/develop/http-api.md#authenticate-your-requests",
   routes: "/develop/http-api.md#call-the-engines-routes",
@@ -111,6 +117,7 @@ export const DOCS = {
   startEngine: "/administration/run-the-service.md#start-the-engine",
   port: "/administration/run-the-service.md#choose-the-port",
   stop: "/administration/run-the-service.md#stop-the-engine",
+  restartEngine: "/administration/run-the-service.md#restart-the-engine",
   moveDatabase: "/start/how-it-works.md#move-the-vault-or-the-database-folder",
   storeBackup: "/guides/history/back-up.md#turn-on-the-store-backup",
   storeBackupCadence: "/guides/history/back-up.md#choose-how-often-the-backup-commits",
@@ -382,6 +389,7 @@ interface RefusalLike {
 
 /** Guidance for a refused or failed undo_migration. */
 export function undoGuidance(r: { conflicts: readonly { message: string }[]; failed: readonly unknown[] }): Guidance {
+  if (r.conflicts.some((c) => SETTINGS_UNDO.test(c.message))) return settingsUndoGuidance();
   if (r.failed.length > 0) return guide("Some files could not be written back: undo_migration again once they are free, or repair them by hand.", "undo");
   if (r.conflicts.some((c) => /already undone/.test(c.message))) return guide("This write is undone already: to redo it, undo the undo (its migration_id is in list_migrations).", "undo");
   return guide("Later changes touched the same notes: undo those first (list_migrations lists them, newest first), or change the rows with update_row.", "undoConflict");
@@ -417,9 +425,20 @@ export function refusalGuidance(r: RefusalLike): Guidance {
   return guide(`Resolve what the message names, then call ${r.op} again; dry_run: true checks without writing.`, "errors");
 }
 
+/** The refusal of an undo of `set_engine_settings` (RECORD_ONLY_OPS). */
+const SETTINGS_UNDO = /^a change of the engine's settings cannot be undone/;
+
+function settingsUndoGuidance(): Guidance {
+  return guide(
+    "Read the settings (POST /datanotes/settings/), then send the values you want to POST /datanotes/settings/update/; list_migrations with op set_engine_settings shows who changed which setting, and the values before.",
+    "changeSettings",
+  );
+}
+
 /** What the usual conflicts mean, by their message. */
 export const CONFLICTS: readonly [RegExp, (op: string) => Guidance][] = [
   [/^row changed: expected/, (op) => guide(`The row changed since you read it: read it again (select_rows), then retry ${op} with "expect" set to what you read.`, "expect")],
+  [/^row changed: its body/, (op) => guide(`The note's text changed since you read it: read it again (select_rows with include_body), then retry ${op} with "expect_body" set to the body you read.`, "expect")],
   [/^"where" matched \d+ rows, expected \d+/, () => guide(`Check the rows with select_rows and the same "where", then narrow it or change expect_count.`, "updateRows")],
   [/^referenced by |^linked from |would be left empty/, () => guide(`Other rows link to it: pass on_referenced ("set_null" or "ignore"), or change those rows first.`, "referenced")],
   [/^violates CHECK /, () => guide("Rows that break the new rule must change first: select_rows finds them; fix them with update_row, then add the constraint again.", "check")],
@@ -436,4 +455,5 @@ export const CONFLICTS: readonly [RegExp, (op: string) => Guidance][] = [
   [/already exists|is a table$/, () => guide("The name is taken: choose another one, or pass replace: true to replace a view.", "catalogs")],
   [/^repeats key |rows match key /, () => guide(`Each key of "on" must name one row: drop the repeated rows, or add a key column so each names one.`, "merge")],
   [/^already a row of .*: use move_rows$/, () => guide("The note already belongs to a table: move_rows moves rows between tables.", "moveRows")],
+  [SETTINGS_UNDO, settingsUndoGuidance],
 ];

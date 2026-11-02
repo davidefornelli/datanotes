@@ -67,6 +67,17 @@ export class LockHolder {
     await this.write();
   }
 
+  /**
+   * Stop refreshing the heartbeat and leave the lock file as it is, naming this process: a restart in
+   * this process takes the store over (openStore ignores a lock of its own process). `release` still
+   * removes the file while it names this holder.
+   */
+  async handOver(): Promise<void> {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    await this.writes;
+  }
+
   private write(): Promise<void> {
     this.writes = this.writes.then(async () => {
       this.info.heartbeat = new Date().toISOString();

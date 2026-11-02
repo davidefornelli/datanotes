@@ -67,6 +67,7 @@ child.stdout.on("data", (d) => {
     console.log(`  vault: ${vault}`);
     console.log(`  store: ${store}`);
     console.log(`  url:   http://127.0.0.1:${port}  (API docs: /datanotes/docs)`);
+    console.log(`  browser: http://127.0.0.1:${port}/datanotes/ui/`);
     console.log(`  token: ${settings} (httpServerToken${token ? `: ${token}` : ""})`);
     console.log(`  try:   curl -s -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{}" http://127.0.0.1:${port}/datanotes/operations/list_tables/\n`);
   }

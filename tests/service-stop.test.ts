@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import esbuild from "esbuild";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { serviceBuildOptions } from "../scripts/service-build.mjs";
 import { storeLocation } from "../src/api/local";
 import type { GuidedError } from "../src/core/hints";
 import { parseArgs, parsePort, startService, type RunningService } from "../src/node/service";
@@ -248,17 +249,7 @@ describe("the built command: serve on any free port, stop it, its last store bac
 
   beforeAll(async () => {
     bin = path.join(tempDir("dn-stop-bundle-"), "datanotes.cjs");
-    await esbuild.build({
-      entryPoints: [path.resolve(__dirname, "..", "src", "node", "cli.ts")],
-      bundle: true,
-      platform: "node",
-      target: "node22",
-      format: "cjs",
-      outfile: bin,
-      define: { SERVICE_VERSION: JSON.stringify("0.0.0-test"), SWAGGER_UI_CSS: '""', SWAGGER_UI_JS: '""' },
-      external: ["swagger-ui-dist/package.json"],
-      logLevel: "error",
-    });
+    await esbuild.build({ ...serviceBuildOptions({ outfile: bin, version: "0.0.0-test" }), absWorkingDir: path.resolve(__dirname, ".."), logLevel: "error" });
   }, 60_000);
 
   const children: ChildProcess[] = [];

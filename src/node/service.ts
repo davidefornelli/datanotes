@@ -28,16 +28,21 @@
  * A graceful stop (a signal, or `POST /datanotes/stop/` that `datanotes stop` sends) lets
  * the requests under way finish, refuses new ones, makes the last git sync and store backup commit
  * and push, and releases the lock.
+ *
+ * A restart (`POST /datanotes/restart/`, runService) stops the engine gracefully and starts it
+ * again in this process with the same options, the lock kept: the settings waiting for a restart
+ * and the settings file's hand edits apply.
  */
 
 import fs from "node:fs";
+import net from "node:net";
 import { folderArg, readOptions } from "../api/cli-options";
 import os from "node:os";
 import path from "node:path";
 import { mergeWithDefaults, RUNTIME_KEYS, type DatanotesSettings } from "../core/settings";
 import { telemetry } from "../core/telemetry";
 import { startChild, startSpan, traceNow } from "../core/tracing";
-import { LockHolder } from "../server/engine-lock";
+import { LOCK_PATH_SUFFIX, LockHolder } from "../server/engine-lock";
 import { EngineRuntime } from "../server/runtime";
 import { engineWriting, onApplied } from "../core/engine";
 import { recordDatabaseMove } from "../core/database";
@@ -57,10 +62,12 @@ import { enableIndexCheck } from "../core/index-check";
 import { PRIVATE_FILE_MODE } from "./private-files";
 import { nodeVersionWarning } from "./node-version";
 import { NodeWatcher } from "./watcher";
-import { openStore, recordStore, StoreSetupError, type OpenedStore } from "./store-setup";
+import { openStore, recordStore, StoreSetupError, writeTextAtomic, type OpenedStore } from "./store-setup";
 import { SETTINGS_FILE } from "../api/local";
 import { guide, guidanceOf, GuidedError } from "../core/hints";
-import { ListenError } from "../server/http-server";
+import { listenError, ListenError } from "../server/http-server";
+import { messageOf } from "../core/message";
+import type { HostRestart, RestartProblem, StartedBy } from "../server/restart-route";
 
 declare const SERVICE_VERSION: string | undefined;
 /* v8 ignore next -- only the built command defines SERVICE_VERSION (esbuild); tests run the source */
@@ -191,9 +198,47 @@ export interface RunningService {
   stop(): Promise<void>;
   /** Settles once the engine has stopped, whatever stopped it (`stop()`, or `POST /datanotes/stop/`). */
   stopped: Promise<void>;
+  /**
+   * The stop of a restart: drains with "the engine is restarting"; cancelled when a request is
+   * still under way after drainMs; else stops like stop() but hands the lock over.
+   */
+  stopForRestart(): Promise<RestartStop>;
 }
 
-export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = process.env): Promise<RunningService> {
+/** What a host gives a start (runService): how to stop and restart on request, and the port to keep. */
+export interface ServiceHooks {
+  /** POST /datanotes/stop/; default: this engine's graceful stop. */
+  stop?: () => void;
+  /** POST /datanotes/restart/; none: the route is not served. */
+  restart?: HostRestart;
+  /** Listen on this port when the options and the settings say 0 (any free port): a restart keeps its port. */
+  keepPort?: number;
+}
+/** The stop of a restart: cancelled (the engine serves again), or done with the lock handed over. */
+export type RestartStop = { cancelled: string } | { releaseLock(): Promise<void> };
+export interface ServiceEnd {
+  code: 0 | 1;
+  error?: unknown;
+}
+export interface ServiceRun {
+  /** The engine running now (a restart replaces it). */
+  readonly current: RunningService;
+  readonly restarts: number;
+  /** Restart in this process: the new engine, or the same one when cancelled; rejects when the new start failed (ended then settles with code 1). */
+  restart(requestedAt?: string): Promise<RunningService>;
+  /** A graceful stop, for good. */
+  stop(): Promise<void>;
+  /** Settles once the run is over: code 0 after a stop, 1 with the error when a restart could not start. */
+  readonly ended: Promise<ServiceEnd>;
+}
+export interface RunOptions {
+  /** Called after each start: the first (restarted false) and every restart. */
+  announce?(svc: RunningService, restarted: boolean): void;
+  /** Tests: instead of detectStartedBy(). */
+  startedBy?: StartedBy;
+}
+
+export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = process.env, hooks: ServiceHooks = {}): Promise<RunningService> {
   const locEnv: Record<string, string | undefined> = { ...Object.fromEntries(LOCATION_VARS.map((k) => [k, process.env[k]])), ...env };
   // Tests never write to the user's data folder (tests/setup.ts sets DATANOTES_DATA_HOME).
   if (process.env.VITEST && !locEnv.DATANOTES_DATA_HOME && !locEnv.DATANOTES_STORE && !o.store) throw new Error("set DATANOTES_DATA_HOME in tests");
@@ -219,7 +264,7 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
   // the lock, once the start holds the store: let go if the start fails
   const held: { lock: LockHolder | null } = { lock: null };
   try {
-    return await startOn(o, env, locEnv, host, watcher, t0, held);
+    return await startOn(o, env, locEnv, host, watcher, t0, held, hooks);
   } catch (e) {
     // a start that failed follows nothing, leaves the index on disk closed, then lets the store go
     watcher.stop();
@@ -230,7 +275,7 @@ export async function startService(o: ServiceOptions, env: NodeJS.ProcessEnv = p
 }
 
 /** The rest of {@link startService} (a failure stops the watcher, closes the host and releases `held.lock`). */
-async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record<string, string | undefined>, host: NodeHost, watcher: NodeWatcher, t0: number, held: { lock: LockHolder | null }): Promise<RunningService> {
+async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record<string, string | undefined>, host: NodeHost, watcher: NodeWatcher, t0: number, held: { lock: LockHolder | null }, hooks: ServiceHooks): Promise<RunningService> {
   const walkAt = performance.now();
   const { renameTemps } = await host.vault.scan();
   const walked = { at: walkAt, ms: performance.now() - walkAt };
@@ -259,9 +304,18 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
   if (env.DATANOTES_INDEX_CHECK === "1") enableIndexCheck(app);
   const file = settingsPath(o, opened.store);
 
+  // the file's text as the engine last read or wrote it: another text on disk is a hand edit
+  const readText = (): string | null => {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  let known = readText();
   let raw: Record<string, unknown> = {};
   try {
-    raw = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    raw = known === null ? {} : (JSON.parse(known) as Record<string, unknown>);
   } catch {
     raw = {};
   }
@@ -296,9 +350,12 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
     }
     const out: Record<string, unknown> = { ...current, ...settings };
     for (const k of RUNTIME_KEYS) delete out[k];
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    // it holds the owner token: created private (0600); an existing one was tightened at start
-    fs.writeFileSync(file, JSON.stringify(out, null, 2), { mode: PRIVATE_FILE_MODE });
+    // it holds the owner token: created private (0600); an existing one was tightened at start;
+    // atomic: a crash mid-write must not leave half a file (the next start would read {} and make a
+    // new owner token)
+    const text = JSON.stringify(out, null, 2);
+    writeTextAtomic(file, text, PRIVATE_FILE_MODE);
+    known = text;
     // the database folder moved (configure_database, or by hand): the store's record follows
     if (settings.databaseFolder !== recorded) {
       recordStore(opened.home, opened.store, o.vault, opened.id, settings.databaseFolder);
@@ -314,6 +371,9 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
       return undefined;
     }
   };
+  // a restart keeps its port when the options and the settings say any free port
+  const keep = hooks.keepPort !== undefined && (o.port ?? settings.httpServerPort) === 0 ? hooks.keepPort : undefined;
+  const httpPort = keep ?? o.port;
   const runtime = new EngineRuntime({
     ...(o.host ? { httpHost: o.host } : {}),
     app,
@@ -328,7 +388,14 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
     version: VERSION,
     hostName: "service",
     canServeHttp: true,
-    ...(o.port !== undefined ? { httpPort: o.port } : {}),
+    ...(httpPort !== undefined ? { httpPort } : {}),
+    settingsFileChanged: () => readText() !== known,
+    settingOverrides: {
+      ...(o.port !== undefined ? { httpServerPort: "the --port option of datanotes serve (or DATANOTES_PORT)" } : {}),
+      ...(o.storeBackup?.enabled !== undefined ? { storeBackupEnabled: "the --store-backup, --no-store-backup or --store-backup-remote option of datanotes serve (or DATANOTES_STORE_BACKUP)" } : {}),
+      ...(o.storeBackup?.remote !== undefined ? { storeBackupRemote: "the --store-backup-remote option of datanotes serve (or DATANOTES_STORE_BACKUP_REMOTE)" } : {}),
+      ...(o.storeBackup?.every !== undefined ? { storeBackupIntervalSeconds: "the --store-backup-interval-s option of datanotes serve (or DATANOTES_STORE_BACKUP_INTERVAL_S)" } : {}),
+    },
   });
   runtime.startTelemetry();
   // how much of the vault the start read (with the vault index, only the notes changed since)
@@ -378,6 +445,24 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
   let stopping: Promise<void> | null = null;
   let markStopped!: () => void;
   const stopped = new Promise<void>((r) => (markStopped = r));
+  const drainMs = o.drainMs ?? 30_000;
+  /** After the drain: the engine stops writing, the last pushes, then the lock, released or handed over to a restart. */
+  const finish = async (keepLock: boolean): Promise<void> => {
+    offApplied?.();
+    offBackup?.();
+    git?.stop();
+    runtime.setHostSettler(null);
+    setBulkWriter(app, null);
+    watcher.stop();
+    await runtime.dispose();
+    setRepairGate(app, null);
+    closeNodeHost(host);
+    // after the engine's last writes (change feed, tokens): a last commit and push
+    await backup?.stop();
+    backupChanges?.dispose();
+    if (git) await lastGitSync(git, o.gitSyncStopMs ?? GIT_SYNC_STOP_MS);
+    await (keepLock ? lock.handOver() : lock.release());
+  };
   /**
    * A graceful stop: the requests under way finish first, then the engine stops writing, then the
    * store backup's last commit and push, then git sync's, and the lock goes last: no other engine
@@ -387,31 +472,37 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
   const stop = (): Promise<void> => {
     stopping ??= (async () => {
       // new requests are refused (503) from here on; the ones under way finish
-      const drainMs = o.drainMs ?? 30_000;
       const drained = await runtime.drain(drainMs);
       if (!drained) telemetry().log("WARN", "datanotes stopped before every request under way was answered", { waited_ms: drainMs });
-      offApplied?.();
-      offBackup?.();
-      git?.stop();
-      runtime.setHostSettler(null);
-      setBulkWriter(app, null);
-      watcher.stop();
-      await runtime.dispose();
-      setRepairGate(app, null);
-      closeNodeHost(host);
-      // after the engine's last writes (change feed, tokens): a last commit and push
-      await backup?.stop();
-      backupChanges?.dispose();
-      if (git) await lastGitSync(git, o.gitSyncStopMs ?? GIT_SYNC_STOP_MS);
-      await lock.release();
+      await finish(false);
     })().finally(markStopped);
     return stopping;
   };
+  /** The stop of a restart: the same steps, the lock handed over; cancelled when a request still runs after the drain. */
+  const stopForRestart = async (): Promise<RestartStop> => {
+    if (stopping) return { cancelled: "the engine is stopping" };
+    const drained = await runtime.drain(drainMs, "restarting");
+    if (stopping) return { cancelled: "the engine is stopping" };
+    if (!drained) {
+      runtime.undrain();
+      const reason = `a request was still under way after ${drainMs / 1000} s`;
+      telemetry().log("WARN", "datanotes restart cancelled", { reason, waited_ms: drainMs });
+      return { cancelled: reason };
+    }
+    stopping = finish(true).finally(markStopped);
+    await stopping;
+    return { releaseLock: () => lock.release() };
+  };
   // `POST /datanotes/stop/` (`datanotes stop`): answered first, then the same graceful stop
-  runtime.setHostStop(() => {
-    console.log("datanotes service: stop requested, stopping");
-    void stop();
-  });
+  runtime.setHostStop(
+    hooks.stop ??
+      (() => {
+        console.log("datanotes service: stop requested, stopping");
+        void stop();
+      }),
+  );
+  // `POST /datanotes/restart/`: only when the host can restart (runService)
+  if (hooks.restart) runtime.setHostRestart(hooks.restart);
 
   const deadline = Date.now() + (o.httpWaitMs ?? 45_000);
   let waiting = false;
@@ -497,6 +588,7 @@ async function startOn(o: ServiceOptions, env: NodeJS.ProcessEnv, locEnv: Record
     store: opened,
     stop,
     stopped,
+    stopForRestart,
   };
 }
 
@@ -529,6 +621,237 @@ export async function lastGitSync(git: GitSync, ms: number): Promise<void> {
   await Promise.race([cycle, new Promise((r) => setTimeout(r, 1000))]);
 }
 
+/** A problem that would make the next start of a restart fail, with what to do. */
+const p = (error: string, hint: string): RestartProblem => ({ error, ...guide(hint, "restartEngine") });
+
+/** How the engine was started, as far as it can tell: what decides whether a failed start is started again. */
+export function detectStartedBy(env: NodeJS.ProcessEnv, exists: (file: string) => boolean, stdinIsTTY: boolean): StartedBy {
+  if (exists("/.dockerenv") || exists("/run/.containerenv") || !!env.container) return "container";
+  if (env.INVOCATION_ID) return "systemd";
+  return stdinIsTTY ? "terminal" : "unknown";
+}
+
+/** Whether the engine could listen on port: null, or the error a start would get. */
+export function portFree(port: number, host: string): Promise<ListenError | null> {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", (e) => resolve(listenError(e, host, port)));
+    srv.listen(port, host, () => srv.close(() => resolve(null)));
+  });
+}
+
+export interface RestartCheckInput {
+  o: ServiceOptions;
+  /** The settings file the next start reads (settingsPath). */
+  file: string;
+  /** The port the engine listens on now. */
+  portNow: number;
+  /** The file's text; null when there is no such file. */
+  readText(file: string): string | null;
+  folderExists(folder: string): boolean;
+  portFree(port: number, host: string): Promise<ListenError | null>;
+}
+
+/** What the next start of a restart would read and where it would listen, and why it would fail. */
+export async function restartCheck(i: RestartCheckInput): Promise<{ problems: RestartProblem[]; next: DatanotesSettings | null; portAfter: number }> {
+  const problems: RestartProblem[] = [];
+  if (!i.folderExists(i.o.vault)) problems.push(p(`the folder ${i.o.vault} is gone: the engine could not start on it again`, "Put the folder back where it was, then restart."));
+  let next: DatanotesSettings | null = null;
+  const text = i.readText(i.file);
+  if (text === null) {
+    problems.push(
+      p(
+        `the settings file ${i.file} is missing: the next start would make a new owner token`,
+        "Put the file back (from your backup or the store backup), then restart. To start with new settings on purpose, stop the engine and start it again by hand.",
+      ),
+    );
+  } else {
+    let value: unknown;
+    let detail: string | null = null;
+    try {
+      value = JSON.parse(text);
+      if (Array.isArray(value)) detail = "it holds an array";
+      else if (value === null) detail = "it holds null";
+      else if (typeof value !== "object") detail = `it holds a ${typeof value}`;
+    } catch (e) {
+      detail = messageOf(e);
+    }
+    if (detail !== null) {
+      problems.push(
+        p(`the settings file ${i.file} is not a JSON object (${detail}): the next start would ignore it and make a new owner token`, 'Fix the file: one JSON object of settings, such as {"httpServerPort": 27150}. Then restart.'),
+      );
+    } else {
+      const copy = { ...(value as Record<string, unknown>) };
+      for (const k of RUNTIME_KEYS) delete copy[k];
+      try {
+        next = mergeWithDefaults(copy);
+      } catch (e) {
+        problems.push(p(`the settings file ${i.file} has a value the next start refuses: ${messageOf(e)}`, "Fix that value in the file, then restart."));
+      }
+    }
+  }
+  if (next !== null && next.httpServerToken === "") {
+    problems.push(p(`the settings file ${i.file} has no owner token (httpServerToken): the next start would make a new one`, 'Put the owner token back in the file as "httpServerToken", then restart.'));
+  }
+  const configured = i.o.port ?? next?.httpServerPort ?? i.portNow;
+  const portAfter = configured === 0 ? i.portNow : configured;
+  if (portAfter !== i.portNow) {
+    const e = await i.portFree(portAfter, i.o.host ?? "127.0.0.1");
+    if (e) problems.push(p(`after the restart the engine could not listen: ${e.message}`, "Free the port, or change httpServerPort (the engine settings page, or POST /datanotes/settings/update/), then restart."));
+  }
+  return { problems, next, portAfter };
+}
+
+/** Remove the store's lock when it names this process: a failed start may have written its own (port 0) before it failed. */
+function removeOwnLock(store: string): void {
+  const file = path.join(store, LOCK_PATH_SUFFIX);
+  try {
+    const lock = JSON.parse(fs.readFileSync(file, "utf8")) as { pid?: unknown; host?: unknown };
+    if (lock.pid === process.pid && lock.host === os.hostname()) fs.rmSync(file, { force: true });
+  } catch {
+    // no lock, or not one of this process
+  }
+}
+
+/**
+ * Run the service: start it, and restart it in this process when asked (`POST /datanotes/restart/`),
+ * with the lock kept; `POST /datanotes/stop/` and `stop()` end the run. It never ends the process:
+ * `ended` says how the run ended, and the caller (`main()`) exits.
+ */
+export async function runService(o: ServiceOptions, env: NodeJS.ProcessEnv = process.env, opts: RunOptions = {}): Promise<ServiceRun> {
+  let state: "starting" | "running" | "restarting" | "stopping" | "ended" = "starting";
+  let current: RunningService | undefined;
+  let restarts = 0;
+  let stopAsked = false;
+  let restarting: Promise<RunningService> | null = null;
+  let lastCancelled: { requested_at: string; reason: string } | undefined;
+  let settle!: (e: ServiceEnd) => void;
+  const ended = new Promise<ServiceEnd>((r) => (settle = r));
+  const finishRun = (e: ServiceEnd): void => {
+    if (state === "ended") return;
+    state = "ended";
+    settle(e);
+  };
+  const startedBy = opts.startedBy ?? detectStartedBy(process.env, (f) => fs.existsSync(f), process.stdin.isTTY === true);
+
+  const check: HostRestart["check"] = async () => {
+    const svc = current;
+    if (!svc || state === "starting") {
+      return { problems: [p("the engine is still starting", "Wait until it has started (GET / answers), then restart.")], next: null, portAfter: svc?.port ?? 0, startedBy, restarting: false };
+    }
+    return {
+      ...(await restartCheck({
+        o,
+        file: settingsPath(o, svc.store.store),
+        portNow: svc.port,
+        readText: (f) => {
+          try {
+            return fs.readFileSync(f, "utf8");
+          } catch {
+            return null;
+          }
+        },
+        folderExists: (f) => fs.statSync(f, { throwIfNoEntry: false })?.isDirectory() === true,
+        portFree,
+      })),
+      startedBy,
+      restarting: state === "restarting",
+      ...(lastCancelled ? { lastCancelled } : {}),
+    };
+  };
+  const hooks = (keepPort?: number): ServiceHooks => ({
+    stop: () => {
+      console.log("datanotes service: stop requested, stopping");
+      void run.stop();
+    },
+    restart: {
+      check,
+      restart: (at) => {
+        void run.restart(at).catch(() => undefined);
+      },
+    },
+    ...(keepPort !== undefined ? { keepPort } : {}),
+  });
+  // a stop that did not come through the run (a test's svc.stop()) ends it; a restart's stop does not
+  const watch = (svc: RunningService): void => {
+    void svc.stopped.then(() => {
+      if (svc === current && state === "running") finishRun({ code: 0 });
+    });
+  };
+
+  const run: ServiceRun = {
+    get current() {
+      return current!;
+    },
+    get restarts() {
+      return restarts;
+    },
+    ended,
+    restart(requestedAt = new Date().toISOString()): Promise<RunningService> {
+      if (state !== "running") return Promise.reject(new Error(state === "restarting" ? "the engine is already restarting" : `the engine is ${state}`));
+      state = "restarting";
+      restarting = (async () => {
+        const old = current!;
+        console.log("datanotes service: restart requested, restarting");
+        const s = await old.stopForRestart();
+        if ("cancelled" in s) {
+          lastCancelled = { requested_at: requestedAt, reason: s.cancelled };
+          console.log(`datanotes service: restart cancelled: ${s.cancelled}`);
+          state = "running";
+          return old;
+        }
+        if (stopAsked) {
+          await s.releaseLock();
+          finishRun({ code: 0 });
+          return old;
+        }
+        try {
+          const next = await startService(o, env, hooks(old.port));
+          current = next;
+          restarts++;
+          lastCancelled = undefined;
+          state = "running";
+          watch(next);
+          telemetry().log("INFO", "datanotes service restarted", { restarts, port: next.port });
+          opts.announce?.(next, true);
+          // a stop asked while the new engine started (a signal, POST /datanotes/stop/, announce): stop
+          // that engine here. run.stop() would wait for `restarting`, the promise this body runs in, and
+          // never return (R2w3-7)
+          if (stopAsked) {
+            state = "stopping";
+            await next.stop();
+            finishRun({ code: 0 });
+          }
+          return next;
+        } catch (e) {
+          await s.releaseLock();
+          removeOwnLock(old.store.store);
+          finishRun({ code: 1, error: e });
+          throw e;
+        }
+      })().finally(() => {
+        restarting = null;
+      });
+      return restarting;
+    },
+    async stop(): Promise<void> {
+      stopAsked = true;
+      if (restarting) await restarting.catch(() => undefined);
+      if (state === "ended" || !current) return;
+      state = "stopping";
+      await current.stop();
+      finishRun({ code: 0 });
+    },
+  };
+
+  current = await startService(o, env, hooks());
+  state = "running";
+  watch(current);
+  opts.announce?.(current, false);
+  if (stopAsked) await run.stop();
+  return run;
+}
+
 /** `datanotes serve` (the command line is in `cli.ts`). */
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const o = parseArgs(argv);
@@ -543,16 +866,31 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   const warning = nodeVersionWarning();
   if (warning) console.error(warning);
-  const svc = await startService(o);
-  console.log(`datanotes service ${VERSION}: ${o.atRoot ? "database" : "vault"} ${o.vault}, http://${o.host ?? "127.0.0.1"}:${svc.port}, watch ${o.watch}, store ${svc.store.store}`);
+  const announce = (svc: RunningService, restarted: boolean) => {
+    if (restarted) console.log("datanotes service: restarted");
+    console.log(`datanotes service ${VERSION}: ${o.atRoot ? "database" : "vault"} ${o.vault}, http://${o.host ?? "127.0.0.1"}:${svc.port}, watch ${o.watch}, store ${svc.store.store}`);
+  };
+  const run = await runService(o, process.env, { announce });
   // a signal, or a stop asked over HTTP (`datanotes stop`): the same graceful stop, then the process ends
-  void svc.stopped.then(() => {
+  for (const sig of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) {
+    process.on(sig, () => {
+      console.log(`datanotes service: ${sig}, stopping`);
+      void run.stop();
+    });
+  }
+  // main returns once the engine has started (its callers wait for the start, not the end); the run
+  // ends the process: 0 after a stop, 1 with the guided error when a restart could not start, as
+  // cli.ts reports a failed start
+  void run.ended.then((end) => {
+    if (end.error !== undefined) {
+      const g = guidanceOf(end.error);
+      const text = `datanotes: ${messageOf(end.error)}${g ? `\n${g.hint}\nSee ${g.docs}` : ""}`;
+      console.error(text);
+      // with --log the line above went to the log file: whoever started the command sees it too
+      if (o.logFile) process.stderr.write(`${text}\n`);
+      process.exit(1);
+    }
     console.log("datanotes service: stopped");
     process.exit(0);
   });
-  const shutdown = (signal: string) => {
-    console.log(`datanotes service: ${signal}, stopping`);
-    void svc.stop();
-  };
-  for (const sig of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) process.on(sig, () => shutdown(sig));
 }

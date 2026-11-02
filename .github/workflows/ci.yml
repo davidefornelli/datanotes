@@ -56,6 +56,23 @@ jobs:
       - run: npm ci
       - run: npm run test:coverage
 
+  # The database browser in a real Chromium (tests/ui-browser.test.ts).
+  ui-browser:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright-core install --with-deps chromium
+      - run: npx vitest run tests/ui-browser.test.ts
+        env:
+          DATANOTES_UI_BROWSER_REQUIRED: "1"
+
   # The tests on the headless Node host, the code users run, on Linux, Windows and macOS: file
   # watching, renames, locked files, case sensitivity, long paths and line endings differ between
   # them. Every Node version supported runs on Linux, the fastest runner: what changes between Node

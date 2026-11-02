@@ -1,6 +1,6 @@
 # Run the Datanotes engine in Docker
 
-You can run the headless engine (`src/node/service.ts`) in a container, on any machine that runs Docker, such as a virtual private server (VPS), a network-attached storage (NAS) device or a Linux server. This page shows how to:
+You can run the headless engine (`src/node/service.ts`) in a container, on any machine that runs Docker. Examples are a virtual private server (VPS), a network-attached storage (NAS) device and a Linux server. This page shows how to:
 
 - Start the engine and find its token
 - Set up file watching and permissions
@@ -27,7 +27,7 @@ The container mounts your vault folder at `/vault`, and its entrypoint starts th
 
 ## Keep the engine’s store in a volume
 
-The engine keeps its store outside the vault: the journal, the history of your tables, the named tokens, the change feed and the logs. In the container, the store is `/data/<database id>/`, in the `datanotes-data` volume. The image sets `DATANOTES_DATA_HOME=/data`. Keep that volume: without it, a new container starts with an empty journal and no history.
+The engine keeps its store outside the vault. The store holds the journal, the history of your tables, the named tokens, the change feed and the logs. In the container, the store is `/data/<database id>/`, in the `datanotes-data` volume. The image sets `DATANOTES_DATA_HOME=/data`. Keep that volume: without it, a new container starts with an empty journal and no history.
 
 ## Get the owner token
 
@@ -52,7 +52,7 @@ Polling a large vault over a bind mount is slow: one scan of 10,000 notes takes 
 
 ## Run one engine per vault
 
-Run one engine per database folder. The engine holds a lock file, `engine.lock`, in its store, so it refuses only a second engine with the same store. The container keeps its store in its own volume. An engine on the host has another store, so it starts on the same folder, and the two engines lose each other’s writes.
+Run one engine per database folder. The engine holds a lock file, `engine.lock`, in its store. So it refuses only a second engine with the same store. The container keeps its store in its own volume. An engine on the host has another store, so it starts on the same folder. The two engines then lose each other’s writes.
 
 Never run the engine on the host and the engine in Docker on the same folder. Stop the host engine with `datanotes stop` before you start the container. [Sync the vault between devices](https://datanotes.dev/guides/data-quality/sync-between-devices/) explains the same rule for a synced vault.
 
@@ -66,6 +66,19 @@ The container runs as the user `engine`, and the engine writes notes in the vaul
 ## Reach the engine from other machines
 
 The compose file publishes the port on `127.0.0.1` only. To reach the engine from outside, put a reverse proxy or a tunnel in front of it. The [security page](https://datanotes.dev/guides/security/security-model/) explains what to expose and which tokens to use.
+
+## Restart the engine
+
+The database browser’s **Restart the engine…** button restarts the engine inside its process, so the
+container keeps running. [Restart the engine](https://datanotes.dev/administration/run-the-service/#restart-the-engine)
+explains the restart.
+
+Keep `httpServerPort` at 27150 in a container. To use another port on the host, set
+`DATANOTES_HOST_PORT` and run `docker compose up -d` again. A new `httpServerPort` also needs two
+changes in the compose file:
+
+- the container side of `ports`, the number after the last colon
+- `DATANOTES_PORT` under `environment`, the port the health check probes
 
 ## Connect agents to the engine in Docker
 

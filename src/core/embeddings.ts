@@ -5,6 +5,7 @@
  * - Ollama's native `POST <base>/api/embed`.
  * The HTTP call goes through an injected transport (Obsidian's `requestUrl` in the plugin).
  */
+import { redactErrorCredentials, redactUrlCredentials } from "./url-credentials";
 
 export type ProviderKind = "ollama" | "openrouter" | "openai" | "lmstudio" | "custom";
 
@@ -66,12 +67,18 @@ export async function embed(transport: Transport, cfg: EmbeddingConfig, texts: s
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
   if (cfg.provider === "openrouter") headers["X-Title"] = "Datanotes";
   const ollama = preset.style === "ollama";
-  const res = await transport({
-    url: ollama ? `${base}/api/embed` : `${base}/embeddings`,
-    method: "POST",
-    headers,
-    body: JSON.stringify({ model: cfg.model.trim(), input: texts }),
-  });
+  let res: HttpResponse;
+  try {
+    res = await transport({
+      url: ollama ? `${base}/api/embed` : `${base}/embeddings`,
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: cfg.model.trim(), input: texts }),
+    });
+  } catch (e) {
+    // Node's fetch repeats the URL in its errors; its credentials must not reach last_error, a log or an answer
+    throw redactErrorCredentials(e);
+  }
   let json: unknown;
   try {
     json = JSON.parse(res.text);
@@ -81,7 +88,7 @@ export async function embed(transport: Transport, cfg: EmbeddingConfig, texts: s
   if (res.status < 200 || res.status >= 300) {
     const err = json as { error?: unknown } | undefined;
     const msg = typeof err?.error === "string" ? err.error : (err?.error as { message?: string } | undefined)?.message ?? res.text.slice(0, 200);
-    throw new EmbeddingError(`embedding request failed (HTTP ${res.status}): ${msg}`);
+    throw new EmbeddingError(redactUrlCredentials(`embedding request failed (HTTP ${res.status}): ${msg}`));
   }
   const vectors = ollama
     ? (json as { embeddings?: number[][] })?.embeddings

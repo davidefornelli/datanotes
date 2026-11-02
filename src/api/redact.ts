@@ -82,14 +82,52 @@ export function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * The user info of every `scheme://user:password@` in a text: the rule of `src/core/url-credentials.ts`
+ * (`ANY_USERINFO` and `userinfoCut`), repeated here because src/api imports nothing else
+ * (tests/api-redact-urls.test.ts checks that both give the same text). Global: use it only with replace.
+ */
+export const URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/)[^\s/?#'"<>`]*@/g;
+const URL_END = /[\s'"<>`]/;
+const BACKSLASH_SCHEMES = new Set(["http:", "https:", "ws:", "wss:", "ftp:", "file:"]);
+
+/** A `\` in the user info ends it only when the URL parses and its scheme ends the authority at a `\`; otherwise the user info runs to the last `@`. */
+function userinfoCut(match: string, scheme: string, offset: number, text: string): string {
+  const info = match.slice(scheme.length);
+  const bs = info.indexOf("\\");
+  if (bs < 0) return scheme;
+  const rest = text.slice(offset);
+  const end = rest.search(URL_END);
+  let special = false;
+  try {
+    special = BACKSLASH_SCHEMES.has(new URL(end < 0 ? rest : rest.slice(0, end)).protocol);
+  } catch {
+    special = false;
+  }
+  if (!special) return scheme;
+  const at = info.lastIndexOf("@", bs);
+  return at < 0 ? match : scheme + info.slice(at + 1);
+}
+
+/** A JSON value with the user info of the URLs in its strings removed, at any depth (new arrays and objects). */
+export function withoutUrlUserinfo(v: unknown): unknown {
+  if (typeof v === "string") return v.includes("://") && v.includes("@") ? v.replace(URL_USERINFO, (m: string, scheme: string, offset: number) => userinfoCut(m, scheme, offset, v)) : v;
+  if (Array.isArray(v)) return v.map(withoutUrlUserinfo);
+  if (v === null || typeof v !== "object") return v;
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, withoutUrlUserinfo(x)]));
+}
+
+/**
  * A call (secrets already removed) as a reporter sends it to an engine that takes it cut: the
  * arguments and the value cut as the engine cuts them, and the summary of a result object, which
  * the cut value may no longer give. The engine records the same event as from the whole call.
+ * URL user info goes before the cut: a cut inside a long password would leave its start without
+ * the `@` that marks where it ends.
  */
 export function cutToolCall(call: { args: Record<string, unknown>; ok: boolean; value: unknown }): { args: Record<string, unknown>; value: unknown; summary?: Record<string, unknown> } {
+  const value = withoutUrlUserinfo(call.value);
   return {
-    args: Object.fromEntries(Object.entries(call.args).map(([k, v]) => [k, cutRecorded(v, RECORDED_CHARS.arg)])),
-    value: cutRecorded(call.value, RECORDED_CHARS.value),
-    ...(call.ok && isPlainObject(call.value) ? { summary: summarizeRecorded(call.value) } : {}),
+    args: Object.fromEntries(Object.entries(call.args).map(([k, v]) => [k, cutRecorded(withoutUrlUserinfo(v), RECORDED_CHARS.arg)])),
+    value: cutRecorded(value, RECORDED_CHARS.value),
+    ...(call.ok && isPlainObject(value) ? { summary: summarizeRecorded(value) } : {}),
   };
 }

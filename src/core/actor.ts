@@ -69,6 +69,20 @@ export function currentActor(): Actor | undefined {
   return storage?.getStore();
 }
 
+/** The actors of requests where the owner views as a token (X-Datanotes-View-As): `auth` is the viewed token. */
+const VIEWING_AS = new WeakSet<Actor>();
+
+/** Marks `actor` as the owner viewing as `actor.auth` (the HTTP server only, never a header); returns it. */
+export function viewingAs(actor: Actor): Actor {
+  VIEWING_AS.add(actor);
+  return actor;
+}
+
+/** Whether `actor` is the owner viewing as a token. */
+export function isViewingAs(actor: Actor | undefined): boolean {
+  return actor !== undefined && VIEWING_AS.has(actor);
+}
+
 /** "harness / model" (and "via <token>" for a named token), for the transaction log's userName. */
 export function actorName(a: Actor | undefined): string | undefined {
   if (!a) return undefined;

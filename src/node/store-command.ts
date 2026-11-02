@@ -41,6 +41,7 @@ import { dataHome, LOCK_FILE, METASTORE, readDatabaseId, readRegistry, REGISTRY_
 import { newDatabaseId, withMetastoreId } from "../core/database-id";
 import { guide } from "../core/hints";
 import { messageOf } from "../core/message";
+import { redactUrlCredentials } from "../core/url-credentials";
 import { runGit, type GitRunner } from "./git-sync";
 import { tightenPrivate } from "./private-files";
 import { DATABASE_ID_TRAILER, MIN_EVERY_S, parseEvery, prepareStoreRepo, redactRemote, StoreBackup } from "./store-backup";
@@ -168,7 +169,7 @@ function readSettings(file: string): Record<string, unknown> {
 }
 
 /** A text (a git error) without the credentials of the URLs in it. */
-const redactText = (text: string) => text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s'"]*@/gi, "$1");
+const redactText = (text: string) => redactUrlCredentials(text);
 
 /**
  * The time limit of the local git commands (`add`, `commit`) of the first backup: the first commit

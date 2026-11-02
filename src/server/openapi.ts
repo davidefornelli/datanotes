@@ -130,6 +130,10 @@ interface RouteDoc {
   unavailable?: string;
   /** When a route open to every token may still answer 403: why. */
   forbidden?: string;
+  /** When the route may answer 409: why. */
+  conflict?: string;
+  /** The 400 answer when it carries more than `error`. */
+  invalid?: { description: string; schema: Schema };
 }
 
 /** A `POST /datanotes/<route>` operation with the responses it can really give. */
@@ -148,6 +152,8 @@ function postRoute(d: RouteDoc): Schema {
   if (refused === 422) {
     responses["422"] = { description: "Refused (validation failures, conflicts, an unmet `expect`): nothing written. Same body as 200, with `ok: false` and the reasons.", content: json(d.result) };
   }
+  if (d.conflict) responses["409"] = { description: d.conflict, content: json(ref("Error")) };
+  if (d.invalid) responses["400"] = { description: d.invalid.description, content: json(d.invalid.schema) };
   responses["500"] = refused
     ? { description: "Unexpected error (`{error}`), or a write that failed partway and could not be rolled back: `rolled_back: false`, `failed` lists the files left (undo_migration on `migration_id` retries the rollback).", content: json({ anyOf: [d.result, ref("Error")] }) }
     : ERRORS[500];
@@ -162,6 +168,8 @@ function postRoute(d: RouteDoc): Schema {
       summary: d.summary,
       ...(d.description ? { description: d.description } : {}),
       ...(d.writes ? { parameters: [{ $ref: "#/components/parameters/Actor" }] } : {}),
+      // read operations never write: the two parameters never meet
+      ...(op !== undefined && READ_OPERATIONS.has(op) ? { parameters: [{ $ref: "#/components/parameters/ViewAs" }] } : {}),
       requestBody: { required: d.bodyRequired ?? false, content: json(d.body ?? { type: "object" }) },
       responses,
       ...(d.extra ?? {}),
@@ -174,6 +182,60 @@ const TOKEN_SECRET = { type: "string", description: "The token itself: shown onc
 
 const TOKEN_ROUTES: Record<string, { summary: string; body: Schema; result: Schema; writes?: boolean }> = {
   "/tokens/": { summary: "List the named tokens (owner only).", body: { type: "object" }, result: { type: "object", properties: { tokens: { type: "array", items: TOKEN } } } },
+  "/tokens/permissions/": {
+    summary: "Every table and view, and what each named token may read and write in it (owner only): the permission matrix, as the engine applies it.",
+    body: { type: "object", properties: { name: { type: "string", description: "One token; absent: every token." } } },
+    result: {
+      type: "object",
+      required: ["objects", "tokens"],
+      properties: {
+        objects: {
+          type: "array",
+          description: "The tables (sorted), then the views (sorted).",
+          items: {
+            type: "object",
+            required: ["name", "kind"],
+            properties: {
+              name: { type: "string", description: "The qualified name (catalog.schema.name)." },
+              kind: { type: "string", enum: ["table", "view"] },
+              reads: { type: "array", items: { type: "string" }, description: "A view: the tables its query reads (sorted)." },
+              reads_complete: { type: "boolean", description: "A view: false when the tables it reads are known only when it runs (`base:`, `within`, `{this.*}`): listings then hide it from a token with `read` patterns." },
+            },
+          },
+        },
+        tokens: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["name", "read", "write", "ddl", "maintain", "access"],
+            properties: {
+              name: { type: "string" },
+              read: { type: "array", items: { type: "string" }, description: "Its read patterns (`[\"*\"]`: every table)." },
+              write: { type: "array", items: { type: "string" } },
+              ddl: { type: "boolean" },
+              maintain: { type: "boolean" },
+              access: {
+                type: "array",
+                description: "One entry per object, in the order of `objects`.",
+                items: {
+                  type: "object",
+                  required: ["object", "read", "write"],
+                  properties: {
+                    object: { type: "string" },
+                    read: { type: "boolean" },
+                    write: { type: "boolean", description: "Always false for a view." },
+                    read_pattern: { type: "string", description: "The first `read` pattern that matches the name, when the object is readable." },
+                    write_pattern: { type: "string", description: "The first `write` pattern that matches the table." },
+                    reason: { type: "string", description: "Why a view is not readable: its name matches no read pattern, the tables it reads are known only when it runs, or it reads tables the token may not read (named)." },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/tokens/me/": { summary: "The calling token's own entry (a named token; 400 for the owner).", body: { type: "object" }, result: { type: "object", properties: { entry: { oneOf: [TOKEN, { type: "null" }] } } } },
   "/tokens/create/": {
     summary: "Create a named token (owner only). Returns the token once.",
@@ -341,8 +403,70 @@ const ENGINE_STATUS: Schema = {
   description: "The engine's health (`datanotes status`). Never a token or a secret.",
 };
 
+/** One setting of the engine as `/settings/` shows it (settings-route.ts). */
+const SETTING_VIEW: Schema = {
+  type: "object",
+  description: "One key of the engine's settings file, with its rule. Secrets are never sent: the owner token has no `value`, header values and the credentials inside an address are hidden.",
+  required: ["name", "type", "changed", "expected", "applies", "editable", "restart_pending"],
+  properties: {
+    name: { type: "string", description: "The settings file's key (camelCase)." },
+    type: { type: "string", enum: ["boolean", "integer", "number", "string", "enum", "string_list", "string_map"], description: "The kind of value it takes." },
+    value: { description: "The value saved now. Absent when `write_only`; `telemetryHeaders` shows each header's value as `<redacted>`; an address shows no user or password." },
+    default_value: { description: "The value when the file does not set it. Absent for `httpServerToken`." },
+    changed: { type: "boolean", description: "The value differs from the default (`httpServerToken`: it is set)." },
+    expected: { type: "string", description: "The allowed values in words, read after \"<name> takes \"." },
+    values: { type: "array", items: { type: "string" }, description: "The allowed values of an `enum`." },
+    minimum: { type: "number", description: "The smallest value of an `integer` or `number`, when it has one." },
+    maximum: { type: "number", description: "The largest value of an `integer` or `number`, when it has one." },
+    applies: { type: "string", enum: ["live", "restart"], description: "`live`: a change applies from the next request or background job; `restart`: at the engine's next start." },
+    editable: { type: "boolean", description: "False for the settings that change only in the settings file (`tableKey`, `transactionLogFormat`)." },
+    change_with: { type: "string", description: "When not editable: why, and how to change it." },
+    restart_pending: { type: "boolean", description: "A `restart` setting whose saved value is not the one the engine runs with." },
+    overridden_by: { type: "string", description: "A start option of `datanotes serve` that wins over the setting, in words." },
+    write_only: { type: "boolean", const: true, description: "Its value is never sent (`httpServerToken`)." },
+    redacted: { type: "boolean", const: true, description: "Something was hidden: header values, the credentials of an address, the token." },
+    sends_data: { type: "boolean", const: true, description: "An address the engine sends data to." },
+    warning: { type: "string", description: "What a change of it does, to show before it is saved." },
+  },
+};
+
+const SETTINGS_LIST: Schema = { type: "array", items: ref("SettingView"), description: "Every key of the settings file, in its order." };
+
+/** The answer of `/restart/` (restart-route.ts), its fields in this order. */
+const ENGINE_RESTART: Schema = {
+  type: "object",
+  required: ["ok", "dry_run", "restarting", "ready", "problems", "will_apply", "still_overridden", "warnings", "port", "port_after", "started_at", "pid", "started_by"],
+  properties: {
+    ok: { type: "boolean", const: true, description: "Always true in a 200 answer." },
+    dry_run: { type: "boolean", description: "Whether this was only a dry run (nothing restarted)." },
+    restarting: { type: "boolean", description: "A restart is under way (always true in the answer of a real restart)." },
+    ready: { type: "boolean", description: "No problem and no restart under way: a restart may start now." },
+    problems: {
+      type: "array",
+      items: obj({ error: { type: "string" }, hint: { type: "string" }, docs: { type: "string" } }),
+      description: "Why the next start would fail, with what to do; empty when nothing would.",
+    },
+    will_apply: { type: "array", items: { type: "string" }, description: "The settings whose value at the next start differs from what runs now (restart settings changed since the start, hand edits of the file), in settings order. Names only, never values." },
+    still_overridden: {
+      type: "array",
+      items: obj({ setting: { type: "string" }, by: { type: "string", description: "The start option that wins, in words." } }),
+      description: "Settings that differ too, but a start option of datanotes serve keeps winning.",
+    },
+    warnings: { type: "array", items: { type: "string" }, description: '"<name>: <text>" for each setting of will_apply whose rule has a file-only reason or a warning, in settings order.' },
+    port: { type: ["integer", "null"], description: "The port the engine listens on now." },
+    port_after: { type: "integer", description: "The port after the restart (equal to port unless it changes)." },
+    started_at: { type: "string", description: "When this run started (ISO; equals /status/ engine.started_at): a new value means the restart is done." },
+    pid: { type: ["integer", "null"], description: "The engine's process (a restart does not change it)." },
+    started_by: { type: "string", enum: ["systemd", "container", "terminal", "unknown"], description: "How the engine was started, as far as it can tell: what decides whether a failed start is started again." },
+    last_cancelled: { ...obj({ requested_at: { type: "string" }, reason: { type: "string" } }), description: "The last restart of this run that was cancelled (a request still under way after the drain), with why." },
+    requested_at: { type: "string", description: "Only in the answer of a real restart: when it was asked (ISO)." },
+  },
+};
+
 const SCHEMAS: Record<string, Schema> = {
   EngineStatus: ENGINE_STATUS,
+  EngineRestart: ENGINE_RESTART,
+  SettingView: SETTING_VIEW,
   Error: { type: "object", required: ["error"], properties: { error: { type: "string", description: "What went wrong, for a person or an agent." } } },
   AmbiguousName: {
     type: "object",
@@ -504,6 +628,51 @@ export function openApiDocument(version: string): Schema {
       result: ok,
     },
     {
+      route: "/sessions/",
+      operationId: "list_sessions",
+      summary: "The agent sessions that used each credential (owner only), read from the change feed: harness, model, tool calls, row changes, operations and tables, the most recent first.",
+      description: "Each session groups the change feed's events of one credential (`owner` or a token's name) and one agent session (compared on its first 16 characters); a credential's work without a session is one entry with `session: null`. Hand edits and background work have no credential and are left out. A named token is refused (403), even with `maintain`.",
+      body: {
+        type: "object",
+        properties: {
+          token: { type: "string", description: "Only this credential: `owner` or a token's name." },
+          since: { type: "string", description: "ISO date-time: the earliest event to look at. Default: 7 days ago." },
+          limit: { type: "integer", minimum: 1, maximum: 1000, default: 100, description: "The most sessions to return." },
+        },
+      },
+      result: {
+        type: "object",
+        required: ["since", "sessions"],
+        properties: {
+          since: { type: "string", description: "The earliest time looked at (ISO date-time)." },
+          sessions: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["token", "session", "first_at", "last_at", "first_seq", "last_seq", "tool_call_count", "failed_tool_call_count", "row_change_count", "migration_count", "tables", "tools"],
+              properties: {
+                token: { type: "string", description: "The credential: `owner` or a token's name." },
+                session: { type: ["string", "null"], description: "The session id (its longest form seen); null for work without a session." },
+                harness: { type: "string" },
+                model: { type: "string" },
+                first_at: { type: "string" },
+                last_at: { type: "string" },
+                first_seq: { type: "integer" },
+                last_seq: { type: "integer" },
+                tool_call_count: { type: "integer" },
+                failed_tool_call_count: { type: "integer" },
+                row_change_count: { type: "integer", description: "Inserts, updates, deletes, moves and unreadable rows." },
+                migration_count: { type: "integer", description: "Distinct journal operations." },
+                tables: { type: "array", items: { type: "string" }, description: "The tables of its row changes (sorted)." },
+                tools: { type: "array", description: "Its tools by calls, most first (at most 20).", items: { type: "object", required: ["tool", "call_count"], properties: { tool: { type: "string" }, call_count: { type: "integer" } } } },
+              },
+            },
+          },
+        },
+      },
+      unavailable: "The change feed is not running.",
+    },
+    {
       route: "/tool-calls/record/",
       operationId: "record_tool_call",
       summary: "Record an agent's tool call in the change feed (`tool_call` events): what an MCP server reports after each call, its own tools included (`served_by`). Any token may call it.",
@@ -542,12 +711,82 @@ export function openApiDocument(version: string): Schema {
       result: ref("EngineStatus"),
     },
     {
+      route: "/settings/",
+      operationId: "engine_settings",
+      summary: "The engine's settings (owner only): every key of the settings file with its value, default, whether it applies at once or after a restart; secrets are never sent.",
+      description: "`settings_version` changes with every applied change and every start: send it as `expect_version` to `/settings/update/`. A named token is refused (403), even with `maintain`.",
+      result: obj({
+        settings_file: { type: ["string", "null"], description: "The settings file; null on a host that keeps its settings in memory." },
+        settings_version: { type: "string", description: "Opaque: changes with every applied change and every start." },
+        file_changed_on_disk: { type: "boolean", description: "The file was edited by hand since the engine read or wrote it: changes are refused until a restart." },
+        restart_pending: { type: "array", items: { type: "string" }, description: "The settings saved but waiting for a restart, in settings order." },
+        settings: SETTINGS_LIST,
+      }),
+    },
+    {
+      route: "/settings/update/",
+      operationId: "update_engine_settings",
+      summary: "Change the engine's settings (owner only): checked with the rules the engine loads the settings file with, saved, and journaled as set_engine_settings.",
+      description:
+        "`expect_version` is the `settings_version` you read: another change since is refused (409). `changes` maps each setting to its new value; null puts its default back (not `httpServerToken`); `telemetryHeaders` is a patch merged into the current headers (a header set to null is removed). Secrets are write-only: send a new value, never read one; an address sent back as shown (without its credentials) keeps them. All or nothing: one refused value refuses the change, and `refused` lists each. A `live` setting applies from the next request or job, a `restart` one at the next start. `dry_run: true` checks without saving. A named token is refused (403), even with `maintain`.",
+      body: {
+        type: "object",
+        required: ["expect_version", "changes"],
+        properties: {
+          expect_version: { type: "string", description: "The `settings_version` that `/settings/` answered." },
+          changes: { type: "object", description: "Setting name -> new value; null puts the default back.", additionalProperties: {} },
+          dry_run: { type: "boolean", default: false, description: "Check only: nothing saved, journaled or logged." },
+        },
+      },
+      bodyRequired: true,
+      writes: true,
+      result: obj(
+        {
+          ok: { type: "boolean", const: true },
+          dry_run: { type: "boolean" },
+          settings_version: { type: "string", description: "The new version (unchanged on a dry run or when nothing changed)." },
+          changed: { type: "array", items: { type: "string" }, description: "The settings whose value changes, in settings order." },
+          applied_now: { type: "array", items: { type: "string" }, description: "Of `changed`: the ones that apply at once." },
+          after_restart: { type: "array", items: { type: "string" }, description: "Of `changed`: the ones that apply at the next start." },
+          restart_pending: { type: "array", items: { type: "string" }, description: "Every setting waiting for a restart after this change." },
+          follow_ups: { type: "array", items: obj({ setting: { type: "string" }, description: { type: "string" } }), description: "What to do next." },
+          migration_id: { type: "string", description: "The journal entry (absent on a dry run or when nothing changed)." },
+          settings: SETTINGS_LIST,
+        },
+        ["ok", "dry_run", "settings_version", "changed", "applied_now", "after_restart", "restart_pending", "follow_ups", "settings"],
+      ),
+      invalid: {
+        description: "A bad body, or values refused: nothing changed. `refused` lists every refused setting.",
+        schema: {
+          type: "object",
+          required: ["error"],
+          properties: {
+            error: { type: "string" },
+            refused: { type: "array", items: obj({ setting: { type: "string" }, error: { type: "string" }, hint: { type: "string" } }) },
+          },
+        },
+      },
+      conflict: "The settings changed since you read them (expect_version), or the settings file was edited on disk while the engine runs: nothing changed.",
+      unavailable: "The settings could not be saved or journaled: nothing changed.",
+    },
+    {
       route: "/stop/",
       operationId: "stop_engine",
       summary: "Stop the engine gracefully (owner only; `datanotes stop` calls it): it answers at once, then finishes the requests under way, makes the last git sync and store backup commit and push, releases its lock and exits.",
       description:
         "From the answer on, new requests get 503 (the engine is stopping) and long polls of the change feed answer at once. The engine waits for the requests under way for up to 30 s. Then it makes the vault's last git sync and the store backup's last commit and push, releases the lock and exits. The caller learns the end from the process (`datanotes stop` waits for it) or from `GET /`, which stops answering. A named token is refused (403), even with `maintain`. A host that cannot stop on request does not serve the route (404).",
       result: { type: "object", required: ["ok", "stopping", "pid"], properties: { ok: { type: "boolean", const: true }, stopping: { type: "boolean", const: true }, pid: { type: ["integer", "null"], description: "The engine's process." } } },
+    },
+    {
+      route: "/restart/",
+      operationId: "restart_engine",
+      summary:
+        "Restart the engine in its own process (owner only): it applies the settings waiting for a restart and the settings file's edits. With dry_run, it says what a restart would do and whether it can.",
+      description:
+        "The engine checks first that the next start will succeed: the folder exists, the settings file holds a JSON object the engine accepts, with an owner token, and the new port is free. When it would fail, the answer is 409 with the problems, and nothing stops. Otherwise it answers at once, then the requests under way finish and new ones get 503 (the engine is restarting). When a request still runs after 30 s, the restart is cancelled and the engine serves again (`last_cancelled`). The lock is kept. Poll the dry run until `started_at` changes: the restart is done. A new port or owner token applies. A start that still fails ends the process with exit code 1. A named token is refused (403), even with `maintain`. A host that cannot restart does not serve the route (404).",
+      body: { type: "object", properties: { dry_run: { type: "boolean", default: false, description: "Only say what a restart would do." } } },
+      result: ref("EngineRestart"),
+      conflict: "A restart is already under way, or the next start would fail (problems): nothing stopped.",
     },
     {
       route: "/openapi/",
@@ -621,6 +860,16 @@ export function openApiDocument(version: string): Schema {
     },
   };
 
+  paths[`${ROUTE_PREFIX}/ui`] = {
+    get: {
+      tags: ["service"],
+      operationId: "ui",
+      summary: "The database browser: a web page that browses and administers the database, served by the engine (public; its calls need a token).",
+      security: [],
+      responses: { "200": { description: "HTML page.", content: { "text/html": { schema: { type: "string" } } } } },
+    },
+  };
+
   // the docs of this version, shipped with the package (src/api/docs.ts)
   const markdown = (description: string) => ({ description, content: { "text/markdown": { schema: { type: "string" } } } });
   const noDocs = { description: "The docs are not in this installation (a checkout where they were not built).", content: json(ref("Error")) };
@@ -659,11 +908,12 @@ export function openApiDocument(version: string): Schema {
       description:
         "Database of Markdown notes: tables of notes, rows, queries, history, a change feed and the vault's notes.\n\n" +
         "**Operations**: every operation is `POST /datanotes/operations/<name>/`, its body the operation's arguments (the same names as the MCP tool of the same name). An unknown argument is refused (400) with the closest real one.\n\n" +
-        "**Authentication**: every route but `GET /`, this document and `/datanotes/docs` needs `Authorization: Bearer <token>`: " +
+        "**Authentication**: every route but `GET /`, this document, `/datanotes/docs` and `/datanotes/ui` needs `Authorization: Bearer <token>`: " +
         "the owner's token (`httpServerToken` in the settings: everything) or a named token (`/datanotes/tokens/create/`: reads the tables in its `read` patterns, every table without them; writes the tables in its `write` patterns, " +
         "changes the schema with `ddl`; the engine's administration stays the owner's: 403 otherwise).\n\n" +
         "**Actor**: send `X-Datanotes-Actor: {\"harness\": …, \"model\": …, \"session\": …}` (JSON) to record on whose behalf a write is made; " +
         "the journal adds the credential (`auth`: `owner`, or the named token's name), which the client cannot claim.\n\n" +
+        "**View as**: the owner may send `X-Datanotes-View-As: <token name>` on a read to get the answer that token would get.\n\n" +
         "**Errors**: `{error}` with 400 (bad input), 401 (missing or wrong token), 403 (a named token beyond its permissions, or a read of a table outside its `read` patterns), 404 (unknown table, view, migration or note), " +
         "409 (ambiguous table name), 500. A refused write answers 422 (409 for undo) with the operation's result, `ok: false`: nothing was written.",
     },
@@ -682,6 +932,14 @@ export function openApiDocument(version: string): Schema {
           description: "JSON: on whose behalf the write is made, recorded in the journal (`harness`, `model`, `session`).",
           schema: { type: "string" },
           example: '{"harness":"my-script","model":"","session":"s-1"}',
+        },
+        ViewAs: {
+          name: "X-Datanotes-View-As",
+          in: "header",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Owner only, on reads only (an operation that only reads, tokens/me/, extensions/, the change stream): the request runs with this named token's permissions and read scope, and the token's last_seen does not change. A named token sending it gets 403; a request that is not a read gets 400.",
         },
       },
       responses: {

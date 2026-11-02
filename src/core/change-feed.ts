@@ -119,6 +119,10 @@ export interface ChangeQuery {
    * keeps the agent's harness (and the token's name in `auth`), so the program still sees it.
    */
   excludeActor?: string;
+  /** Only events of this credential: "owner" or a token's name (the actor's auth). */
+  auth?: string;
+  /** Only events of this agent session (compared on its first 16 characters, as identities are). */
+  session?: string;
   /** Only changes whose row matches (as in select_rows; tested on the values after the change, before it for deletes). */
   where?: Where;
   /** Default 500, at most 5000. */
@@ -145,6 +149,50 @@ export interface HandEditSummary {
   violations: number;
   /** The newest of them, with the first violation's message. */
   latest: { path: string; table: string | null; at: string; seq: number; violations: number; message: string }[];
+}
+
+/** One agent session (or one credential's work without a session) as the change feed saw it (`ChangeFeed.sessions`). */
+export interface SessionSummary {
+  /** The credential: "owner" or a token's name. */
+  token: string;
+  /** The longest form of the session id seen; null for work without a session. */
+  session: string | null;
+  harness?: string;
+  model?: string;
+  firstAt: string;
+  lastAt: string;
+  firstSeq: number;
+  lastSeq: number;
+  toolCalls: number;
+  failedToolCalls: number;
+  /** Row events: inserts, updates, deletes, moves, unreadable rows. */
+  rowChanges: number;
+  /** Distinct journal operations (migrations). */
+  migrations: number;
+  /** The tables of its row changes, sorted. */
+  tables: string[];
+  /** Its tools by calls (most first, then by name), at most 20. */
+  tools: { tool: string; calls: number }[];
+}
+
+/** The ops that change a row (counted as a session's row changes). */
+const ROW_CHANGE_OPS: ReadonlySet<ChangeOp> = new Set(["insert", "update", "delete", "move", "unreadable"]);
+
+interface SessionGroup {
+  token: string;
+  session: string | null;
+  harness?: string;
+  model?: string;
+  firstAt: string;
+  lastAt: string;
+  firstSeq: number;
+  lastSeq: number;
+  toolCalls: number;
+  failedToolCalls: number;
+  rowChanges: number;
+  migrations: Set<string>;
+  tables: Set<string>;
+  tools: Map<string, number>;
 }
 
 interface RowState {
@@ -354,6 +402,11 @@ function matches(ev: ChangeEvent, q: ChangeQuery): boolean {
   if (q.ops && q.ops.length > 0 && !q.ops.includes(ev.op)) return false;
   if (q.columns && q.columns.length > 0 && ev.op === "update" && !Object.keys(ev.changes ?? {}).some((c) => q.columns!.includes(c))) return false;
   if (q.excludeActor && ev.actor?.harness === q.excludeActor) return false;
+  if (q.auth !== undefined && ev.actor?.auth !== q.auth) return false;
+  if (q.session !== undefined) {
+    const s = ev.actor?.session ?? ev.call?.session;
+    if (s === undefined || s.slice(0, 16) !== q.session.slice(0, 16)) return false;
+  }
   return true;
 }
 
@@ -1109,6 +1162,72 @@ export class ChangeFeed {
 
   get lastSeq(): number {
     return this.seq;
+  }
+
+  /**
+   * The agent sessions (and each credential's work without a session) seen since `since` (ms), the
+   * most recent first: read from the day files, so every event is counted, not only the ones kept
+   * in memory. Events without a credential (hand edits, background work) are left out.
+   */
+  async sessions(since: number, opts: { auth?: string; limit: number }): Promise<SessionSummary[]> {
+    const fromDay = new Date(since).toISOString().slice(0, 10);
+    const groups = new Map<string, SessionGroup>();
+    for (const f of (await storeList(this.app, this.dir())).files.filter((x) => x.endsWith(".jsonl")).sort()) {
+      const day = /(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(f)?.[1];
+      if (!day || day < fromDay) continue;
+      /* v8 ignore next -- a race: a file listed a moment ago was removed (pruned) before this read */
+      for (const ev of parseEvents((await storeRead(this.app, f)) ?? "")) {
+        const auth = ev.actor?.auth;
+        if (typeof auth !== "string" || Date.parse(ev.at) < since) continue;
+        if (opts.auth !== undefined && auth !== opts.auth) continue;
+        const session = ev.actor?.session ?? ev.call?.session;
+        const key = `${auth}\u0000${session ? session.slice(0, 16) : ""}`;
+        let g = groups.get(key);
+        if (!g) {
+          g = { token: auth, session: session || null, firstAt: ev.at, lastAt: ev.at, firstSeq: ev.seq, lastSeq: ev.seq, toolCalls: 0, failedToolCalls: 0, rowChanges: 0, migrations: new Set(), tables: new Set(), tools: new Map() };
+          groups.set(key, g);
+        }
+        // the group of a session has one from its first event: keep the longest form
+        if (session && session.length > g.session!.length) g.session = session;
+        // the day files hold the events in order: the last one read is the latest
+        g.lastSeq = ev.seq;
+        g.lastAt = ev.at;
+        if (ev.actor?.harness) g.harness = ev.actor.harness;
+        if (ev.actor?.model) g.model = ev.actor.model;
+        if (ev.op === "tool_call" && ev.call) {
+          g.toolCalls++;
+          if (ev.call.ok === false) g.failedToolCalls++;
+          g.tools.set(ev.call.tool, (g.tools.get(ev.call.tool) ?? 0) + 1);
+        }
+        if (ROW_CHANGE_OPS.has(ev.op)) {
+          g.rowChanges++;
+          if (ev.table) g.tables.add(ev.table);
+        }
+        if (ev.migration) g.migrations.add(ev.migration);
+      }
+    }
+    return [...groups.values()]
+      .sort((a, b) => b.lastAt.localeCompare(a.lastAt) || b.lastSeq - a.lastSeq)
+      .slice(0, opts.limit)
+      .map((g) => ({
+        token: g.token,
+        session: g.session,
+        ...(g.harness !== undefined ? { harness: g.harness } : {}),
+        ...(g.model !== undefined ? { model: g.model } : {}),
+        firstAt: g.firstAt,
+        lastAt: g.lastAt,
+        firstSeq: g.firstSeq,
+        lastSeq: g.lastSeq,
+        toolCalls: g.toolCalls,
+        failedToolCalls: g.failedToolCalls,
+        rowChanges: g.rowChanges,
+        migrations: g.migrations.size,
+        tables: [...g.tables].sort(),
+        tools: [...g.tools.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 20)
+          .map(([tool, calls]) => ({ tool, calls })),
+      }));
   }
 
   /**

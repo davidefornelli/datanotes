@@ -9,6 +9,7 @@
 import { OtlpLogExporter, otlpFromEnv, otlpProtocol, parseResourceAttributes, type OtlpOptions } from "../api/otlp";
 import type { AttrValue, Severity, Telemetry, TelemetrySettings } from "../core/telemetry";
 import { activeSpanContext } from "../core/tracing";
+import { redactAttributes, redactUrlCredentials } from "../core/url-credentials";
 
 type Env = Record<string, string | undefined>;
 
@@ -66,7 +67,8 @@ export class OtlpSink implements Telemetry {
 
   log(severity: Severity, body: string, attributes?: Record<string, AttrValue>): void {
     // inside a span, the record names it: the backend links the log to its trace
-    this.current()?.log(severity, body, attributes, activeSpanContext());
+    // no URL credentials leave in a log record (url-credentials.ts)
+    this.current()?.log(severity, redactUrlCredentials(body), attributes && redactAttributes(attributes), activeSpanContext());
   }
 
   async flush(): Promise<void> {

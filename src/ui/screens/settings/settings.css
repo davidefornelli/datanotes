@@ -1,0 +1,155 @@
+/* The engine settings screen (src/ui/screens/settings). */
+.settings-screen {
+  max-width: 1100px;
+}
+.settings-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.settings-links {
+  margin: 0 0 12px;
+}
+.settings-warning,
+.settings-info {
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+.settings-warning {
+  background: var(--warn-bg);
+  color: var(--fg);
+  border-left: 3px solid var(--warn);
+}
+.settings-info {
+  background: var(--info-bg);
+  border-left: 3px solid var(--accent);
+}
+.settings-warning p,
+.settings-info p {
+  margin: 4px 0;
+}
+.settings-table table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.settings-table thead th:nth-child(2) {
+  width: 44%;
+}
+.settings-table thead th:nth-child(3) {
+  width: 14%;
+}
+.settings-table thead th:nth-child(4) {
+  width: 10%;
+}
+.settings-table th,
+.settings-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-table thead th {
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 12px;
+}
+.settings-table tbody th {
+  font-weight: normal;
+  width: 32%;
+}
+.settings-row-edited {
+  background: var(--bg-soft);
+}
+.settings-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.settings-help {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+.settings-field-error {
+  color: var(--error);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+.settings-input input[type="number"],
+.settings-input input[type="text"] {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+}
+.settings-default {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.settings-headers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.settings-header-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.settings-removed {
+  text-decoration: line-through;
+}
+.settings-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
+}
+.settings-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--bg-strong);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-top: 12px;
+}
+/* while the sticky footer shows, the toasts sit above it: they would cover its Save */
+body:has(.settings-footer) {
+  --toasts-bottom: 96px;
+}
+.settings-footer-buttons {
+  display: flex;
+  gap: 6px;
+}
+.settings-restart {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 12px 12px;
+  margin: 12px 0;
+}
+.settings-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-recent ul {
+  padding-left: 18px;
+}
+.settings-recent-time {
+  font-family: var(--mono);
+}

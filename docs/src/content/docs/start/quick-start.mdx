@@ -24,9 +24,11 @@ The package installs two commands: `datanotes` and its short name `dnotes`. Ever
    npx -y datanotes serve --database your_database_folder
    ```
 
-   The folder is the database: the engine keeps `metastore.yaml` at its root, and serves every note in it. To use an app such as Obsidian on a vault that holds the database, start with `--vault` instead: [Use Datanotes with Obsidian](/administration/use-with-obsidian/) explains it.
+   The folder is the database: the engine keeps `metastore.yaml` at its root, and serves every note in it. To use an app such as Obsidian on a vault that holds the database, start with `--vault` instead. [Use Datanotes with Obsidian](/administration/use-with-obsidian/) explains it.
 
    The engine serves the [HTTP API](/develop/http-api/) on `http://127.0.0.1:27150`. It keeps its settings and your owner token in `settings.json`, in its store outside the folder. `npx datanotes store path --database your_database_folder` shows where.
+
+   To browse the database, open `http://127.0.0.1:27150/datanotes/ui/` and sign in with the owner token. [Browse and administer the database](/administration/database-browser/) explains the browser.
 
    To check that the engine is running and healthy, run `npx datanotes status --database your_database_folder` (see [Check the engine’s status](/administration/status/#read-the-status-over-http)).
 
@@ -47,7 +49,7 @@ The package installs two commands: `datanotes` and its short name `dnotes`. Ever
    const db = new DatanotesClient({ url: engine.url, token: engine.token });
    ```
 
-4. Create a table of films with four columns. The table and each column need a `description`, which tells agents and people what they hold. `filename` names each note after the film’s title, `unique` allows one note per title, and `ordered` keeps the statuses in order:
+4. Create a table of films with four columns. The table and each column need a `description`, which tells agents and people what they hold. `filename` names each note after the film’s title. `unique` allows one note per title. `ordered` keeps the statuses in order:
 
    ```ts
    const created = await db.call("create_table", {

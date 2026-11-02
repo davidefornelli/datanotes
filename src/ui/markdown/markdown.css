@@ -1,0 +1,52 @@
+/* Rendered note bodies (MarkdownView.tsx). */
+.markdown {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  max-width: 80ch;
+}
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
+  line-height: 1.25;
+  margin: 1.2em 0 0.5em;
+}
+.markdown h1 { font-size: 1.6em; }
+.markdown h2 { font-size: 1.35em; }
+.markdown h3 { font-size: 1.15em; }
+.markdown p, .markdown ul, .markdown ol, .markdown blockquote, .markdown pre, .markdown table {
+  margin: 0 0 0.9em;
+}
+.markdown ul, .markdown ol { padding-left: 1.6em; }
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--bg-soft);
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+}
+.markdown pre {
+  background: var(--bg-soft);
+  border-radius: 4px;
+  padding: 0.7em 0.9em;
+  overflow-x: auto;
+}
+.markdown pre code { background: none; padding: 0; font-size: 0.875em; }
+.markdown pre.md-plain { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.markdown blockquote {
+  border-left: 3px solid var(--border, rgba(127, 127, 127, 0.4));
+  padding: 0 0 0 0.9em;
+  margin-left: 0;
+  color: var(--muted, inherit);
+}
+.markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
+.markdown th, .markdown td {
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.4));
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+.markdown th { font-weight: 600; }
+.markdown hr { border: 0; border-top: 1px solid var(--border, rgba(127, 127, 127, 0.4)); margin: 1.2em 0; }
+.markdown img { max-width: 100%; }
+.markdown .md-image, .markdown .wikilink.embed {
+  font-style: italic;
+  color: var(--muted, inherit);
+}
+.markdown .wikilink, .markdown .vault-link { text-decoration: underline dotted; }

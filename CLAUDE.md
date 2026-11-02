@@ -16,6 +16,8 @@ This file applies to every session, local (Windows) or in the cloud (claude.ai/c
 - `src/mcp/` the MCP server (`datanotes mcp`): stdio and Streamable HTTP, tools from `src/api/catalog.ts`.
   Imports only `src/api` and the MCP SDK (a devDependency, bundled into `dist/datanotes.cjs`); the
   engine never serves MCP itself.
+- `src/ui/` the database browser (Preact), served at `/datanotes/ui/`: built by `scripts/ui-build.mjs`,
+  embedded in `dist/datanotes.cjs`. Imports only itself, `preact` and `markdown-it`; nothing imports it.
 - `src/api/` the published client. `src/api/catalog.ts` is the single source of the operations: names,
   tool descriptions, input schemas, OpenAPI. `src/api/` imports nothing else. It compiles with
   NodeNext (`tsconfig.api.json`): its relative imports end in `.js` (`./catalog.js`).

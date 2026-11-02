@@ -1,0 +1,228 @@
+/* The shell (src/ui/shell): login, header, sidebar tree, search, view-as, home, operations. */
+.shell-login {
+  display: flex;
+  justify-content: center;
+  padding: 12vh 16px;
+  background: var(--bg-soft);
+  min-height: 100%;
+}
+.shell-login-box {
+  width: min(420px, 100%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+  height: fit-content;
+}
+.shell-login-box input[type="password"] {
+  width: 100%;
+}
+.shell-login-reason {
+  background: var(--warn-bg);
+  color: var(--fg);
+  border-left: 3px solid var(--warn);
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+.shell-login-remember {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 10px 0 16px;
+}
+.shell-login-remember .ui-field-help {
+  display: block;
+}
+.shell-unreachable {
+  max-width: 560px;
+  margin: 12vh auto;
+  padding: 0 16px;
+}
+
+.shell-header {
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.shell-brand {
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.shell-header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.shell-viewas-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.shell-signout {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.shell-viewas {
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--warn);
+  padding: 6px 16px;
+}
+.shell-viewas button {
+  border: 1px solid var(--warn);
+  background: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 8px;
+}
+
+.shell-search {
+  position: relative;
+  flex: 1;
+  max-width: 480px;
+}
+.shell-search input {
+  width: 100%;
+}
+.shell-search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 40;
+  max-height: 70vh;
+  overflow: auto;
+}
+.shell-search-results li {
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+.shell-search-active {
+  background: var(--bg-strong);
+}
+.shell-search-name {
+  font-weight: 600;
+}
+.shell-search-folder,
+.shell-search-context,
+.shell-search-note {
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+
+.shell-sidebar {
+  padding: 10px 10px 32px;
+}
+.shell-filter {
+  width: 100%;
+  margin-bottom: 8px;
+}
+.shell-tree details {
+  margin: 2px 0;
+}
+.shell-tree summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 2px 0;
+}
+.shell-schema {
+  padding-left: 12px;
+}
+.shell-tree ul,
+.shell-links {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+}
+.shell-tree li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+.shell-tree li a {
+  text-decoration: none;
+}
+.shell-group {
+  margin: 6px 0 2px 12px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.shell-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+.shell-structure {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.shell-new {
+  display: flex;
+  gap: 12px;
+  margin: 10px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.shell-links {
+  padding: 8px 0 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.shell-links li {
+  padding: 2px 0;
+}
+.shell-links a {
+  text-decoration: none;
+}
+
+.shell-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 12px 0;
+}
+.shell-facts div {
+  display: contents;
+}
+.shell-facts dt {
+  color: var(--muted);
+}
+.shell-facts dd {
+  margin: 0;
+}
+
+.shell-ops input[type="search"] {
+  width: min(420px, 100%);
+}
+.shell-ops-list {
+  list-style: none;
+  padding: 0;
+}
+.shell-ops-list li {
+  padding: 3px 0;
+}

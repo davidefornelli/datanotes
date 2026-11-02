@@ -311,9 +311,16 @@ export interface MigrationSummary {
   files_failed: number;
   /** "harness / model" of the agent that ran it. */
   by?: string;
+  /** Who ran it: the credential (auth), the agent's session, harness and model, as recorded. */
+  actor?: JournalActor;
   /** For a batch: its operations; for an operation of a batch: the batch's id. */
   members?: string[];
   batch?: string;
+  /**
+   * For op set_engine_settings: each setting changed, with its value before and after; a secret has
+   * neither and `redacted` true (an address has them without its credentials).
+   */
+  settings?: { name: string; before?: unknown; after?: unknown; redacted?: true }[];
 }
 
 export interface ListMigrationsInput {
@@ -323,6 +330,29 @@ export interface ListMigrationsInput {
   table?: string;
   /** ISO date or date-time: only operations at or after it. */
   since?: string;
+  /** ISO date-time: only operations strictly before it, to page back with the `executed_at` of the oldest one read. */
+  before?: string;
+  /** Only operations made with this credential: `owner` or a token's name. */
+  auth?: string;
+}
+
+/** The actor of a journal entry as list_migrations shows it. */
+export interface JournalActor {
+  auth?: string;
+  session?: string;
+  harness?: string;
+  model?: string;
+}
+
+/** The credential, session, harness and model an entry recorded (only those present), or undefined when none. */
+function journalActor(a: MigrationLine["actor"]): JournalActor | undefined {
+  if (!a) return undefined;
+  const out: JournalActor = {};
+  if (typeof a.auth === "string") out.auth = a.auth;
+  if (typeof a.session === "string") out.session = a.session;
+  if (typeof a.harness === "string") out.harness = a.harness;
+  if (typeof a.model === "string") out.model = a.model;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** The table (or view, or `bases.<name>`) an operation was about: what its `schema` names after `#`. */
@@ -340,6 +370,7 @@ export async function listMigrations(app: App, settings: Settings, input: ListMi
   const files = (await storeList(app, journalDir(settings))).files.filter((f) => f.endsWith(".jsonl")).sort().reverse();
   const limit = Math.max(1, Math.min(input.limit ?? 50, 1000));
   const since = input.since ? Date.parse(input.since) : NaN;
+  const before = input.before !== undefined ? Date.parse(input.before) : NaN;
   const out: MigrationSummary[] = [];
   let total = 0;
   for (const f of files) {
@@ -352,12 +383,15 @@ export async function listMigrations(app: App, settings: Settings, input: ListMi
       if (input.op && e.op !== input.op) continue;
       if (input.table && !(e.schema ?? "").includes(input.table) && !e.summary.includes(input.table)) continue;
       if (!Number.isNaN(since) && Date.parse(e.executed_at) < since) continue;
+      if (!Number.isNaN(before) && Date.parse(e.executed_at) >= before) continue;
+      if (input.auth !== undefined && e.actor?.auth !== input.auth) continue;
       if (scope) {
         const table = tableOfEntry(e);
         if (table === undefined || !tableReadable(table, scope)) continue;
       }
       total++;
       if (out.length >= limit) continue;
+      const actor = journalActor(e.actor);
       out.push({
         migration_id: e.migration_id,
         op: e.op,
@@ -370,8 +404,19 @@ export async function listMigrations(app: App, settings: Settings, input: ListMi
         ...(e.undoes !== undefined ? { undoes: e.undoes } : {}),
         files_failed: e.failed.length,
         ...(actorName(e.actor) ? { by: actorName(e.actor) } : {}),
+        ...(actor ? { actor } : {}),
         ...(e.members ? { members: e.members } : {}),
         ...(batchOf.has(e.migration_id) ? { batch: batchOf.get(e.migration_id)! } : {}),
+        ...(e.settings
+          ? {
+              settings: e.settings.map((c) => ({
+                name: c.name,
+                ...("before" in c ? { before: c.before } : {}),
+                ...("after" in c ? { after: c.after } : {}),
+                ...(c.redacted ? { redacted: true as const } : {}),
+              })),
+            }
+          : {}),
       });
     }
   }

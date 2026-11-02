@@ -1,7 +1,7 @@
 /**
  * dist/datanotes.cjs bundles third-party packages: esbuild.service.mjs writes their licenses to
  * dist/THIRD-PARTY-NOTICES.txt (scripts/third-party-notices.mjs), which the npm package ships.
- * This test bundles src/node/cli.ts the same way and fails when a bundled package has a license
+ * This test bundles src/node/cli.ts and the database browser (src/ui/) the same way and fails when a bundled package has a license
  * outside the allowlist, or ships no license file.
  */
 
@@ -9,7 +9,9 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { beforeAll, describe, expect, it } from "vitest";
+import { serviceBuildOptions } from "../scripts/service-build.mjs";
 import { ALLOWED_LICENSES, bundledPackages, licenseAllowed, noticesText, swaggerUi } from "../scripts/third-party-notices.mjs";
+import { buildUi } from "../scripts/ui-build.mjs";
 
 type Package = { name: string; version: string; license: string; files: { name: string; text: string }[] };
 
@@ -18,20 +20,15 @@ let packages: Package[] = [];
 
 beforeAll(async () => {
   const { metafile } = await esbuild.build({
+    ...serviceBuildOptions({ outfile: "dist/datanotes.cjs", version: "0.0.0-test" }),
     absWorkingDir: root,
-    entryPoints: ["src/node/cli.ts"],
-    bundle: true,
-    platform: "node",
-    target: "node22",
-    format: "cjs",
-    outfile: "dist/datanotes.cjs",
     write: false,
     metafile: true,
-    define: { SERVICE_VERSION: '"0.0.0-test"', SWAGGER_UI_CSS: '""', SWAGGER_UI_JS: '""' },
-    external: ["swagger-ui-dist/package.json"],
     logLevel: "error",
   });
-  packages = [...(bundledPackages(metafile, root) as Package[]), swaggerUi(root) as Package];
+  // the database browser is bundled too, embedded as two strings (esbuild.service.mjs)
+  const ui = await buildUi(root);
+  packages = [...(bundledPackages(metafile, root) as Package[]), ...(bundledPackages(ui.metafile, root) as Package[]), swaggerUi(root) as Package];
 }, 60_000);
 
 describe("third-party notices of the bundled command", () => {
@@ -40,6 +37,8 @@ describe("third-party notices of the bundled command", () => {
     expect(names).toContain("@modelcontextprotocol/sdk");
     expect(names).toContain("yaml");
     expect(names).toContain("swagger-ui-dist");
+    expect(names).toContain("preact");
+    expect(names).toContain("markdown-it");
     expect(packages.filter((p) => !licenseAllowed(p.license)).map((p) => `${p.name} ${p.version} (${p.license})`)).toEqual([]);
     expect(packages.filter((p) => !p.files.some((f) => /^licen[cs]e/i.test(f.name))).map((p) => p.name)).toEqual([]);
   });

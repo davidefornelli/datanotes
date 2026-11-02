@@ -8224,7 +8224,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "update_row",
-    "description": "Update exactly ONE row, addressed by its `id` (the system UUID) or its `path`; refused when\nthe row does not exist (or id and path disagree). Same validation, journal and history as\n`update_rows`.\n\n- `set` / `unset`: columns to set or remove.\n- `body`: replace the whole note body; or edit it keeping the rest:\n  `body_sections` `{\"History\": \"…\"}` replaces the text under that heading (any level, up to the\n  next heading of the same level; added as `## History` when missing), `body_prepend` /\n  `body_append` add text before / after.\n- `expect`: compare-and-set — `{\"status\": \"open\"}` writes only if the row still has those\n  values (a person may have changed it since you read it); otherwise refused, nothing written.\n- `autolink`: the text written links the notes it mentions by name, at their first mention\n  (off with `autolink: false` or the database's setting). `links_added` lists the links made;\n  `ambiguous_mentions` the mentions left as text with the notes they may name: read those, then\n  link the right one with update_row and `autolink: false`, or leave the text.",
+    "description": "Update exactly ONE row, addressed by its `id` (the system UUID) or its `path`; refused when\nthe row does not exist (or id and path disagree). Same validation, journal and history as\n`update_rows`.\n\n- `set` / `unset`: columns to set or remove.\n- `body`: replace the whole note body; or edit it keeping the rest:\n  `body_sections` `{\"History\": \"…\"}` replaces the text under that heading (any level, up to the\n  next heading of the same level; added as `## History` when missing), `body_prepend` /\n  `body_append` add text before / after.\n- `expect`: compare-and-set — `{\"status\": \"open\"}` writes only if the row still has those\n  values (a person may have changed it since you read it); otherwise refused, nothing written.\n- `expect_body`: the same for the note's text: the body as you read it; refused when it\n  changed since.\n- `autolink`: the text written links the notes it mentions by name, at their first mention\n  (off with `autolink: false` or the database's setting). `links_added` lists the links made;\n  `ambiguous_mentions` the mentions left as text with the notes they may name: read those, then\n  link the right one with update_row and `autolink: false`, or leave the text.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -8320,6 +8320,17 @@ export const OPERATIONS: OperationDef[] = [
             {
               "additionalProperties": true,
               "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expect_body": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -12795,7 +12806,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "list_migrations",
-    "description": "The operation journal, newest first: `total` (the matching operations) and `migrations`, each with\n`migration_id` (for undo_migration), `op`, `summary`, `table` (when it was about one), `executed_at`,\n`notes_changed`, `files_changed`, `undone`, `undoes`, `files_failed`, `by` (the agent), and `members`\n(a batch's operations) or `batch` (the batch of an operation).\nFilters: `op` (e.g. \"update_rows\"), `table` (substring of the table name, e.g.\n\"personal.tasks.task\"), `since` (ISO date). `limit` default 50. The journal is kept in the\nengine's store, outside the vault (`store:journal/`); entries older than 90 days are dropped.",
+    "description": "The operation journal, newest first: `total` (the matching operations) and `migrations`, each with\n`migration_id` (for undo_migration), `op`, `summary`, `table` (when it was about one), `executed_at`,\n`notes_changed`, `files_changed`, `undone`, `undoes`, `files_failed`, `by` (the agent), and `members`\n(a batch's operations) or `batch` (the batch of an operation).\nFilters: `op` (e.g. \"update_rows\"), `table` (substring of the table name, e.g.\n\"personal.tasks.task\"), `since` (ISO date), `auth` (only the operations made with this credential: `owner` or a token's name),\n`before` (ISO date-time: only the operations strictly before it; pass the `executed_at` of the oldest one\nyou read to page back). Each operation has `actor` (`auth`, `session`, `harness`, `model`, as recorded). `limit` default 50. The journal is kept in the\nengine's store, outside the vault (`store:journal/`); entries older than 90 days are dropped.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12842,6 +12853,30 @@ export const OPERATIONS: OperationDef[] = [
             }
           ],
           "default": null
+        },
+        "before": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO date-time: only the operations strictly before it (page back with the executed_at of the oldest one read)."
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only the operations made with this credential: owner or a token's name."
         }
       },
       "type": "object"
@@ -12903,6 +12938,24 @@ export const OPERATIONS: OperationDef[] = [
                 "type": "string",
                 "description": "harness / model of the agent."
               },
+              "actor": {
+                "type": "object",
+                "description": "Who ran it, as recorded: the credential (owner or a token's name), the agent's session, harness and model.",
+                "properties": {
+                  "auth": {
+                    "type": "string"
+                  },
+                  "session": {
+                    "type": "string"
+                  },
+                  "harness": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                }
+              },
               "members": {
                 "type": "array",
                 "items": {
@@ -12913,6 +12966,26 @@ export const OPERATIONS: OperationDef[] = [
               "batch": {
                 "type": "string",
                 "description": "Batch this operation belongs to."
+              },
+              "settings": {
+                "type": "array",
+                "description": "For op set_engine_settings: each setting changed, with its value before and after; a secret has neither, and redacted true (an address has them without its credentials).",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "before": {},
+                    "after": {},
+                    "redacted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
               }
             },
             "required": [
@@ -13735,7 +13808,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "list_changes",
-    "description": "Change feed across all tables: numbered row changes (`seq`), oldest first, from engine writes\nand from hand edits (`source: external`). Each has `table`, `kind` (insert, update, delete, move,\nmetastore, unreadable), `op` (the operation that made it), `path`, `row_id`, `changes` ({column: {before, after}}), `actor`, `migration_id`. Hand edits are compared in batches (0.7 s after the last vault change, at most 5 s after the first), in the order they happened, renames included. A hand edit that creates, changes, renames or removes a row is checked against the tables' rules (as check_table does) with the rows that link to it: the last event of each row in the batch has `violations` ([{path, violations: [{code, column | constraint (the CHECK's name), index, message}]}]), what the edit breaks (a rule a row already broke is not listed); empty when it breaks nothing, absent when nothing was checked (engine events, a check that failed). A hand edit of metastore.yaml that changes tables' entries checks every row of those tables: on its `metastore` event. At most 100 per event; `violations_total` then counts them all. A note renamed or moved by hand (a row or a plain note) has the links to its old path rewritten across the vault once the vault is quiet (4 s without a change; not while git pulls, rebases or merges; setting repairLinksOnHandMove, on by default), and its move event does not report them as broken_link: that repair's events (`op: repair_links`) follow the batch and name the moves in `cause` ([{path, old_path, seq}], `seq` of the row's move event). A hand edit that leaves a row's front matter unreadable (broken YAML) is a `kind: unreadable` event with one violation of code `unreadable`: every read leaves the row out until the note is fixed, and the fix is an update of the row's last readable state (an insert for a new note). Agents' tool calls (reported by MCP servers) are `kind: tool_call` events (`call`: tool, args, ok, duration_ms, value, served_by), returned only when `kinds` includes tool_call. Pass the returned\n`last` as `since` next time (`head` is the newest number); `wait_ms` (max 60000) waits for a new change (long poll); `limit` max 5000. `gap: true` means\nolder changes were dropped: re-read the tables. `where` filters rows as in select_rows (on the values after the change). Per-table versions: `table_changes`.",
+    "description": "Change feed across all tables: numbered row changes (`seq`), oldest first, from engine writes\nand from hand edits (`source: external`). Each has `table`, `kind` (insert, update, delete, move,\nmetastore, unreadable), `op` (the operation that made it), `path`, `row_id`, `changes` ({column: {before, after}}), `actor`, `migration_id`. Hand edits are compared in batches (0.7 s after the last vault change, at most 5 s after the first), in the order they happened, renames included. A hand edit that creates, changes, renames or removes a row is checked against the tables' rules (as check_table does) with the rows that link to it: the last event of each row in the batch has `violations` ([{path, violations: [{code, column | constraint (the CHECK's name), index, message}]}]), what the edit breaks (a rule a row already broke is not listed); empty when it breaks nothing, absent when nothing was checked (engine events, a check that failed). A hand edit of metastore.yaml that changes tables' entries checks every row of those tables: on its `metastore` event. At most 100 per event; `violations_total` then counts them all. A note renamed or moved by hand (a row or a plain note) has the links to its old path rewritten across the vault once the vault is quiet (4 s without a change; not while git pulls, rebases or merges; setting repairLinksOnHandMove, on by default), and its move event does not report them as broken_link: that repair's events (`op: repair_links`) follow the batch and name the moves in `cause` ([{path, old_path, seq}], `seq` of the row's move event). A hand edit that leaves a row's front matter unreadable (broken YAML) is a `kind: unreadable` event with one violation of code `unreadable`: every read leaves the row out until the note is fixed, and the fix is an update of the row's last readable state (an insert for a new note). Agents' tool calls (reported by MCP servers) are `kind: tool_call` events (`call`: tool, args, ok, duration_ms, value, served_by), returned only when `kinds` includes tool_call. Pass the returned\n`last` as `since` next time (`head` is the newest number); `wait_ms` (max 60000) waits for a new change (long poll); `limit` max 5000. `gap: true` means\nolder changes were dropped: re-read the tables. `where` filters rows as in select_rows (on the values after the change). `auth`: only the changes made with this credential (`owner` or a token's name); `session`: only those of one agent session (with `kinds: [\"tool_call\"]`: its tool calls). Per-table versions: `table_changes`.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -13816,6 +13889,30 @@ export const OPERATIONS: OperationDef[] = [
             }
           ],
           "default": null
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only the changes made with this credential: owner or a token's name."
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only the changes of this agent session (compared on its first 16 characters)."
         },
         "limit": {
           "type": "integer",

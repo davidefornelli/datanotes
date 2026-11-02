@@ -50,19 +50,27 @@ function fieldsOf(s: Schema, prefix: string, out: Map<string, string[]>): void {
   walk(s, prefix);
 }
 
-/** The `DATANOTES_*` environment variables the source names, sorted. */
+/**
+ * The `DATANOTES_*` environment variables the source names, sorted. Build-time defines
+ * (`declare const DATANOTES_UI_JS: string`, set by esbuild.service.mjs) are not environment variables.
+ */
 export function environmentVariables(): string[] {
   const src = path.join(__dirname, "..", "..", "src");
   const found = new Set<string>();
+  const defines = new Set<string>();
   const walk = (dir: string): void => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p);
-      else if (p.endsWith(".ts")) for (const v of fs.readFileSync(p, "utf8").match(/\bDATANOTES_[A-Z0-9_]+/g) ?? []) found.add(v);
+      else if (p.endsWith(".ts")) {
+        const text = fs.readFileSync(p, "utf8");
+        for (const v of text.match(/\bDATANOTES_[A-Z0-9_]+/g) ?? []) found.add(v);
+        for (const m of text.matchAll(/\bdeclare const (DATANOTES_[A-Z0-9_]+)/g)) defines.add(m[1]!);
+      }
     }
   };
   walk(src);
-  return [...found].sort();
+  return [...found].filter((v) => !defines.has(v)).sort();
 }
 
 /** The `datanotes --help` text, with the options of `datanotes mcp`. */

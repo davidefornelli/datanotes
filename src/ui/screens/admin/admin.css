@@ -1,0 +1,102 @@
+/* The administration screens: configuration, webhooks, extensions, status, semantic index, maintenance. */
+.admin-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1100px;
+}
+
+.admin-screen h1 {
+  margin: 0;
+  font-size: 1.4em;
+}
+
+.admin-screen h2 {
+  margin: 0 0 8px;
+  font-size: 1.05em;
+}
+
+.admin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.admin-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.admin-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg);
+  min-width: 0;
+}
+
+.admin-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.admin-facts dt {
+  color: var(--muted);
+}
+
+.admin-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.admin-list li {
+  overflow-wrap: anywhere;
+}
+
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.admin-pre {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-violations {
+  margin: 4px 0 0;
+}

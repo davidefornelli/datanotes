@@ -90,6 +90,7 @@ const FULL = [
   "src/core/transaction-log.ts",
   "src/core/types-table.ts",
   "src/core/unique-index.ts",
+  "src/core/url-credentials.ts",
   "src/core/uuid.ts",
   "src/core/validate.ts",
   "src/core/vault-index.ts",
@@ -115,9 +116,15 @@ const FULL = [
   "src/server/identities.ts",
   "src/server/openapi.ts",
   "src/server/otlp-sink.ts",
+  "src/server/restart-route.ts",
+  "src/server/settings-route.ts",
   "src/server/status.ts",
   "src/server/token-routes.ts",
   "src/server/tokens.ts",
+  "src/server/ui.ts",
+  // the database browser's pure modules (no DOM at import time): tested in node, all of them
+  "src/ui/lib/**/*.ts",
+  "src/ui/markdown/**/*.ts",
 ];
 
 const floor = (branches: number, lines = 100, functions = 100) => ({ branches, lines, statements: lines, functions });
@@ -141,7 +148,7 @@ export default defineConfig({
     sequence: { sequencer: ExamplesFirst },
     coverage: {
       provider: "v8",
-      include: ["src/core/**/*.ts", "src/server/**/*.ts", "src/node/**/*.ts", "src/api/**/*.ts", "src/mcp/**/*.ts"],
+      include: ["src/core/**/*.ts", "src/server/**/*.ts", "src/node/**/*.ts", "src/api/**/*.ts", "src/mcp/**/*.ts", "src/ui/lib/**/*.ts", "src/ui/markdown/**/*.ts"],
       exclude: [
         "src/api/catalog.ts", // data (the operations' descriptions and schemas): no logic, 12 800 lines
         "src/core/host.ts", // types only
@@ -151,11 +158,13 @@ export default defineConfig({
       reporter: ["text", "html"],
       thresholds: {
         // the whole code base: the engine's operations, the HTTP server and tokens, the Node host, the MCP server.
-        // Today 99.86 / 99.86 / 99.77 (lines, statements, functions) on Linux / Node 26: rounded down.
+        // Today 99.81 / 99.81 / 99.81 (lines 36060/36129, statements the same, functions 3172/3178) on
+        // Linux / Node 26: rounded down. Functions stay at 99.7, not 99.8: one function less is 0.03, so
+        // 99.8 would leave no margin for the paths Windows and other Node versions do not reach.
         lines: 99.8,
         statements: 99.8,
         functions: 99.7,
-        // today 99.41; 99, not 99.4: timing-dependent paths and Node versions move a few branches between runs
+        // today 99.26 (26683/26882); 99, not 99.2: timing-dependent paths and Node versions move a few branches between runs
         branches: 99,
         ...Object.fromEntries(FULL.map((file) => [file, { 100: true }])),
         ...NEAR_FULL,
