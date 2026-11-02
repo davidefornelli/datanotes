@@ -127,7 +127,7 @@ export function withoutGuidance(text: string, op = "the call"): string {
     .join("\n");
 }
 
-const TOKEN = "test-vault-token";
+export const TOKEN = "test-vault-token";
 const ACTOR = { harness: "test-vault-ops" };
 
 function recording(

@@ -6,7 +6,7 @@
  *
  *   store:semantic/docs.json   {format, key, version, sections: {<path>: {h, q, k}}}
  *
- * `key` names the provider, address and model: another one starts a new index. `version` is the
+ * `key` names the provider, the address (without credentials) and the model: another one starts a new index. `version` is the
  * docs' version (a hash of their sections), written once every section has its vector: when the
  * docs change (another engine version, a new docs build), the index is rebuilt for them, and a
  * section whose text did not change keeps its vector (`h`, the hash of the text embedded).
@@ -23,6 +23,7 @@ import { contentHash } from "./file-cache";
 import { guide } from "./hints";
 import { OperationInputError } from "./engine";
 import { messageOf } from "./message";
+import { redactUrlCredentials } from "./url-credentials";
 import { dequantize, embeddingConfig, quantize, SEMANTIC_OFF_MESSAGE, vectorSpaceKey } from "./semantic";
 import type { DatanotesSettings } from "./settings";
 import { storePath, storeRead, storeWrite } from "./store";
@@ -198,7 +199,7 @@ export class DocsSemanticIndex {
       this.lastError = undefined;
       return { version: corpus.version, embedded, reused: wanted.size - todo.length, removed };
     } catch (e) {
-      this.lastError = messageOf(e);
+      this.lastError = redactUrlCredentials(messageOf(e));
       throw e;
     }
   }

@@ -17,6 +17,11 @@
  * and when the engine stops, so after a crash a receiver may get again the batches of the last
  * second (`X-Datanotes-Delivery`, the last sequence number of a batch, tells them apart).
  * Creating, deleting, enabling or disabling a webhook is saved at once.
+ *
+ * An address with a user and password (`https://user:password@host/...`): a delivery goes to the
+ * address without them and sends them as HTTP Basic authentication (Node's fetch refuses a URL that
+ * holds credentials). They stay in `webhooks.json`, next to the webhook's secret, and in memory;
+ * answers, `last_error`, logs and spans show the address without them.
  */
 
 import type { App } from "../core/host";
@@ -27,6 +32,7 @@ import { currentReadScope, tableReadable } from "../core/read-scope";
 import { storePath, storeRead, storeWrite } from "../core/store";
 import { telemetry } from "../core/telemetry";
 import { messageOf } from "../core/message";
+import { redactErrorCredentials, redactUrlCredentials, stripLeadingUserinfo } from "../core/url-credentials";
 import { withSpan } from "../core/tracing";
 import type { AttrValue } from "../core/telemetry";
 
@@ -92,6 +98,42 @@ const defaultPost: Post = async (url, body, headers) => {
   return { status: r.status };
 };
 
+/** Text as base64 of its UTF-8 bytes (btoa takes Latin-1 only). */
+function base64Utf8(text: string): string {
+  let bin = "";
+  for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/** A percent-encoded part of a URL's user info, decoded; as it is when it does not decode. */
+function decodeUserinfo(part: string): string {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+}
+
+/**
+ * Where a delivery goes: the address without its user info, and that user info as HTTP Basic
+ * authentication. An address without user info goes as it is, byte for byte. One that `new URL`
+ * refuses loses its user info as text and gets no authentication: its delivery fails, with an error
+ * that holds none.
+ */
+export function deliveryTarget(url: string): { url: string; authorization?: string } {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return { url: stripLeadingUserinfo(url) };
+  }
+  if (u.username === "" && u.password === "") return { url };
+  const credentials = `${decodeUserinfo(u.username)}:${decodeUserinfo(u.password)}`;
+  u.username = "";
+  u.password = "";
+  return { url: u.toString(), authorization: `Basic ${base64Utf8(credentials)}` };
+}
+
 const BATCH = 100;
 const WAIT_MS = 20_000;
 /** The cursors moved by deliveries are saved at most this often (and when the engine stops). */
@@ -111,10 +153,14 @@ function randomHex(bytes: number): string {
   return [...a].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * A webhook as callers see it: snake_case, no secret, the address without user info, errors without URL
+ * credentials (webhooks.json keeps its stored form).
+ */
 export function publicView(w: Webhook): PublicWebhook {
   return {
     id: w.id,
-    url: w.url,
+    url: typeof w.url === "string" ? stripLeadingUserinfo(w.url) : w.url,
     ...(w.tables !== undefined ? { tables: w.tables } : {}),
     ...(w.ops !== undefined ? { kinds: w.ops.map((o) => (o === "schema" ? "metastore" : o)) } : {}),
     ...(w.columns !== undefined ? { columns: w.columns } : {}),
@@ -124,7 +170,7 @@ export function publicView(w: Webhook): PublicWebhook {
     cursor: w.cursor,
     created_at: w.createdAt,
     ...(w.lastDelivery !== undefined ? { last_delivery: w.lastDelivery } : {}),
-    ...(w.lastError !== undefined ? { last_error: w.lastError } : {}),
+    ...(w.lastError !== undefined ? { last_error: typeof w.lastError === "string" ? redactUrlCredentials(w.lastError) : w.lastError } : {}),
     failures: w.failures,
     status: !w.enabled ? "disabled" : w.failures > 0 ? "failing" : "ok",
   };
@@ -160,6 +206,17 @@ export class WebhookDispatcher {
     } catch {
       this.hooks = [];
     }
+    // a delivery error stored by an older version may quote the address with its credentials
+    let cleaned = false;
+    for (const h of this.hooks) {
+      if (typeof h.lastError !== "string") continue;
+      const clean = redactUrlCredentials(h.lastError);
+      if (clean !== h.lastError) {
+        h.lastError = clean;
+        cleaned = true;
+      }
+    }
+    if (cleaned) await this.save();
     this.running = true;
     for (const h of this.hooks) this.spawn(h);
   }
@@ -293,13 +350,15 @@ export class WebhookDispatcher {
       const body = JSON.stringify({ webhook: h.id, events: page.events.map(wireEvent), last: page.last, ...(page.gap ? { gap: true, since: h.cursor } : {}) });
       let ok = false;
       let error = "";
+      const target = deliveryTarget(h.url);
       // each delivery is a trace of its own (the loop outlives the request that created the webhook)
       await withSpan("POST", { kind: "client", newTrace: true, attributes: webhookAttributes(h, page.events.length) }, async (span) => {
         try {
-          const r = await this.post(h.url, body, {
+          const r = await this.post(target.url, body, {
             "Content-Type": "application/json",
             "X-Datanotes-Signature": `sha256=${await hmacHex(h.secret, body)}`,
             "X-Datanotes-Delivery": String(page.last),
+            ...(target.authorization ? { Authorization: target.authorization } : {}),
           });
           span.setAttribute("http.response.status_code", r.status);
           ok = r.status >= 200 && r.status < 300;
@@ -308,8 +367,10 @@ export class WebhookDispatcher {
             span.setAttribute("error.type", String(r.status)).setStatus("error", error);
           }
         } catch (e) {
-          error = messageOf(e);
-          span.recordException(e);
+          // a transport may quote the address in its error: no credentials in last_error, the log or the span
+          const clean = redactErrorCredentials(e);
+          error = messageOf(clean);
+          span.recordException(clean);
         }
       });
       if (ok) {
@@ -321,9 +382,9 @@ export class WebhookDispatcher {
         continue;
       }
       h.failures += 1;
-      h.lastError = error.slice(0, 300);
+      h.lastError = redactUrlCredentials(error).slice(0, 300);
       this.saveSoon();
-      if (h.failures === 1 || h.failures % 10 === 0) telemetry().log("WARN", "datanotes webhook delivery failed", { webhook: h.id, url: h.url, failures: h.failures, error: h.lastError });
+      if (h.failures === 1 || h.failures % 10 === 0) telemetry().log("WARN", "datanotes webhook delivery failed", { webhook: h.id, url: stripLeadingUserinfo(h.url), failures: h.failures, error: h.lastError });
       await this.sleep(h.id, Math.min(this.backoffBaseMs * 2 ** (h.failures - 1), MAX_BACKOFF_MS));
     }
   }

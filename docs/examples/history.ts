@@ -106,6 +106,7 @@ const chapter: Chapter = {
         { op: "list_changes", args: { tables: ["film"], limit: 3 }, save: "c" },
         { op: "insert_row", args: { table: "film", values: { title: "His Girl Friday" } }, quiet: true },
         { say: "With `since`, the answer holds only the newer changes:", op: "list_changes", args: (ctx) => ({ since: ctx.saved.c.head }) },
+        { say: "`auth` keeps the changes one credential made, `session` those of one agent session:", op: "list_changes", args: { tables: ["film"], auth: "owner", limit: 2 } },
       ],
     },
     {

@@ -52,6 +52,7 @@ import type { App } from "../core/host";
 import { guide, type Guidance } from "../core/hints";
 import { onStoreChange, storeKey } from "../core/store";
 import { messageOf } from "../core/message";
+import { redactUrlCredentials, stripLeadingUserinfo } from "../core/url-credentials";
 import { forgetSshCommand, isNetworkGit, NETWORK_TIMEOUT_MS, runGit, type GitRunner } from "./git-sync";
 
 /** What the backup keeps: folders end with `/`. */
@@ -96,12 +97,12 @@ export const STOP_TIMEOUT_MS = 15_000;
 
 /** A remote URL without its credentials (`https://user:token@host/x` → `https://host/x`). */
 export function redactRemote(url: string): string {
-  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1");
+  return stripLeadingUserinfo(url);
 }
 
 /** A text (a git error) with every URL's credentials removed. */
 function redactText(text: string): string {
-  return text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s'"]*@/gi, "$1");
+  return redactUrlCredentials(text);
 }
 
 async function git(run: GitRunner, cwd: string, ...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {

@@ -11,11 +11,13 @@
  * refuse what it may not read.
  */
 
-import { currentActor, type Actor } from "../core/actor";
+import { currentActor, isViewingAs, type Actor } from "../core/actor";
 import { matchesTablePattern, READ_SCOPE_SUPPORTED, runWithReadScope, tableReadDenied, type ReadDeniedError, type ReadScope } from "../core/read-scope";
 import { runWithWriteScope, type WriteScope } from "../core/write-scope";
 import type { App } from "../core/host";
-import { loadMetastore, rowTableFull } from "../core/metastore";
+import { catalogTables, catalogViews, loadMetastore, rowTableFull, type Metastore } from "../core/metastore";
+import { viewReadable } from "../core/table-registry";
+import { tablesReadByView } from "../core/query-tables";
 import type { DatanotesSettings } from "../core/settings";
 import { storePath, storeRead, storeWrite } from "../core/store";
 import { telemetry } from "../core/telemetry";
@@ -52,6 +54,39 @@ export interface TokenRecord {
   createdAt: string;
   updatedAt: string;
   lastSeen?: string;
+}
+
+/** A table or view of the permission matrix; a view names the tables it reads. */
+export interface PermissionObject {
+  name: string;
+  kind: "table" | "view";
+  /** The tables a view reads (sorted). */
+  reads?: string[];
+  /** False when the tables a view reads are known only when it runs (a vault-wide query). */
+  reads_complete?: boolean;
+}
+
+/** What one token may do with one table or view, and why. */
+export interface PermissionAccess {
+  object: string;
+  read: boolean;
+  write: boolean;
+  /** The first `read` pattern that matches the name (when readable). */
+  read_pattern?: string;
+  /** The first `write` pattern that matches the name. */
+  write_pattern?: string;
+  /** Why a view is not readable. */
+  reason?: string;
+}
+
+/** A token's row of the permission matrix. */
+export interface TokenPermissions {
+  name: string;
+  read: string[];
+  write: string[];
+  ddl: boolean;
+  maintain: boolean;
+  access: PermissionAccess[];
 }
 
 /** A registry entry as the routes show it: everything but the hash, snake_case (tokens.json keeps its keys). */
@@ -199,6 +234,55 @@ export class TokenRegistry {
 
   list(): PublicToken[] {
     return this.tokens.map((t) => this.publicView(t));
+  }
+
+  /**
+   * The permission matrix: every table and view, and what each named token (or the one named) may
+   * read and write in it, as the engine applies it (a view: by its name and the tables it reads).
+   */
+  async permissions(name?: string): Promise<{ objects: PermissionObject[]; tokens: TokenPermissions[] }> {
+    await this.load();
+    const chosen = name === undefined ? this.tokens : this.tokens.filter((t) => t.name === name);
+    if (name !== undefined && chosen.length === 0) throw new BadRequest(`no token ${name}`, guide(`tokens/ lists the named tokens; leave "name" out for all of them.`, "tokenPermissions"));
+    const model = (await loadMetastore(this.deps.app, this.deps.getSettings()).catch(() => null))?.model ?? null;
+    const objects: PermissionObject[] = [];
+    if (model) {
+      for (const full of catalogTables(model).map(({ ref }) => ref.full).sort()) objects.push({ name: full, kind: "table" });
+      for (const full of catalogViews(model).map(({ ref }) => ref.full).sort()) {
+        const reads = tablesReadByView(model, full);
+        objects.push({ name: full, kind: "view", reads: [...new Set(reads.tables)].sort(), reads_complete: reads.complete });
+      }
+    }
+    return { objects, tokens: chosen.map((t) => this.tokenPermissions(t, model, objects)) };
+  }
+
+  private tokenPermissions(t: TokenRecord, model: Metastore | null, objects: PermissionObject[]): TokenPermissions {
+    const pub = this.publicView(t);
+    const scope = scopeOf(t);
+    const access: PermissionAccess[] = [];
+    for (const o of objects) {
+      const readPattern = pub.read.find((p) => matchesTablePattern(o.name, [p]));
+      if (o.kind === "table") {
+        const writePattern = t.write.find((p) => matchesTablePattern(o.name, [p]));
+        access.push({
+          object: o.name,
+          read: scope === null || readPattern !== undefined,
+          write: writePattern !== undefined,
+          ...(readPattern !== undefined ? { read_pattern: readPattern } : {}),
+          ...(writePattern !== undefined ? { write_pattern: writePattern } : {}),
+        });
+        continue;
+      }
+      const read = viewReadable(model!, o.name, scope);
+      access.push({
+        object: o.name,
+        read,
+        write: false,
+        ...(read && readPattern !== undefined ? { read_pattern: readPattern } : {}),
+        ...(read ? {} : { reason: viewUnreadableReason(t.name, o, readPattern !== undefined, scope) }),
+      });
+    }
+    return { name: t.name, read: pub.read, write: t.write, ddl: t.ddl, maintain: t.maintain === true, access };
   }
 
   /** The entry of this token, or null. */
@@ -370,10 +454,11 @@ export class TokenRegistry {
     return async (route, handler, body) => {
       const name = tokenNameOf(currentActor());
       if (!name) return dispatch(route, handler, body);
+      const viewAs = isViewingAs(currentActor()) ? { view_as: true } : {};
       const why = await this.check(name, route, body);
       if (why) {
         const reason = typeof why === "string" ? why : why.message;
-        telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason });
+        telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason, ...viewAs });
         return typeof why === "string" ? { status: 403, json: { error: why, ...FORBIDDEN_HINT } } : errorResponse(why);
       }
       const token = this.get(name)!; // check() refuses an unknown token
@@ -381,13 +466,13 @@ export class TokenRegistry {
       const scope = scopeOf(token);
       // fail closed: a restricted token never gets an answer that its read scope did not filter
       if (scope && !(this.deps.readScopeSupported ?? READ_SCOPE_SUPPORTED)) {
-        telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason: READ_SCOPE_UNSUPPORTED });
+        telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason: READ_SCOPE_UNSUPPORTED, ...viewAs });
         return { status: 503, json: { error: READ_SCOPE_UNSUPPORTED, ...READ_SCOPE_UNSUPPORTED_HINT } };
       }
       const writeScope = writeScopeOf(token);
       // fail closed too: a row write whose changes to other tables cannot be checked is not run
       if (writeScope && writesRows(route) && !(this.deps.readScopeSupported ?? READ_SCOPE_SUPPORTED)) {
-        telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason: WRITE_SCOPE_UNSUPPORTED });
+        telemetry().log("WARN", "datanotes token refused", { token_name: name, "http.route": route, reason: WRITE_SCOPE_UNSUPPORTED, ...viewAs });
         return { status: 503, json: { error: WRITE_SCOPE_UNSUPPORTED, ...WRITE_SCOPE_UNSUPPORTED_HINT } };
       }
       return runWithReadScope(scope, () => runWithWriteScope(writeScope, () => dispatch(route, handler, body)));
@@ -428,6 +513,11 @@ export class TokenRegistry {
         ownerOnly();
         await this.load();
         return { status: 200, json: { tokens: this.list() } };
+      },
+      "/tokens/permissions/": async (b) => {
+        ownerOnly();
+        const n = optStr(b, "name");
+        return { status: 200, json: await this.permissions(n) };
       },
       "/tokens/me/": async () => {
         const self = caller();
@@ -479,6 +569,14 @@ export class TokenRegistry {
       },
     };
   }
+}
+
+/** Why a token may not read a view: its name, its unknown tables, or the tables it may not read. */
+function viewUnreadableReason(token: string, o: PermissionObject, nameMatches: boolean, scope: ReadScope | null): string {
+  if (!nameMatches) return `its name matches no read pattern of ${token}`;
+  if (o.reads_complete === false) return `the tables it reads are known only when it runs: listings hide it from ${token}`;
+  const denied = o.reads!.filter((t) => !matchesTablePattern(t, scope!.patterns));
+  return `it reads ${denied.join(", ")}, which ${token} may not read`;
 }
 
 /** The writes whose text automatic links link (src/core/autolink.ts). */

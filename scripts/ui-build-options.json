@@ -1,0 +1,15 @@
+{
+  "entryPoints": { "app": "src/ui/main.tsx" },
+  "bundle": true,
+  "platform": "browser",
+  "format": "iife",
+  "target": ["es2020", "chrome100", "firefox100", "safari15"],
+  "jsx": "automatic",
+  "jsxImportSource": "preact",
+  "minify": true,
+  "legalComments": "eof",
+  "charset": "utf8",
+  "define": { "process.env.NODE_ENV": "\"production\"" },
+  "alias": { "entities": "entities/lib/decode.js" },
+  "logLevel": "warning"
+}

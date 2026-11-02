@@ -6,14 +6,14 @@ sidebar:
   order: 1
 ---
 
-`datanotes serve` starts the engine’s HTTP server on `http://127.0.0.1:27150`. Every operation of the engine is a route, so any language that sends HTTP requests can read and write your notes. This page covers tokens, the routes, the engine’s health report and errors; the [HTTP API reference](/api/) documents each route.
+`datanotes serve` starts the engine’s HTTP server on `http://127.0.0.1:27150`. Every operation of the engine is a route. Any language that sends HTTP requests can read and write your notes. This page covers tokens, the routes, the engine’s health report and errors; the [HTTP API reference](/api/) documents each route.
 
 ## Authenticate your requests
 
 Every request needs an `Authorization: Bearer your_token` header, with one of two tokens:
 
 - **Owner token**: `httpServerToken` in the settings file, which the engine generates when it first starts; it can do everything
-- **Named token**: the engine creates it when you [create a token](/guides/security/tokens/#create-a-token) for a program or an agent, with only the permissions you give it
+- **Named token**: the engine creates it when you [create a token](/guides/security/tokens/#create-a-token) for a program or an agent. It has only the permissions you give it
 
 Three routes answer without a token: `GET /`, `GET /datanotes/openapi.json` and the `/datanotes/docs` console. They hold no data from your notes.
 
@@ -23,9 +23,9 @@ To use another port, set `httpServerPort` in the settings, or start the engine w
 
 The engine serves its operations and a description of itself:
 
-- **`POST /datanotes/operations/<operation>/`**: one route per operation, with the operation’s arguments as the JSON body, for example `POST /datanotes/operations/insert_row/` with `{"table": "film", "values": {…}}`
+- **`POST /datanotes/operations/<operation>/`**: one route per operation, with the operation’s arguments as the JSON body. An example is `POST /datanotes/operations/insert_row/` with `{"table": "film", "values": {…}}`
 - **`GET /`**: whether the engine runs, and its version
-- **`GET /datanotes/openapi.json`**: the OpenAPI 3.1 description of every route, generated from the catalog of operations, to generate clients in any language
+- **`GET /datanotes/openapi.json`**: the OpenAPI 3.1 description of every route, generated from the catalog of operations. Use it to generate clients in any language
 - **`GET /datanotes/docs`**: the same description in an interactive console
 
 The console is Swagger UI, which the engine serves itself, with nothing from other hosts. Click **Authorize**, paste the owner token or a named token, then click **Execute** on any route to call this engine. The browser keeps the token in its local storage until you log out in the **Authorize** dialog.
@@ -50,7 +50,7 @@ curl -X POST http://127.0.0.1:27150/datanotes/operations/insert_row/ \
   -d '{"table": "film", "values": {"title": "His Girl Friday", "year": 1940}}'
 ```
 
-The engine stores the actor with the write in the journal, and in the table’s history when the table keeps one. It adds the credential as `auth`: `owner`, or the named token’s name, which the header can’t claim.
+The engine stores the actor with the write in the journal. It also stores it in the table’s history when the table keeps one. It adds the credential as `auth`: `owner`, or the named token’s name, which the header can’t claim.
 
 ## Check the engine’s health
 
@@ -58,7 +58,7 @@ The engine stores the actor with the write in the journal, and in the table’s 
 
 ## Read errors
 
-Errors come back as JSON `{"error": "…", "hint": "…", "docs": "…"}`: what is wrong, how to fix it, and the page of this site, in Markdown, that shows the fix ([read the engine’s errors](/guides/agents/reading-errors/)). The status is one of these:
+Errors come back as JSON `{"error": "…", "hint": "…", "docs": "…"}`. The `error` says what is wrong, and the `hint` says how to fix it. The `docs` field names the page of this site, in Markdown, that shows the fix ([read the engine’s errors](/guides/agents/reading-errors/)). The status is one of these:
 
 - **400**: bad input
 - **401**: missing or wrong token
@@ -78,7 +78,7 @@ The engine binds to `127.0.0.1` unless you start it with `--host`. It answers no
 
 ## Get large answers compressed
 
-A client on another machine gets answers of 16 KB or more compressed with gzip. It asks for that with the `Accept-Encoding: gzip` header, as most HTTP clients do. A client on the engine’s machine gets them as they are: compressing would cost the engine more time than it saves.
+A client on another machine gets answers of 16 KB or more compressed with gzip. It asks for that with the `Accept-Encoding: gzip` header, as most HTTP clients do. A client on the engine’s machine gets them as they are. Compressing would cost the engine more time than it saves.
 
 The `httpCompression` [setting](/reference/settings/) changes this:
 
@@ -90,4 +90,4 @@ The `httpCompression` [setting](/reference/settings/) changes this:
 
 The [HTTP API reference](/api/) documents every route, generated from the same OpenAPI description, [openapi.json](/openapi.json). From JavaScript, use the [JavaScript client](/develop/client/). Agents use the [Model Context Protocol (MCP) server](/start/connect-agents/).
 
-To see the routes at work in one program, follow [Build an app on Datanotes](/develop/build-an-app/).
+To see the routes at work in one program, follow [Build an app on Datanotes](/develop/build-an-app/). To browse the database through these routes, open the [database browser](/administration/database-browser/) at `/datanotes/ui/`.

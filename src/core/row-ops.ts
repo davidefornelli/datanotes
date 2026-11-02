@@ -570,6 +570,8 @@ export interface UpdateRowInput {
    * is written — e.g. `{ status: "open" }` when the agent read it open and a person may have closed it.
    */
   expect?: Record<string, unknown>;
+  /** Compare-and-set on the note's text: the body as read (select_rows include_body); refused when it changed since. */
+  expectBody?: string;
   /** Link the notes the text written mentions (autolink.ts); default: the database's `autolink` setting. */
   autolink?: boolean;
 }
@@ -609,6 +611,14 @@ async function updateRowImpl(app: App, settings: DatanotesSettings, input: Updat
         path: row.file.path,
         message: `row changed: expected ${col} = ${JSON.stringify(value)}, found ${JSON.stringify(fmGet(row.ordered, col) ?? null)} — read it again`,
       }));
+      return res;
+    }
+  }
+  if (input.expectBody !== undefined) {
+    const now = (await rowBody(app, row)).replace(/\r\n/g, "\n");
+    if (now !== input.expectBody.replace(/\r\n/g, "\n")) {
+      const res = emptyResult("update_row", opts.dryRun === true);
+      res.conflicts = [{ path: row.file.path, message: "row changed: its body is not the one you read — read it again" }];
       return res;
     }
   }

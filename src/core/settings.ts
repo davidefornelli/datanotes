@@ -195,6 +195,232 @@ export const DEFAULT_SETTINGS: DatanotesSettings = {
 /** Keys only the host sets at start: never read from nor written to the settings file. */
 export const RUNTIME_KEYS = ["databaseFolder", "databaseId"] as const;
 
+/** A key of the settings file: every setting but the ones the host sets at start. */
+export type EditableSettingKey = Exclude<keyof DatanotesSettings, (typeof RUNTIME_KEYS)[number]>;
+export type SettingType = "boolean" | "integer" | "number" | "string" | "enum" | "string_list" | "string_map";
+
+/** How a setting is read from the settings file and changed while the engine runs. */
+export interface SettingRule {
+  type: SettingType;
+  /** The allowed values in words, read after "<name> takes " (errors, the browser, the reference). */
+  expected: string;
+  values?: readonly string[];
+  minimum?: number;
+  maximum?: number;
+  /** What the loader keeps for `raw` (the settings file's rule); undefined: it does not keep it. */
+  load(raw: unknown): unknown;
+  /** When a change reaches a running engine: at once, or at the next start. */
+  applies: "live" | "restart";
+  /** Never changed over HTTP: why, and how instead. */
+  fileOnly?: string;
+  /** "value": never sent; "header_values": the map's values hidden; "url_credentials": user and password stripped. */
+  secret?: "value" | "header_values" | "url_credentials";
+  /** An address the engine sends data to. */
+  sendsData?: true;
+  /** Shown before a change is saved; a change of it is logged as WARN. */
+  warning?: string;
+  /** Shown after a change: what to do next. */
+  followUp?: string;
+  /** Writes over HTTP must also pass it (stricter than the loader). */
+  writeCheck?: { test(value: unknown): boolean; expected: string };
+}
+
+const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
+const bool = (raw: unknown): boolean | undefined => (typeof raw === "boolean" ? raw : undefined);
+const oneOf = (values: readonly string[]): string => values.map((v) => JSON.stringify(v)).join(", ").replace(/, ([^,]*)$/, " or $1");
+const isInt = (raw: unknown): raw is number => typeof raw === "number" && Number.isInteger(raw);
+const enumOf = <T extends string>(values: readonly T[]) => (raw: unknown): T | undefined => (values as readonly unknown[]).includes(raw) ? (raw as T) : undefined;
+const BOOLEAN = { type: "boolean", expected: "true or false", load: bool } as const;
+const enumRule = (values: readonly string[]) => ({ type: "enum" as const, values, expected: oneOf(values), load: enumOf(values) });
+
+const PROTOCOLS = ["http/protobuf", "http/json"] as const;
+const PROVIDERS = Object.keys(PROVIDER_PRESETS);
+const SCOPES = ["vault", "tables"] as const;
+const COMPRESSIONS = ["remote", "always", "off"] as const;
+const SYNCS = ["operation", "off"] as const;
+const LOG_FORMATS = ["files", "segments"] as const;
+
+/**
+ * Every setting of the settings file: its type, what it takes, how the loader reads it
+ * ({@link mergeWithDefaults}) and how a change over HTTP applies. One table for the loader, the
+ * settings route and the settings reference.
+ */
+export const SETTING_RULES: Readonly<Record<EditableSettingKey, SettingRule>> = {
+  journalRetentionDays: {
+    type: "integer", minimum: 1, expected: "an integer of at least 1 (days)", applies: "live",
+    load: (raw) => (isInt(raw) && raw >= 1 ? raw : undefined),
+    warning: "Journal entries older than this are dropped at the next daily housekeeping, and their undo with them.",
+  },
+  fileLogEnabled: { ...BOOLEAN, applies: "live" },
+  logRetentionDays: {
+    type: "integer", minimum: 1, expected: "an integer of at least 1 (days)", applies: "live",
+    load: (raw) => (isInt(raw) && raw >= 1 ? raw : undefined),
+  },
+  tableKey: {
+    type: "string", expected: "a property name: a letter or _, then letters, digits, _ or -", applies: "restart",
+    load: (raw) => (typeof raw === "string" && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(raw.trim()) ? raw.trim() : undefined),
+    fileOnly: "Every row names its table with this property: changing it hides every row from the engine. Stop the engine, rename the property in every note, then change tableKey in the settings file.",
+  },
+  telemetryEnabled: {
+    ...BOOLEAN, applies: "live",
+    warning: "On, the engine sends its logs and traces (operation and table names, timings, errors) to telemetryEndpoint.",
+  },
+  telemetryEndpoint: {
+    type: "string", expected: "an http or https URL, such as http://127.0.0.1:4318", applies: "live",
+    load: (raw) => (typeof raw === "string" && /^https?:\/\/\S+$/.test(raw.trim()) ? raw.trim().replace(/\/+$/, "") : undefined),
+    secret: "url_credentials", sendsData: true,
+    warning: "While telemetry is on, the engine sends its logs and traces to this address.",
+  },
+  telemetryServiceName: {
+    type: "string", expected: "a name that is not empty", applies: "live",
+    load: (raw) => (typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : undefined),
+  },
+  telemetryHeaders: {
+    type: "string_map",
+    expected: 'an object of HTTP header names and string values, such as {"Authorization": "Bearer <key>"}; a header set to null is removed',
+    applies: "live",
+    load: (raw) =>
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter(([k, v]) => HEADER_NAME.test(k) && typeof v === "string"))
+        : undefined,
+    secret: "header_values",
+  },
+  telemetryProtocol: { ...enumRule(PROTOCOLS), applies: "live" },
+  telemetryTraces: { ...BOOLEAN, applies: "live" },
+  telemetryTraceSampleRatio: {
+    type: "number", minimum: 0, maximum: 1, expected: "a number from 0 to 1", applies: "live",
+    load: (raw) => (typeof raw === "number" && raw >= 0 && raw <= 1 ? raw : undefined),
+  },
+  telemetryMaxSpansPerTrace: {
+    type: "integer", minimum: 1, maximum: 100000, expected: "an integer from 1 to 100000", applies: "live",
+    load: (raw) => (isInt(raw) && raw >= 1 && raw <= 100000 ? raw : undefined),
+  },
+  telemetrySlowSpanMs: {
+    type: "integer", minimum: 0, expected: "an integer of at least 0 (milliseconds; 0: never)", applies: "live",
+    load: (raw) => (isInt(raw) && raw >= 0 ? raw : undefined),
+  },
+  telemetryEnvironment: {
+    type: "string", expected: 'a name, or "" for none', applies: "live",
+    load: (raw) => (typeof raw === "string" ? raw.trim() : undefined),
+  },
+  autoRecompute: { ...BOOLEAN, applies: "live" },
+  autoPack: { ...BOOLEAN, applies: "live" },
+  repairLinksOnHandMove: { ...BOOLEAN, applies: "live" },
+  semanticEnabled: {
+    ...BOOLEAN, applies: "live",
+    warning: "On, the engine sends the text of your notes to the embedding provider and indexes every note now: a paid provider charges for it.",
+    followUp: "The engine indexes every note now: describe_semantic_index shows the progress.",
+  },
+  semanticProvider: {
+    ...enumRule(PROVIDERS), applies: "live",
+    followUp: "Passages embedded with the previous provider or model stay in the index: rebuild it (sync_semantic_index with rebuild: true).",
+  },
+  semanticBaseUrl: {
+    type: "string", expected: 'an http or https URL, or "" for the provider\'s default', applies: "live",
+    load: (raw) => (typeof raw === "string" && (raw.trim() === "" || /^https?:\/\/\S+$/.test(raw.trim())) ? raw.trim().replace(/\/+$/, "") : undefined),
+    secret: "url_credentials", sendsData: true,
+    warning: "While semantic search is on, the engine sends the text of your notes to this address.",
+    followUp: "Passages embedded with the previous provider or model stay in the index: rebuild it (sync_semantic_index with rebuild: true).",
+  },
+  semanticModel: {
+    type: "string", expected: 'a model name, such as nomic-embed-text, or "" for the provider\'s default', applies: "live",
+    load: (raw) => (typeof raw === "string" ? raw.trim() : undefined),
+    followUp: "Passages embedded with the previous provider or model stay in the index: rebuild it (sync_semantic_index with rebuild: true).",
+  },
+  semanticScope: { ...enumRule(SCOPES), applies: "live" },
+  semanticExclude: {
+    type: "string_list", expected: 'a list of folder paths, such as ["Archive", "Templates"]', applies: "live",
+    load: (raw) =>
+      Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim().replace(/^\/+|\/+$/g, "")) : undefined,
+  },
+  semanticBatchSize: {
+    type: "integer", minimum: 1, maximum: 512, expected: "an integer from 1 to 512", applies: "live",
+    load: (raw) => (isInt(raw) && raw >= 1 && raw <= 512 ? raw : undefined),
+  },
+  writePriority: { ...BOOLEAN, applies: "live" },
+  writePriorityMaxWaitMs: {
+    type: "integer", minimum: 0, maximum: 60000, expected: "an integer from 0 to 60000 (milliseconds)", applies: "live",
+    load: (raw) => (isInt(raw) && raw >= 0 && raw <= 60000 ? raw : undefined),
+  },
+  readCacheMaxBytes: {
+    type: "integer", minimum: 0, expected: "an integer of at least 0 (bytes; 0: no cache)", applies: "live",
+    load: (raw) => (isInt(raw) && raw >= 0 ? raw : undefined),
+  },
+  vaultIndexEnabled: {
+    ...BOOLEAN, applies: "restart",
+    warning: "Off, the next start deletes the vault index, and every start reads every note.",
+  },
+  httpServerPort: {
+    type: "integer", minimum: 0, maximum: 65535, expected: "an integer from 1024 to 65535, or 0 for any free port", applies: "restart",
+    // The loader throws for a bad port (mergeWithDefaults): never the usual engine's port by mistake.
+    load: (raw) => (isInt(raw) && (raw === 0 || (raw >= 1024 && raw <= 65535)) ? raw : undefined),
+    warning: "After the restart the engine, and this page, answer on this port. If another program holds it, the engine does not start. In a container, publish the new port too.",
+  },
+  httpServerToken: {
+    type: "string", expected: "the owner's token", applies: "restart",
+    load: (raw) => (typeof raw === "string" ? raw.trim() : undefined),
+    secret: "value",
+    warning: "After the restart only the new owner token opens the engine: this browser and every program that uses the owner token need it. Programs on this machine read it from the settings file.",
+    writeCheck: {
+      test: (value) => typeof value === "string" && /^[A-Za-z0-9._~-]{32,256}$/.test(value),
+      expected: 'a token of 32 to 256 characters among A-Z, a-z, 0-9, ".", "_", "~" and "-" (the browser\'s Generate button makes one)',
+    },
+  },
+  httpCompression: { ...enumRule(COMPRESSIONS), applies: "live" },
+  storeBackupEnabled: {
+    ...BOOLEAN, applies: "restart",
+    warning: "On, after the restart the engine pushes its whole store (journal, history, change feed) to storeBackupRemote.",
+  },
+  storeBackupRemote: {
+    type: "string", expected: 'a git remote, such as git@github.com:you/vault-store.git, or "" for commits in the store only', applies: "restart",
+    load: (raw) => (typeof raw === "string" ? raw.trim() : undefined),
+    secret: "url_credentials", sendsData: true,
+    warning: "After the restart the engine pushes its whole store to this repository. datanotes store backup tests the push at once.",
+  },
+  storeBackupIntervalSeconds: {
+    type: "integer", minimum: 10, expected: "an integer of at least 10 (seconds)", applies: "restart",
+    load: (raw) => (isInt(raw) && raw >= 10 ? raw : undefined),
+  },
+  storeSync: {
+    ...enumRule(SYNCS), applies: "live",
+    warning: "Off, a power loss can take the undo data and history of the last operations.",
+  },
+  transactionLogFormat: {
+    ...enumRule(LOG_FORMATS), applies: "restart",
+    fileOnly: "Run datanotes store convert-log --to files (or segments) with the engine stopped: it converts the versions already written and sets this setting.",
+  },
+};
+
+export type SettingCheck = { ok: true; value: unknown } | { ok: false; problem: string };
+
+/**
+ * Checks a value for a setting as a write over HTTP: what the loader keeps, and nothing it would
+ * drop or replace. The problem never repeats the value of a secret.
+ */
+export function checkSetting(key: EditableSettingKey, raw: unknown): SettingCheck {
+  const rule = SETTING_RULES[key];
+  const v = rule.load(raw);
+  if (v === undefined) {
+    if (rule.secret) return { ok: false, problem: "the value is not allowed" };
+    const text = String(JSON.stringify(raw));
+    const shown = text.length > 60 ? `${text.slice(0, 60)}…` : text;
+    return { ok: false, problem: `${shown} is not allowed` };
+  }
+  if (rule.type === "string_list") {
+    const items = raw as unknown[];
+    const bad = items.findIndex((x) => typeof x !== "string" || x.trim().replace(/^\/+|\/+$/g, "").trim() === "");
+    if (bad >= 0) return { ok: false, problem: `item ${bad + 1} is not a folder path` };
+  }
+  if (rule.type === "string_map") {
+    const entries = Object.entries(raw as Record<string, unknown>);
+    const badName = entries.find(([k]) => !HEADER_NAME.test(k));
+    if (badName) return { ok: false, problem: `${JSON.stringify(badName[0])} is not an HTTP header name` };
+    const badValue = entries.find(([, val]) => typeof val !== "string");
+    if (badValue) return { ok: false, problem: `the value of ${JSON.stringify(badValue[0])} must be a string` };
+  }
+  if (rule.writeCheck && !rule.writeCheck.test(v)) return { ok: false, problem: "the value is not allowed" };
+  return { ok: true, value: v };
+}
 
 const KEYS: (keyof DatanotesSettings)[] = [
   "journalRetentionDays",
@@ -253,147 +479,23 @@ export function mergeWithDefaults(
     if (!(key in loaded)) continue;
     const raw = loaded[key];
     if (raw === undefined) continue;
-
-    switch (key) {
-      case "telemetryEndpoint": {
-        if (typeof raw === "string" && /^https?:\/\/\S+$/.test(raw.trim())) {
-          out.telemetryEndpoint = raw.trim().replace(/\/+$/, "");
-        }
-        break;
-      }
-      case "telemetryProtocol": {
-        if (raw === "http/protobuf" || raw === "http/json") out.telemetryProtocol = raw;
-        break;
-      }
-      case "telemetryHeaders": {
-        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-          out.telemetryHeaders = Object.fromEntries(
-            Object.entries(raw as Record<string, unknown>).filter(([k, v]) => /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(k) && typeof v === "string"),
-          ) as Record<string, string>;
-        }
-        break;
-      }
-      case "telemetryServiceName": {
-        if (typeof raw === "string" && raw.trim().length > 0) {
-          out.telemetryServiceName = raw.trim();
-        }
-        break;
-      }
-      case "telemetryTraceSampleRatio": {
-        if (typeof raw === "number" && raw >= 0 && raw <= 1) out.telemetryTraceSampleRatio = raw;
-        break;
-      }
-      case "telemetryMaxSpansPerTrace": {
-        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 100000) out.telemetryMaxSpansPerTrace = raw;
-        break;
-      }
-      case "telemetrySlowSpanMs": {
-        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) out.telemetrySlowSpanMs = raw;
-        break;
-      }
-      case "telemetryEnvironment": {
-        if (typeof raw === "string") out.telemetryEnvironment = raw.trim();
-        break;
-      }
-      case "tableKey": {
-        if (typeof raw === "string" && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(raw.trim())) out.tableKey = raw.trim();
-        break;
-      }
-      case "databaseFolder": {
-        // "" is the root of the vault: the database is the folder the engine serves (--database)
-        if (typeof raw === "string") out.databaseFolder = normalizeDatabaseFolder(raw);
-        break;
-      }
-      case "databaseId": {
-        if (typeof raw === "string") out.databaseId = raw.trim();
-        break;
-      }
-      case "journalRetentionDays":
-      case "logRetentionDays": {
-        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1) out[key] = raw;
-        break;
-      }
-      case "semanticProvider": {
-        if (typeof raw === "string" && raw in PROVIDER_PRESETS) out.semanticProvider = raw as ProviderKind;
-        break;
-      }
-      case "semanticBaseUrl": {
-        if (typeof raw === "string" && (raw.trim() === "" || /^https?:\/\/\S+$/.test(raw.trim()))) out.semanticBaseUrl = raw.trim().replace(/\/+$/, "");
-        break;
-      }
-      case "semanticModel": {
-        if (typeof raw === "string") out.semanticModel = raw.trim();
-        break;
-      }
-      case "semanticScope": {
-        if (raw === "vault" || raw === "tables") out.semanticScope = raw;
-        break;
-      }
-      case "semanticExclude": {
-        if (Array.isArray(raw)) out.semanticExclude = raw.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim().replace(/^\/+|\/+$/g, ""));
-        break;
-      }
-      case "semanticBatchSize": {
-        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 512) out.semanticBatchSize = raw;
-        break;
-      }
-      case "writePriorityMaxWaitMs": {
-        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= 60000) out.writePriorityMaxWaitMs = raw;
-        break;
-      }
-      case "readCacheMaxBytes": {
-        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) out.readCacheMaxBytes = raw;
-        break;
-      }
-      case "httpServerPort": {
-        // Refused, not replaced by the default: the default is the port of the usual engine, which
-        // another engine must never take by mistake. 0 is any free port.
-        if (typeof raw !== "number" || !Number.isInteger(raw) || (raw !== 0 && (raw < 1024 || raw > 65535))) {
-          throw new Error(`invalid setting httpServerPort: ${JSON.stringify(raw)} (an integer from 1024 to 65535, or 0 for any free port)`);
-        }
-        out.httpServerPort = raw;
-        break;
-      }
-      case "httpCompression": {
-        if (raw === "remote" || raw === "always" || raw === "off") out.httpCompression = raw;
-        break;
-      }
-      case "httpServerToken": {
-        if (typeof raw === "string") out.httpServerToken = raw.trim();
-        break;
-      }
-      case "storeBackupRemote": {
-        if (typeof raw === "string") out.storeBackupRemote = raw.trim();
-        break;
-      }
-      case "storeBackupIntervalSeconds": {
-        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 10) out.storeBackupIntervalSeconds = raw;
-        break;
-      }
-      case "storeSync": {
-        if (raw === "operation" || raw === "off") out.storeSync = raw;
-        break;
-      }
-      case "transactionLogFormat": {
-        if (raw === "files" || raw === "segments") out.transactionLogFormat = raw;
-        break;
-      }
-      case "storeBackupEnabled":
-      case "telemetryEnabled":
-      case "telemetryTraces":
-      case "fileLogEnabled":
-      case "semanticEnabled":
-      case "autoRecompute":
-      case "autoPack":
-      case "writePriority":
-      case "vaultIndexEnabled":
-      case "repairLinksOnHandMove": {
-        if (typeof raw === "boolean") {
-          out[key] = raw;
-        }
-        break;
-      }
+    // "" is the root of the vault: the database is the folder the engine serves (--database)
+    if (key === "databaseFolder") {
+      if (typeof raw === "string") out.databaseFolder = normalizeDatabaseFolder(raw);
+      continue;
     }
+    if (key === "databaseId") {
+      if (typeof raw === "string") out.databaseId = raw.trim();
+      continue;
+    }
+    const value = SETTING_RULES[key].load(raw);
+    if (value === undefined) {
+      // Refused, not replaced by the default: the default is the port of the usual engine, which
+      // another engine must never take by mistake. 0 is any free port.
+      if (key === "httpServerPort") throw new Error(`invalid setting httpServerPort: ${JSON.stringify(raw)} (an integer from 1024 to 65535, or 0 for any free port)`);
+      continue;
+    }
+    (out as unknown as Record<string, unknown>)[key] = value;
   }
 
   return out;

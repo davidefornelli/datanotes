@@ -47,7 +47,7 @@ export const OWNER_OPERATIONS: ReadonlySet<string> = new Set(["create_webhook", 
 export const READ_ROUTES = new Set(["/manual/search/", "/tokens/me/", "/tokens/update/", "/extensions/", "/openapi/", "/openapi.json/", "/sessions/identify/", "/tool-calls/record/"]);
 
 /** Administration of the engine and its status: only with the owner's token, never a named one (even with `maintain`). */
-export const OWNER_ADMIN_ROUTES = new Set(["/tokens/", "/tokens/create/", "/tokens/update/", "/tokens/delete/", "/tokens/rotate/", "/extensions/record/", "/extensions/delete/", "/status/", "/stop/"]);
+export const OWNER_ADMIN_ROUTES = new Set(["/tokens/", "/tokens/permissions/", "/sessions/", "/tokens/create/", "/tokens/update/", "/tokens/delete/", "/tokens/rotate/", "/extensions/record/", "/extensions/delete/", "/status/", "/stop/", "/restart/", "/settings/", "/settings/update/"]);
 
 /**
  * The refusal (503) of a restricted token on a runtime that cannot carry its read scope (no

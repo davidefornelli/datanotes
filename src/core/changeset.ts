@@ -244,6 +244,16 @@ export interface JournalEntry {
   actor?: Actor;
   /** Rows the operation put into packs or took out (pack_rows, unpack_rows), in order: undo does the opposite. */
   packs?: PackChange[];
+  /** For op "set_engine_settings": the settings changed, with their values before and after; secrets left out (redacted). */
+  settings?: JournalSettingChange[];
+}
+
+/** One setting changed by `set_engine_settings`: its value before and after, none for a secret (redacted). */
+export interface JournalSettingChange {
+  name: string;
+  before?: unknown;
+  after?: unknown;
+  redacted?: true;
 }
 
 export interface ApplyResult {
@@ -692,6 +702,7 @@ export const RECORD_ONLY_OPS: Readonly<Record<string, string>> = {
   move_database: "a move of the database folder cannot be undone: move it back with configure_database (root)",
   set_database_id: "the database's id cannot be taken back: the engine finds its store by it",
   rollback: "the rollback of a failed write cannot be undone: it put the database back as it was; run the write again instead",
+  set_engine_settings: "a change of the engine's settings cannot be undone: send the values you want back to POST /datanotes/settings/update/ (list_migrations shows the values before)",
 };
 
 /**

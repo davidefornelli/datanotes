@@ -66,6 +66,18 @@ const chapter: Chapter = {
       steps: [
         { op: "update_row", args: { table: "film", path: SHERLOCK, expect: { status: "to watch" }, set: { status: "watched" } } },
         { say: "Run the same call again. `status` is no longer `to watch`, so the engine writes nothing.", op: "update_row", args: { table: "film", path: SHERLOCK, expect: { status: "to watch" }, set: { status: "watched" } }, refused: true },
+        { say: "`expect_body` guards the note's text the same way. Read the body first:", op: "select_rows", args: { table: "film", columns: ["title"], where: { path: SHERLOCK }, include_body: true }, save: "read" },
+        {
+          say: "Then write a new body with `expect_body` set to the body you read:",
+          op: "update_row",
+          args: (ctx) => ({ table: "film", path: SHERLOCK, body: `${ctx.saved.read.rows[0].body}Keaton walks into the screen.\n`, expect_body: ctx.saved.read.rows[0].body }),
+        },
+        {
+          say: "The same call again is refused: the body is no longer the one you read.",
+          op: "update_row",
+          args: (ctx) => ({ table: "film", path: SHERLOCK, body: `${ctx.saved.read.rows[0].body}Keaton walks into the screen.\n`, expect_body: ctx.saved.read.rows[0].body }),
+          refused: true,
+        },
       ],
     },
     {
@@ -125,6 +137,25 @@ const chapter: Chapter = {
         { op: "list_migrations", args: { table: "film", limit: 3 }, save: "m" },
         { op: "undo_migration", args: (ctx) => ({ migration_id: ctx.saved.m.migrations[0].migration_id }) },
         { op: "select_rows", args: { table: "film", columns: ["title"], where: { title: "Battleship Potemkin" } }, say: "Battleship Potemkin is back:", check: (v) => v.total !== 1 && "the row should be back" },
+        {
+          say: "Each write also has `actor`, with the credential it came with: `owner` or a token's name. It adds the agent's session, harness and model when the agent sent them. `auth` keeps the writes of one credential:",
+          op: "list_migrations",
+          args: { auth: "owner", limit: 2 },
+          check: (v) => v.migrations[0]?.actor?.auth !== "owner" && "the writes should carry actor.auth owner",
+        },
+      ],
+    },
+    {
+      title: "Page back through the journal",
+      say: "`list_migrations` answers the newest writes first. To read older ones, pass `before`: the `executed_at` of the oldest write you read.",
+      steps: [
+        { op: "list_migrations", args: { table: "film", limit: 2 }, save: "page" },
+        {
+          say: "The next page holds the writes before the last one above:",
+          op: "list_migrations",
+          args: (ctx) => ({ table: "film", limit: 2, before: ctx.saved.page.migrations.at(-1).executed_at }),
+          check: (v, ctx) => (v.migrations.length === 0 || !v.migrations.every((m: { executed_at: string }) => m.executed_at < ctx.saved.page.migrations.at(-1).executed_at)) && "older writes expected, each before the first page",
+        },
       ],
     },
     {

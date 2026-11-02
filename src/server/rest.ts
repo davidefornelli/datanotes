@@ -644,6 +644,7 @@ export function createHandlers(
             ...(text(b, "body_prepend") !== undefined ? { bodyPrepend: text(b, "body_prepend")! } : {}),
             ...(text(b, "body_append") !== undefined ? { bodyAppend: text(b, "body_append")! } : {}),
             ...(obj(b, "expect") ? { expect: obj(b, "expect")! } : {}),
+            ...(text(b, "expect_body") !== undefined ? { expectBody: text(b, "expect_body")! } : {}),
             ...autolinkArg(b),
           },
           runOpts(b),
@@ -909,9 +910,21 @@ export function createHandlers(
       const op = str(b, "op");
       const table = str(b, "table");
       const since = str(b, "since");
+      const before = str(b, "before");
+      const auth = str(b, "auth");
+      if (before !== undefined && Number.isNaN(Date.parse(before))) {
+        throw new BadRequest(`"before" must be a date-time (ISO 8601), such as 2026-11-01T12:00:00Z`, guide("Pass the executed_at of the oldest operation you read: the answer holds the ones before it.", "journalPaging"));
+      }
       return {
         status: 200,
-        json: await listMigrations(app, s(), { ...(limit !== undefined ? { limit } : {}), ...(op ? { op } : {}), ...(table ? { table } : {}), ...(since ? { since } : {}) }),
+        json: await listMigrations(app, s(), {
+          ...(limit !== undefined ? { limit } : {}),
+          ...(op ? { op } : {}),
+          ...(table ? { table } : {}),
+          ...(since ? { since } : {}),
+          ...(before !== undefined ? { before } : {}),
+          ...(auth !== undefined ? { auth } : {}),
+        }),
       };
     },
     undo_migration: async (b) => {
@@ -969,6 +982,8 @@ export function createHandlers(
           ...(kinds ? { ops: kinds as never } : {}),
           ...(strings(b, "columns") ? { columns: strings(b, "columns")! } : {}),
           ...(str(b, "exclude_actor") !== undefined ? { excludeActor: str(b, "exclude_actor")! } : {}),
+          ...(str(b, "auth") !== undefined ? { auth: str(b, "auth")! } : {}),
+          ...(str(b, "session") !== undefined ? { session: str(b, "session")! } : {}),
           ...(obj(b, "where") ? { where: obj(b, "where")! } : {}),
         })),
       );

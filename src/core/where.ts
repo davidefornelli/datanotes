@@ -51,8 +51,8 @@ export function hasLogical(where: Where | undefined): boolean {
   return where != null && Object.keys(where).some((k) => LOGICAL_KEYS.has(k));
 }
 
-/** The operators a caller may write. */
-const OPERATORS: ReadonlySet<string> = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "in", "contains", "icontains", "exists", "within"]);
+/** The operators a `where` condition may use (also listed by the browser, src/ui/lib/where.ts). */
+export const OPERATORS: ReadonlySet<string> = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "in", "contains", "icontains", "exists", "within"]);
 const OPERATOR_LIST = [...OPERATORS].join(", ");
 
 /**

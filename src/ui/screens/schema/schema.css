@@ -1,0 +1,145 @@
+/* The structure screens (src/ui/screens/schema). */
+.schema-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.schema-links {
+  display: flex;
+  gap: 12px;
+}
+.schema-banner,
+.schema-warning {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+.schema-comments {
+  margin: 8px 0 12px;
+  color: var(--muted);
+}
+.schema-comment {
+  margin: 4px 0;
+}
+.schema-tab {
+  margin-top: 12px;
+}
+.schema-prop {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+}
+.schema-prop-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+.schema-prop-label {
+  font-weight: 600;
+}
+.schema-prop-value {
+  margin-top: 4px;
+}
+.schema-prop-form {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg-soft);
+  border-radius: 4px;
+}
+.schema-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 4px 0;
+}
+.schema-facts div {
+  display: contents;
+}
+.schema-facts dt {
+  color: var(--muted);
+}
+.schema-facts dd {
+  margin: 0;
+  font-family: var(--mono);
+}
+.schema-pre {
+  font-family: var(--mono);
+  background: var(--bg-soft);
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  margin: 4px 0;
+}
+.schema-problems {
+  color: var(--warn);
+  margin: 4px 0;
+}
+.schema-ddl {
+  margin-top: 8px;
+}
+.schema-flag {
+  display: block;
+  margin: 4px 0;
+}
+.schema-checks {
+  margin: 6px 0;
+}
+.schema-row-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.schema-colspec-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px 16px;
+}
+.schema-changes code {
+  word-break: break-all;
+}
+.schema-check {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 6px 0;
+}
+.schema-check-name {
+  font-weight: 600;
+}
+.schema-missing-item {
+  margin: 8px 0;
+}
+.schema-section {
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.schema-section summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-weight: 600;
+}
+.schema-section-body {
+  padding: 6px 12px 12px;
+}
+.schema-new-column {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+.schema-place {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+.schema-relations-list ul {
+  padding-left: 18px;
+}
+.schema-flag .ui-field-help {
+  display: block;
+  margin-left: 22px;
+}

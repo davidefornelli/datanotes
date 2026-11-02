@@ -6,6 +6,7 @@
  */
 
 import { messageOf } from "./message";
+import { redactAttributes, redactUrlCredentials } from "./url-credentials";
 import { activeSpanContext, rootOrChild, type Span } from "./tracing";
 
 export type Severity = "DEBUG" | "INFO" | "WARN" | "ERROR";
@@ -110,7 +111,10 @@ export interface FileLoggerOptions {
   now?: () => number;
 }
 
-/** Log records as JSON Lines, one file per day (`{"time","level","msg",...attributes}`). Never throws. */
+/**
+ * Log records as JSON Lines, one file per day (`{"time","level","msg",...attributes}`). Never throws.
+ * URL credentials are removed from the message and from every string attribute (url-credentials.ts).
+ */
 export class FileLogger implements Telemetry {
   private buffer: { day: string; line: string }[] = [];
   private inflight: Promise<void> = Promise.resolve();
@@ -126,7 +130,7 @@ export class FileLogger implements Telemetry {
     const attrs = Object.fromEntries(Object.entries(attributes).filter(([, v]) => v !== undefined));
     const ctx = activeSpanContext();
     const trace = ctx ? { trace_id: ctx.traceId, span_id: ctx.spanId } : {};
-    this.buffer.push({ day, line: JSON.stringify({ time: d.toISOString(), level: severity, msg: body, ...trace, ...attrs }) });
+    this.buffer.push({ day, line: JSON.stringify({ time: d.toISOString(), level: severity, msg: redactUrlCredentials(body), ...trace, ...redactAttributes(attrs) }) });
   }
 
   flush(): Promise<void> {

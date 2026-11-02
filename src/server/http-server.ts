@@ -11,6 +11,8 @@
  *   section): the Markdown docs of this version, shipped with the package (src/api/docs.ts).
  * - `GET /datanotes/openapi.json` (the OpenAPI document) and `GET /datanotes/docs` (Swagger UI
  *   over it, `docs-ui.ts`): without authentication too; they describe the API and hold no data.
+ * - `GET /datanotes/ui/` (the database browser, `ui.ts`, and its two assets): without
+ *   authentication too; the page holds no data, and its calls send the token the user pastes.
  *
  * Every other request needs `Authorization: Bearer <token>`: the owner's token, or a named token
  * (its requests carry its name as `actor.auth` and are checked against its permissions, see
@@ -20,7 +22,7 @@
 
 import { gzip } from "node:zlib";
 import type { App } from "../core/host";
-import { ACTOR_HEADER, parseActor, runWithActor } from "../core/actor";
+import { ACTOR_HEADER, parseActor, runWithActor, viewingAs } from "../core/actor";
 import { ROUTE_PREFIX, dispatch as plainDispatch, operationOf, type Handler, type HandlerResponse } from "./rest";
 import { CALLABLE_OPERATIONS } from "../api/requests";
 import type { Actor } from "../core/actor";
@@ -30,11 +32,13 @@ import { parseTraceparent, TRACEPARENT_HEADER, TRACESTATE_HEADER } from "../api/
 import type { SessionIdentities } from "./identities";
 import { opOfKind, wireEvent, type ChangeFeed } from "../core/change-feed";
 import { docsResponse } from "./docs-ui";
+import { UI_PATH, uiResponse } from "./ui";
 import { openApiDocument } from "./openapi";
 import { messageOf } from "../core/message";
 import { closestNames, guide, GuidedError, type Guidance } from "../core/hints";
 import { DocsError, openDocs, type DocsLibrary } from "../api/docs";
 import { READ_SCOPE_SUPPORTED, type ReadScope } from "../core/read-scope";
+import { READ_OPERATIONS } from "./token-routes";
 // the stream refuses a restricted token where no read scope can be carried as the permission guard does
 // (tokens.ts imports this module too: the two constants are read only when a request arrives)
 import { READ_SCOPE_UNSUPPORTED, READ_SCOPE_UNSUPPORTED_HINT } from "./token-routes";
@@ -74,10 +78,15 @@ export function listenError(e: Error & { code?: string }, host: string, port: nu
   }
 }
 
-/** Routes that only POST reaches: they change the engine's state. */
-const POST_ONLY = new Set(["/stop/"]);
 const STOP_POST_HINT = guide("Send POST /datanotes/stop/ with the owner token, or run datanotes stop --vault <folder>.", "stop");
+const RESTART_POST_HINT = guide('Send POST /datanotes/restart/ with the owner token; with {"dry_run": true} it says what a restart would do.', "restartEngine");
+/** Routes that only POST reaches: they change the engine's state. */
+const POST_ONLY: ReadonlyMap<string, { what: string; hint: Guidance }> = new Map([
+  ["/stop/", { what: "the stop", hint: STOP_POST_HINT }],
+  ["/restart/", { what: "the restart", hint: RESTART_POST_HINT }],
+]);
 const STOPPING_HINT = guide("Wait until the engine has stopped, then start it again (datanotes serve) and repeat the request.", "stop");
+const RESTARTING_HINT = guide("The engine restarts to apply its settings: retry in a few seconds. GET / answers again once it is back.", "restartEngine");
 
 const AUTH_HINT = guide(
   "Send the owner token (httpServerToken in settings.json in the engine's store: datanotes store path shows where) or a named token as Authorization: Bearer <token>; the owner creates named tokens with POST /datanotes/tokens/create/.",
@@ -89,6 +98,29 @@ const MAX_BODY = 20 * 1024 * 1024;
 const MARKDOWN = "text/markdown; charset=utf-8";
 /** The docs of this version, as Markdown (`/datanotes/docs` is the API console). */
 export const MANUAL_PATH = `${ROUTE_PREFIX}/manual`;
+
+/**
+ * View as a token: the owner sends a named token's name on a read, and the request runs with
+ * that token's permissions and read scope (its `actor.auth`). Only reads; never a named token.
+ */
+export const VIEW_AS_HEADER = "x-datanotes-view-as";
+const VIEW_AS_HINT = guide(
+  "Send X-Datanotes-View-As: <token name> with the owner's token, on a read: an operation that only reads, tokens/me/, extensions/ or the change stream. tokens/ lists the named tokens.",
+  "viewAs",
+);
+
+/** Whether a request only reads, so the owner may send it as another token (`X-Datanotes-View-As`). */
+function viewAsAllowed(method: string, path: string): boolean {
+  if (method === "GET") {
+    return path === `${ROUTE_PREFIX}/changes/stream` || path === `${ROUTE_PREFIX}/changes/stream/` || path === MANUAL_PATH || path.startsWith(`${MANUAL_PATH}/`);
+  }
+  if (method !== "POST" || !path.startsWith(`${ROUTE_PREFIX}/`)) return false;
+  const route = path.slice(ROUTE_PREFIX.length);
+  const key = route.endsWith("/") ? route : `${route}/`;
+  if (key === "/tokens/me/" || key === "/extensions/") return true;
+  const op = operationOf(key);
+  return op !== undefined && READ_OPERATIONS.has(op);
+}
 
 interface NodeReq {
   method?: string;
@@ -144,7 +176,11 @@ export interface HttpServerOptions {
   /** Whether a read scope can be enforced (default: READ_SCOPE_SUPPORTED); a test seam. */
   readScopeSupported?: boolean;
   /** Named tokens: they are accepted too (see `tokens.ts`). */
-  tokens?: { authenticate(token: string): Promise<{ name: string } | null> };
+  tokens?: {
+    authenticate(token: string): Promise<{ name: string } | null>;
+    /** A named token by name, for `X-Datanotes-View-As` (never moves its `last_seen`). */
+    get?(name: string): { name: string } | undefined;
+  };
   /** Runs a route handler (default: `rest.ts` dispatch; the runtime passes one that checks the tokens' permissions). */
   dispatch?: (route: string, handler: Handler, body: unknown) => Promise<HandlerResponse>;
   /** The docs `GET /datanotes/manual/` serves (default: the package's own). */
@@ -253,8 +289,10 @@ export class HttpApiServer {
   /** Requests being answered (the change stream left out: it lasts as long as its client). */
   private inFlight = 0;
   private idleWaiters: (() => void)[] = [];
-  /** Set by `drain`: new requests are answered 503, the engine is stopping. */
+  /** Set by `drain`: new requests are answered 503, the engine is stopping (or restarting). */
   private draining = false;
+  /** Why the server drains: the 503 says the engine is stopping, or restarting. */
+  private drainReason: "stopping" | "restarting" = "stopping";
 
   constructor(private readonly opts: HttpServerOptions) {}
 
@@ -329,11 +367,12 @@ export class HttpApiServer {
   }
 
   /**
-   * Stop taking requests (new ones are answered 503: the engine is stopping) and wait until the
-   * ones under way are answered, at most `timeoutMs`. True when none is left.
+   * Stop taking requests (new ones are answered 503: the engine is stopping, or restarting) and wait
+   * until the ones under way are answered, at most `timeoutMs`. True when none is left.
    */
-  drain(timeoutMs: number): Promise<boolean> {
+  drain(timeoutMs: number, reason: "stopping" | "restarting" = "stopping"): Promise<boolean> {
     this.draining = true;
+    this.drainReason = reason;
     if (this.inFlight === 0) return Promise.resolve(true);
     return new Promise((resolve) => {
       const t = setTimeout(() => {
@@ -346,6 +385,12 @@ export class HttpApiServer {
       };
       this.idleWaiters.push(idle);
     });
+  }
+
+  /** Take requests again after a drain: a restart cancelled because a request was still under way. */
+  undrain(): void {
+    this.draining = false;
+    this.drainReason = "stopping";
   }
 
   /** Requests being answered now. */
@@ -410,6 +455,7 @@ export class HttpApiServer {
   /** `http.route` of a path: the route's template, "" for an unknown one, null for those not traced. */
   private routeOf(path: string): string | null {
     if (path === "/" || path === `${ROUTE_PREFIX}/openapi.json` || path === `${ROUTE_PREFIX}/docs` || path.startsWith(`${ROUTE_PREFIX}/docs/`)) return null;
+    if (path === UI_PATH || path.startsWith(`${UI_PATH}/`)) return null;
     if (path === `${ROUTE_PREFIX}/changes/stream` || path === `${ROUTE_PREFIX}/changes/stream/`) return null;
     if (path === MANUAL_PATH || path.startsWith(`${MANUAL_PATH}/`)) return `${MANUAL_PATH}/{page}`;
     if (!path.startsWith(`${ROUTE_PREFIX}/`)) return "";
@@ -423,7 +469,7 @@ export class HttpApiServer {
     const path = url.pathname;
     const method = (req.method ?? "GET").toUpperCase();
     if (this.draining) {
-      send(res, 503, { error: "the engine is stopping", ...STOPPING_HINT });
+      send(res, 503, this.drainReason === "restarting" ? { error: "the engine is restarting", ...RESTARTING_HINT } : { error: "the engine is stopping", ...STOPPING_HINT });
       return;
     }
     if (method === "GET" && path === "/") {
@@ -443,12 +489,39 @@ export class HttpApiServer {
       send(res, 200, docs.body, docs.type, docs.headers);
       return;
     }
+    // public too: the database browser's page and assets (no data; its calls need a token); HEAD
+    // answers their headers (Node sends no body for it)
+    const ui = method === "GET" || method === "HEAD" ? uiResponse(path, this.opts.version ?? "") : null;
+    if (ui) {
+      send(res, 200, ui.body, ui.type, ui.headers);
+      return;
+    }
     // No WWW-Authenticate on 401: clients would start an OAuth flow this server does not offer.
     const owner = this.authorized(req);
     const named = owner ? null : await this.namedTokenOf(req);
     if (!owner && !named) {
       send(res, 401, { error: "missing or wrong bearer token", ...AUTH_HINT });
       return;
+    }
+    // the owner viewing as a named token: checked before the route is looked up, so a route that
+    // is not a read is refused whether it exists or not
+    let viewAs: string | null = null;
+    const asked = header(req, VIEW_AS_HEADER)?.trim() ?? "";
+    if (asked !== "") {
+      if (!owner) {
+        send(res, 403, { error: "only the owner's token may view as another token", ...VIEW_AS_HINT });
+        return;
+      }
+      // never authenticate() the viewed token: that would move its last_seen
+      if (!this.opts.tokens?.get?.(asked)) {
+        send(res, 400, { error: `no token ${asked} to view as`, ...VIEW_AS_HINT });
+        return;
+      }
+      if (!viewAsAllowed(method, path)) {
+        send(res, 400, { error: `view as ${asked} only reads: ${method} ${path} is not a read`, ...VIEW_AS_HINT });
+        return;
+      }
+      viewAs = asked;
     }
     const said = parseActor(header(req, ACTOR_HEADER));
     // what the agent declared for this session (an MCP server reporting it) wins over what the
@@ -457,7 +530,12 @@ export class HttpApiServer {
     const headerActor = said && known ? { ...said, ...known } : said;
     // `auth` is the credential, which the client cannot claim: "owner", or the named token's name;
     // a named token's requests without an agent behind them name the token as the harness too
-    const actor: Actor = named ? { ...(headerActor ?? { harness: named.name }), auth: named.name } : { ...(headerActor ?? {}), auth: "owner" };
+    // under view-as, `auth` is the viewed token: the permission guard and the read cache apply its scope
+    const actor: Actor = viewAs
+      ? viewingAs({ ...(headerActor ?? {}), auth: viewAs })
+      : named
+        ? { ...(headerActor ?? { harness: named.name }), auth: named.name }
+        : { ...(headerActor ?? {}), auth: "owner" };
     // who called: the token's name (never the token), and what the agent says of itself
     activeSpan().setAttributes({
       "datanotes.token.name": actor.auth,
@@ -466,9 +544,11 @@ export class HttpApiServer {
       "datanotes.session": actor.session,
       "gen_ai.tool.name": actor.tool,
     });
+    if (viewAs) activeSpan().setAttribute("datanotes.view_as", true);
 
     if (method === "GET" && (path === `${ROUTE_PREFIX}/changes/stream` || path === `${ROUTE_PREFIX}/changes/stream/`)) {
-      await this.stream(req, res, url, named ? (this.opts.readScopeOf?.(named.name) ?? null) : null);
+      const reader = viewAs ?? named?.name ?? null;
+      await this.stream(req, res, url, reader !== null ? (this.opts.readScopeOf?.(reader) ?? null) : null);
       return;
     }
 
@@ -501,8 +581,9 @@ export class HttpApiServer {
         send(res, 405, { error: `${method} ${path} does nothing: operations take POST`, ...ROUTES_HINT });
         return;
       }
-      if (method !== "POST" && POST_ONLY.has(key)) {
-        send(res, 405, { error: `${method} ${path} does nothing: the stop takes POST`, ...STOP_POST_HINT });
+      const postOnly = POST_ONLY.get(key);
+      if (method !== "POST" && postOnly) {
+        send(res, 405, { error: `${method} ${path} does nothing: ${postOnly.what} takes POST`, ...postOnly.hint });
         return;
       }
       let body: unknown = undefined;

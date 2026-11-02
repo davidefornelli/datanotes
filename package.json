@@ -1,6 +1,6 @@
 {
   "name": "datanotes",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "mcpName": "io.github.davidefornelli/datanotes",
   "description": "The engine of your second brain: Markdown notes as database tables, for you and your agents.",
   "keywords": [
@@ -112,6 +112,7 @@
     "build:service": "node scripts/check-layers.mjs && tsc -noEmit -skipLibCheck && node esbuild.service.mjs && npm run build:api",
     "prepack": "npm run build:service",
     "build:api": "tsc -p tsconfig.api.json && node esbuild.api.mjs",
+    "build:ui": "node scripts/ui-build.mjs",
     "check:package": "node scripts/check-package.mjs",
     "build": "npm run build:service",
     "dev": "node scripts/dev-vault.mjs",
@@ -123,9 +124,13 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "@types/markdown-it": "14.2.0",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
     "esbuild": "0.25.5",
+    "markdown-it": "14.3.3",
+    "playwright-core": "1.64.1",
+    "preact": "10.29.8",
     "publint": "0.3.25",
     "swagger-ui-dist": "^5.33.1",
     "tslib": "2.8.1",

@@ -432,6 +432,7 @@ export const PAGES: GuidePage[] = [
     include: "docs/examples/text/journal-and-undo.md",
     examples: [
       ["writing", "Undo a write"],
+      ["writing", "Page back through the journal"],
       ["writing", "Undo refuses to overwrite later changes"],
     ],
   },

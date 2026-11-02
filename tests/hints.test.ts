@@ -245,9 +245,11 @@ describe("refusals", () => {
       ['repeats key ["Metropolis"]', "merge"],
       ['2 rows match key ["Metropolis"]', "merge"],
       ["already a row of main.public.film: use move_rows", "moveRows"],
+      ["row changed: its body is not the one you read — read it again", "expect"],
+      ["a change of the engine's settings cannot be undone: send the values you want back to POST /datanotes/settings/update/ (list_migrations shows the values before)", "changeSettings"],
     ];
     for (const [message, topic] of messages) expect(refusalGuidance({ op: "update_row", conflicts: [{ message }] }).docs, message).toBe(docsUrl(topic));
-    expect(CONFLICTS).toHaveLength(10);
+    expect(CONFLICTS).toHaveLength(12);
     expect(refusalGuidance({ op: "insert_row", conflicts: [{ message: "note already exists" }] }).hint).toMatch(/another case .* update_row\. Then call insert_row again\.$/);
     expect(refusalGuidance({ op: "update_row", conflicts: [{ message: 'row changed: expected x = 1, found 2 — read it again' }] }).hint).toContain("retry update_row");
     expect(refusalGuidance({ op: "move_rows", conflicts: [{ message: "target exists: a.md" }] })).toEqual(

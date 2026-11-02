@@ -351,7 +351,7 @@ describe("token registry: the routes a token may call about itself", () => {
 
   it("has no routes of the former plugin mechanism", () => {
     const routes = Object.keys(setup().registry.handlers());
-    expect(routes).toEqual(["/tokens/", "/tokens/me/", "/tokens/create/", "/tokens/update/", "/tokens/delete/", "/tokens/rotate/"]);
+    expect(routes).toEqual(["/tokens/", "/tokens/permissions/", "/tokens/me/", "/tokens/create/", "/tokens/update/", "/tokens/delete/", "/tokens/rotate/"]);
   });
 });
 

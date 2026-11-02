@@ -17,7 +17,7 @@ import { emptyResult, engineWriting, logExternalEdits } from "../core/engine";
 import { bumpVaultGeneration, invalidateFiles } from "../core/file-cache";
 import { appendLog, pruneLogs } from "../core/file-log";
 import { InverseWatcher } from "../core/inverse";
-import { compactJournal } from "../core/journal";
+import { compactJournal, writeJournal } from "../core/journal";
 import { logLockActivity, setCheckpointRunner, verifyCurrentStates, warmLoggedStates, withLogLock, writeDueCheckpoints } from "../core/transaction-log";
 import { loadMetastore, METASTORE_FILE, metastorePath } from "../core/metastore";
 import { metastoreId } from "../core/database-id";
@@ -42,6 +42,7 @@ import { SessionIdentities } from "./identities";
 import { currentActor, type Actor } from "../core/actor";
 import type { ToolCallRecord } from "../api/client";
 import { cutRecorded, isPlainObject, RECORDED_CHARS, redactToolCall, summarizeRecorded } from "../api/redact";
+import { redactUrlCredentialsDeep } from "../core/url-credentials";
 import { ChangeFeed } from "../core/change-feed";
 import { externalRename } from "../core/hand-moves";
 import { WebhookDispatcher } from "./webhooks";
@@ -53,10 +54,16 @@ import { ReadCache } from "./read-cache";
 import { openApiDocument } from "./openapi";
 import { messageOf } from "../core/message";
 import { guide } from "../core/hints";
+import { SettingsRoutes } from "./settings-route";
+import { restartHandler, type HostRestart } from "./restart-route";
 
 /** The routes an MCP server reports its agents on. */
 /** A named token reporting a session another token reported first. */
 const SESSION_TAKEN_HINT = guide("Use your own session id, such as a new UUID for each agent session. This session belongs to another token: only that token and the owner may report it.", "sessionOwner");
+const SESSIONS_HINT = guide("Pass the earliest time to look at; leave it out for the last 7 days.", "listSessions");
+const SESSIONS_TOKEN_HINT = guide('Pass a token\'s name (POST /datanotes/tokens/ lists them) or "owner"; leave it out for every credential.', "listSessions");
+const SESSIONS_DAYS = 7;
+const DAY_MS = 86_400_000;
 const REPORT_HINT = guide(`Send {"session", "model", "harness"} to sessions/identify/ and {"tool", "args", "ok", ...} to tool-calls/record/; DatanotesClient.recordToolCall does it.`, "reportAgents");
 
 /** Quiet time after the last vault change before hand edits are logged. */
@@ -95,6 +102,10 @@ export interface RuntimeOptions {
   httpPort?: number;
   /** The docs the engine serves (`GET /datanotes/manual/`) and indexes for search_docs (default: the package's own). */
   docs?: DocsLibrary;
+  /** Whether the settings file changed on disk since the engine last read or wrote it; none: never. */
+  settingsFileChanged?(): boolean;
+  /** Settings a start option of the host overrides: setting name -> the option, in words. */
+  settingOverrides?: Readonly<Record<string, string>>;
 }
 
 export class EngineRuntime {
@@ -144,10 +155,19 @@ export class EngineRuntime {
   private hostStatus: (() => HostStatus) | null = null;
   /** How the host stops the engine when asked over HTTP (`/stop/`); null: it cannot. */
   private hostStop: (() => void) | null = null;
+  /** How the host restarts the engine when asked over HTTP (`/restart/`); null: it cannot. */
+  private hostRestart: HostRestart | null = null;
   /** Write priority of the operations (settings `writePriority`, `writePriorityMaxWaitMs`). */
   readonly scheduler: OperationScheduler;
   /** Answers of repeated reads, while the engine follows the vault (setting `readCacheMaxBytes`). */
   private cache: ReadCache | null = null;
+  /**
+   * The settings this run started with (the owner token and port as the HTTP server took them):
+   * a restart setting whose saved value differs waits for a restart. The restart route reads it.
+   */
+  private readonly runningSettings: Partial<DatanotesSettings>;
+  /** `POST /datanotes/settings/` and `/settings/update/` (owner only). */
+  private readonly settingsRoutes: SettingsRoutes;
 
   /** The vault this runtime serves. */
   get app(): App {
@@ -187,6 +207,35 @@ export class EngineRuntime {
         telemetry().log("WARN", "datanotes link mirroring failed", { error: messageOf(e) });
       }
     });
+    this.runningSettings = JSON.parse(JSON.stringify(o.getSettings())) as Partial<DatanotesSettings>;
+    this.settingsRoutes = new SettingsRoutes({
+      getSettings: o.getSettings,
+      saveSettings: o.saveSettings,
+      running: () => this.runningSettings,
+      settingsFile: () => this.hostStatus?.()?.settingsFile ?? null,
+      fileChanged: () => this.o.settingsFileChanged?.() ?? false,
+      overrides: () => this.o.settingOverrides ?? {},
+      journal: async (summary, settings) => {
+        // the actor before the lock: the request's, whatever runs the locked work
+        const actor = currentActor();
+        const now = new Date();
+        const w = await withLogLock(this.o.app, () =>
+          writeJournal(
+            this.o.app,
+            this.o.getSettings(),
+            { op: "set_engine_settings", summary, executed_at: now.toISOString(), rows: [], creates: [], moves: [], references: [], deleted: [], failed: [], settings, ...(actor ? { actor } : {}) },
+            now,
+          ),
+        );
+        return w.id;
+      },
+      log: (level, message, attrs) => telemetry().log(level, message, attrs),
+      afterChange: (changed) => {
+        this.cache?.clear();
+        this.refreshTracing();
+        if (this.o.getSettings().semanticEnabled && changed.some((k) => k.startsWith("semantic"))) this.syncSemanticSoon(1000, true);
+      },
+    });
   }
 
   /** What the host adds to the status (`/status/`): how it watches the vault, its files, git sync. */
@@ -204,13 +253,26 @@ export class EngineRuntime {
   }
 
   /**
+   * How the host restarts the engine, for POST /datanotes/restart/ (the service: in its own
+   * process). Set it before the HTTP server starts: the route is served only when the host can restart.
+   */
+  setHostRestart(h: HostRestart | null): void {
+    this.hostRestart = h;
+  }
+
+  /**
    * The first step of a graceful stop: new requests are answered 503 (the engine is stopping), long
    * polls of the change feed answer at once, and the requests under way are let finish, at most
    * `timeoutMs`. True when none is left.
    */
-  async drain(timeoutMs: number): Promise<boolean> {
+  async drain(timeoutMs: number, reason: "stopping" | "restarting" = "stopping"): Promise<boolean> {
     this.feed?.endWaits();
-    return this.httpServer ? this.httpServer.drain(timeoutMs) : true;
+    return this.httpServer ? this.httpServer.drain(timeoutMs, reason) : true;
+  }
+
+  /** Take requests again after a drain (a cancelled restart). */
+  undrain(): void {
+    this.httpServer?.undrain();
   }
 
   /** The change feed, while the engine follows the vault. */
@@ -248,6 +310,8 @@ export class EngineRuntime {
         this.identities.set(session, { model: body.model, harness: body.harness });
         return { status: 200, json: { ok: true } };
       },
+      // the agent sessions of each credential, read from the change feed (owner only: token-routes.ts)
+      "/sessions/": async (body) => this.listSessions(body),
       // the docs ranked by meaning: search_docs fuses this ranking with its own, by words
       "/manual/search/": async (body) => {
         try {
@@ -283,6 +347,8 @@ export class EngineRuntime {
       "/openapi/": openapi,
       "/openapi.json/": openapi,
       // the engine's health (owner only: OWNER_ADMIN_ROUTES)
+      // the engine's settings: read and change (owner only: OWNER_ADMIN_ROUTES, checked again there)
+      ...this.settingsRoutes.handlers(),
       "/status/": async () => {
         const s = this.o.getSettings();
         const status = await engineStatus({
@@ -312,7 +378,67 @@ export class EngineRuntime {
             },
           }
         : {}),
+      // a restart in the host's own process (owner only: OWNER_ADMIN_ROUTES); answered first, then the host restarts
+      ...(this.hostRestart
+        ? {
+            "/restart/": restartHandler({
+              host: this.hostRestart,
+              running: () => this.runningSettings,
+              current: () => this.o.getSettings(),
+              overrides: () => this.o.settingOverrides ?? {},
+              startedAt: () => this.startedAt.toISOString(),
+              port: () => this.httpServerPort,
+              pid: () => this.hostStatus?.()?.pid ?? null,
+              log: (level, message, attrs) => telemetry().log(level, message, attrs),
+            }),
+          }
+        : {}),
     };
+  }
+
+  /** `/sessions/`: the agent sessions the change feed saw, for each credential (owner only). */
+  private async listSessions(body: Record<string, unknown>): Promise<{ status: number; json: unknown }> {
+    const feed = this.feed;
+    if (!feed) {
+      return { status: 503, json: { error: "the change feed is not available", ...guide("The change feed runs while the engine follows the vault (datanotes serve); the sessions are read from it.", "changeFeed") } };
+    }
+    let since = Date.now() - SESSIONS_DAYS * DAY_MS;
+    if (body.since !== undefined && body.since !== null) {
+      const t = typeof body.since === "string" ? Date.parse(body.since) : NaN;
+      if (Number.isNaN(t)) return { status: 400, json: { error: `"since" must be a date-time (ISO 8601), such as 2026-11-01T00:00:00Z`, ...SESSIONS_HINT } };
+      since = t;
+    }
+    let limit = 100;
+    if (body.limit !== undefined && body.limit !== null) {
+      const l = body.limit;
+      if (typeof l !== "number" || !Number.isInteger(l) || l < 1 || l > 1000) return { status: 400, json: { error: `"limit" must be an integer from 1 to 1000`, ...SESSIONS_HINT } };
+      limit = l;
+    }
+    const token = body.token;
+    if (token !== undefined && token !== null && typeof token !== "string") return { status: 400, json: { error: `"token" must be a token's name, or "owner"`, ...SESSIONS_TOKEN_HINT } };
+    const found = await feed.sessions(since, { ...(typeof token === "string" ? { auth: token } : {}), limit });
+    const sessions = found.map((x) => {
+      const known = x.session !== null && (x.harness === undefined || x.model === undefined) ? this.identities.get(x.session) : undefined;
+      const harness = x.harness ?? known?.harness;
+      const model = x.model ?? known?.model;
+      return {
+        token: x.token,
+        session: x.session,
+        ...(harness !== undefined ? { harness } : {}),
+        ...(model !== undefined ? { model } : {}),
+        first_at: x.firstAt,
+        last_at: x.lastAt,
+        first_seq: x.firstSeq,
+        last_seq: x.lastSeq,
+        tool_call_count: x.toolCalls,
+        failed_tool_call_count: x.failedToolCalls,
+        row_change_count: x.rowChanges,
+        migration_count: x.migrations,
+        tables: x.tables,
+        tools: x.tools.map((t) => ({ tool: t.tool, call_count: t.calls })),
+      };
+    });
+    return { status: 200, json: { since: new Date(since).toISOString(), sessions } };
   }
 
   /**
@@ -325,18 +451,21 @@ export class EngineRuntime {
   }
 
   /**
-   * An agent's tool call, as a change-feed event (secrets removed, long values cut); settled once
-   * it is recorded. The feed is kept in the store, which the store backup commits: no secret.
+   * An agent's tool call, as a change-feed event (secrets and URL credentials removed, long values
+   * cut); settled once it is recorded. The feed is kept in the store, which the store backup commits:
+   * no secret.
    */
   private recordToolCall(given: ToolCallRecord & { actor?: Actor }): Promise<void> {
-    const call = { ...given, ...redactToolCall(given.tool, given.args, given.value) };
+    // the secret keys (redact.ts), then URL credentials, such as a create_webhook url with user:password@
+    const clean = redactToolCall(given.tool, given.args, given.value);
+    const call = { ...given, args: redactUrlCredentialsDeep(clean.args) as Record<string, unknown>, value: redactUrlCredentialsDeep(clean.value) };
     // a result object gives its own summary; a value the reporter cut, the summary it sent (its secrets removed too)
     const summary = !call.ok
       ? undefined
       : isPlainObject(call.value)
         ? summarizeRecorded(call.value)
         : given.summary
-          ? summarizeRecorded(redactToolCall(given.tool, {}, given.summary).value as Record<string, unknown>)
+          ? summarizeRecorded(redactUrlCredentialsDeep(redactToolCall(given.tool, {}, given.summary).value) as Record<string, unknown>)
           : undefined;
     const recorded = this.feed?.recordToolCall(
       {
@@ -484,6 +613,9 @@ export class EngineRuntime {
       s.httpServerToken = newToken();
       await this.o.saveSettings();
     }
+    // what this run serves with (the first start made the token after the constructor ran)
+    this.runningSettings.httpServerToken = s.httpServerToken;
+    this.runningSettings.httpServerPort = s.httpServerPort;
     const handlers = this.handlers();
     const guarded = this.tokens.guard(dispatch);
     const server = new HttpApiServer({

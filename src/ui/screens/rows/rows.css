@@ -1,0 +1,295 @@
+/* The rows screens: grid, row editor, new row, note viewer. Colors from the variables of styles.css. */
+
+.rows-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1400px;
+}
+
+.rows-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.rows-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.rows-kind {
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.rows-description,
+.rows-path,
+.rows-crumb,
+.rows-total {
+  margin: 2px 0 0;
+}
+
+.rows-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.rows-actions,
+.rows-toolbar,
+.rows-form-buttons,
+.rows-filter-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rows-actions a.ui-button {
+  text-decoration: none;
+}
+
+.rows-pill {
+  border: 1px solid var(--accent);
+  background: var(--info-bg);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.rows-colpicker {
+  position: relative;
+}
+
+.rows-colpicker summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.rows-colpicker-list {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  min-width: 200px;
+  max-height: 360px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+}
+
+.rows-filter {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--bg-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rows-filter-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.rows-filter-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.rows-filter-row input {
+  min-width: 220px;
+}
+
+.rows-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px 20px;
+}
+
+.rows-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rows-field-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.rows-field-type {
+  font-weight: normal;
+  font-size: 12px;
+}
+
+.rows-field-invalid input,
+.rows-field-invalid select,
+.rows-field-invalid textarea {
+  border-color: var(--error);
+}
+
+.rows-field input,
+.rows-field select,
+.rows-field textarea {
+  width: 100%;
+}
+
+.rows-link-input,
+.rows-list-add {
+  display: flex;
+  gap: 6px;
+}
+
+.rows-link-input input,
+.rows-list-add input {
+  flex: 1;
+}
+
+.rows-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rows-list-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rows-list-remove {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.rows-mono {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.rows-body-text {
+  width: 100%;
+  min-height: 240px;
+}
+
+.rows-autolink {
+  margin-right: auto;
+}
+
+.rows-banner {
+  border: 1px solid var(--accent);
+  background: var(--info-bg);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rows-banner-warn {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
+
+.rows-checks {
+  border: 1px solid var(--error);
+  background: var(--error-bg);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.rows-checks-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+  color: var(--error);
+}
+
+.rows-checks ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.rows-others h2,
+.rows-screen h2 {
+  font-size: 16px;
+  margin: 8px 0 4px;
+}
+
+.rows-current-body {
+  white-space: pre-wrap;
+  background: var(--bg-soft);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.rows-dialog-options {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.rows-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.rows-picker-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--fg);
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.rows-picker-item:hover,
+.rows-picker-item:focus {
+  background: var(--bg-strong);
+}
+
+.rows-links {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.rows-links-group h3 {
+  font-size: 14px;
+  margin: 0 0 4px;
+}
+
+.rows-links-group ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.rows-frontmatter th {
+  text-align: left;
+  width: 200px;
+}
