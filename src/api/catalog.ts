@@ -1275,6 +1275,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -1771,6 +1809,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -2257,6 +2333,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -2747,6 +2861,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -3232,6 +3384,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -3724,6 +3914,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -3786,7 +4014,7 @@ export const OPERATIONS: OperationDef[] = [
   },
   {
     "name": "alter_table",
-    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields, pack_after_days) rewrites the table entry alone: no row is moved or rewritten.\n`pack` sets the period of the table's packs of rows (`\"{occurred_at:YYYY-MM}\"`; \"\" removes it), `pack_after_days` the days\nafter a period's end before its rows go into a pack (\"default\": 7). While rows are in packs, changing `pack`,\n`partition`, `filename` or the table's name is refused: unpack_rows first.\nA partition wider than the packs' periods is answered with `warnings` (`pack_partition`), with how to fix it. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table rewrites what names it in other\ndefinitions: the `ref` and `vocabulary` of the columns of other tables and bases (lists of links\nincluded) and the tables of views (`table`, `union[].table`, `join.table`); `schema_references`\nlists them. CHECKs and `ref_where` / `ref_by` that read it through a link follow the new `ref`. Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
+    "description": "Alter a table: move it (`catalog`, `schema`), rename it (`name`), change\n`partition` / `filename` patterns, `description` (changes, never goes: \"\" is refused), `aliases`,\n`exclude` folders, `row_template`\n(\"\" removes it), `instructions` (how to fill a row, for agents; \"\" removes them), `history` (true | false | \"default\"), `autolink_target`\n(true | false | \"default\": may automatic links link its rows? default: yes, unless its rows are named by\na date or a time) or `tags` (key/value\nlabels merged into the table's, e.g. `{\"domain\": \"health\"}`; a `null` value removes that tag;\n`clear_tags: true` removes every tag first, so with `tags` the table keeps exactly those),\n`archive` (folder name inside the table folder) or `fields` (untyped fields, name → default; a\n`null` value removes one). Rows, archive and transaction log follow; links are updated; renamed\nrows keep their old name in `aliases`. A change of metadata only (tags, description, aliases,\nhistory, autolink_target, row_template, instructions, fields, pack_after_days) rewrites the table entry alone: no row is moved or rewritten.\n`pack` sets the period of the table's packs of rows (`\"{occurred_at:YYYY-MM}\"`; \"\" removes it), `pack_after_days` the days\nafter a period's end before its rows go into a pack (\"default\": 7). While rows are in packs, changing `pack`,\n`partition`, `filename` or the table's name is refused: unpack_rows first.\nA partition wider than the packs' periods is answered with `warnings` (`pack_partition`), with how to fix it. Refused\nwhen a row cannot fill a pattern. Renaming or moving the table rewrites what names it in other\ndefinitions: the `ref` and `vocabulary` of the columns of other tables and bases (lists of links\nincluded) and the tables of views (`table`, `union[].table`, `join.table`); `schema_references`\nlists them. CHECKs and `ref_where` / `ref_by` that read it through a link follow the new `ref`. Named tokens\nwhose `read` or `write` names the table exactly get the new name (`tokens_followed`; patterns stay). Use `dry_run` to see `planned_moves`; undo with undo_migration.\n\nThe schema changes only through operations like this one: never edit metastore.yaml by hand (no validation, no undo).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -4443,6 +4671,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -4986,6 +5252,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -5473,6 +5777,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -6623,6 +6965,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -7115,6 +7495,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -7636,6 +8054,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -8161,6 +8617,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -8773,6 +9267,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -9290,6 +9822,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -9825,6 +10395,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -10372,6 +10980,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -11093,6 +11739,44 @@ export const OPERATIONS: OperationDef[] = [
               "error"
             ]
           }
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before the undo, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name after the undo, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "An undo that put a renamed or moved table back under its old name: the named tokens whose read or write list held exactly the name it had, which now hold the old one again. In the owner's answer only, when there is one."
         }
       },
       "required": [
@@ -11576,6 +12260,44 @@ export const OPERATIONS: OperationDef[] = [
                       ]
                     },
                     "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+                  },
+                  "tokens_followed": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "token": {
+                          "type": "string",
+                          "description": "The named token."
+                        },
+                        "from": {
+                          "type": "string",
+                          "description": "The table's name before, as the token's list held it exactly."
+                        },
+                        "to": {
+                          "type": "string",
+                          "description": "The table's name now, in its place."
+                        },
+                        "permissions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "read",
+                              "write"
+                            ]
+                          },
+                          "description": "The token's lists that changed: read, write or both."
+                        }
+                      },
+                      "required": [
+                        "token",
+                        "from",
+                        "to",
+                        "permissions"
+                      ]
+                    },
+                    "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
                   },
                   "warnings": {
                     "type": "array",
@@ -12106,6 +12828,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -13473,6 +14233,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -15022,6 +15820,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -16125,6 +16961,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -16609,6 +17483,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -17162,6 +18074,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -17642,6 +18592,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "warnings": {
           "type": "array",
@@ -18155,6 +19143,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -18654,6 +19680,44 @@ export const OPERATIONS: OperationDef[] = [
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
         },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
+        },
         "warnings": {
           "type": "array",
           "description": "What is unwise in a table's layout, though allowed: a partition wider than the periods of the table's packs (create_table, alter_table; check_table lists them for the tables it checks). Present when there is one.",
@@ -19146,6 +20210,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "packs": {
           "type": "array",
@@ -19704,6 +20806,44 @@ export const OPERATIONS: OperationDef[] = [
             ]
           },
           "description": "alter_table that moves or renames a table: the references to it in other definitions that it rewrites (on a dry run, would rewrite): the ref and vocabulary of the columns of other tables and of bases, and the tables the views' queries read. Present when there is one."
+        },
+        "tokens_followed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "The named token."
+              },
+              "from": {
+                "type": "string",
+                "description": "The table's name before, as the token's list held it exactly."
+              },
+              "to": {
+                "type": "string",
+                "description": "The table's name now, in its place."
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "The token's lists that changed: read, write or both."
+              }
+            },
+            "required": [
+              "token",
+              "from",
+              "to",
+              "permissions"
+            ]
+          },
+          "description": "alter_table that renames or moves a table: the named tokens whose read or write list held its old name exactly, which now hold the new one (patterns stay as they are). In the owner's answer only, when there is one."
         },
         "packs": {
           "type": "array",

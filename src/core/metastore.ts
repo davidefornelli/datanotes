@@ -294,7 +294,8 @@ export function baseChain(bases: Record<string, BaseEntry>, names: readonly stri
 /** Column keys a table may change on an inherited column (they do not change its meaning). */
 const PRESENTATION_KEYS = new Set(["name", "label", "description", "aliases", "note", "dense"]);
 
-function withSelf(col: Record<string, unknown>, full: string): Record<string, unknown> {
+/** A column with `ref: self` written as the table it is on (`full`); any other column as it is. */
+export function withSelf(col: Record<string, unknown>, full: string): Record<string, unknown> {
   return col.ref === "self" ? { ...col, ref: full } : col;
 }
 
@@ -418,6 +419,7 @@ export function setCatalogComment(text: string, catalog: string, schema: string 
       // A catalog or schema written with nothing under it (`work:`) has no description to remove.
       const node = doc.getIn(path, true);
       if (isMap(node)) node.delete("description");
+      if (schema !== undefined) pruneEmptySchema(doc, catalog, schema);
       return;
     }
     ensureMapIn(doc, path);
@@ -690,6 +692,20 @@ function ensureMapIn(doc: ReturnType<typeof parseDocument>, path: string[]): voi
   }
 }
 
+/**
+ * A schema left with no tables and no views, and no description, goes from the file: the engine creates schemas
+ * implicitly (create_table, alter_table to another schema) and removes them the same way. Undo writes the text back.
+ */
+function pruneEmptySchema(doc: ReturnType<typeof parseDocument>, catalog: string, schema: string): void {
+  const path = ["catalogs", catalog, "schemas", schema];
+  const node = doc.getIn(path, true);
+  // a schema written with nothing under it (`work:`) is no mapping: nothing to prune (setCatalogComment reaches it)
+  if (!isMap(node)) return;
+  const entry = node.toJSON() as Record<string, unknown>;
+  const empty = (v: unknown): boolean => v == null || Object.keys(v as object).length === 0;
+  if (Object.keys(entry).every((k) => k === "tables" || k === "views") && empty(entry.tables) && empty(entry.views)) doc.deleteIn(path);
+}
+
 /** Set (or with `null` remove) a table entry; comments elsewhere in the file are kept. */
 export function setTableEntry(text: string, ref: CatalogRef, entry: CatalogTableEntry | null): string {
   return setTableEntries(text, [[ref, entry]]);
@@ -702,15 +718,20 @@ export function setTableEntry(text: string, ref: CatalogRef, entry: CatalogTable
 export function setTableEntries(text: string, edits: readonly (readonly [CatalogRef, CatalogTableEntry | null])[]): string {
   if (edits.length === 0) return text;
   return editDocument(text, (doc) => {
+    // schemas a removal may have emptied: pruned after every edit, so a table removed and another
+    // set in the same schema (a rename) leaves the schema where it is
+    const emptied = new Map<string, CatalogRef>();
     for (const [ref, entry] of edits) {
       const path = ["catalogs", ref.catalog, "schemas", ref.schema, "tables", ref.table];
       if (entry === null) {
         doc.deleteIn(path);
+        emptied.set(`${ref.catalog}.${ref.schema}`, ref);
         continue;
       }
       ensureMapIn(doc, path.slice(0, -1));
       doc.setIn(path, doc.createNode(entry));
     }
+    for (const ref of emptied.values()) pruneEmptySchema(doc, ref.catalog, ref.schema);
   });
 }
 
@@ -719,6 +740,7 @@ export function setViewEntry(text: string, ref: CatalogRef, view: ViewEntry | nu
     const path = ["catalogs", ref.catalog, "schemas", ref.schema, "views", ref.table];
     if (view === null) {
       doc.deleteIn(path);
+      pruneEmptySchema(doc, ref.catalog, ref.schema);
       return;
     }
     ensureMapIn(doc, path.slice(0, -1));

@@ -97,8 +97,9 @@ describe("metastore", () => {
 
   it("writes what is added to an emptied mapping in block style, like the rest of the file", () => {
     const ref = refOf("main", "public", "a");
+    // the schema left empty goes; its catalog stays, `schemas: {}`
     const emptied = setTableEntry(setTableEntry("", ref, { columns: [{ name: "x", type: "string" }] }), ref, null);
-    expect(emptied).toContain("tables: {}");
+    expect(emptied).toContain("schemas: {}");
     const out = setTableEntry(emptied, refOf("main", "public", "b"), { description: "B", columns: [{ name: "y", type: "string" }] });
     expect(out).toContain("        tables:\n          b:\n            description: B\n");
     expect(out).not.toContain("{");

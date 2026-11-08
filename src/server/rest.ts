@@ -29,7 +29,7 @@ import { searchVault } from "../core/note-search";
 import { holdsStaleWrite, runWrite } from "../core/write-check";
 import { QueryInputError } from "../core/query";
 import { adoptRows, alignRelations, alterTable, checkTable, deleteRows, insertRow, linkOptions, mergeRows, moveRows, recomputeColumns, select, updateRow, updateRows } from "../core/rows";
-import { listMigrations } from "../core/journal";
+import { listMigrations, readJournal } from "../core/journal";
 import { addConstraint, cloneTable, commentOn, createView, defineBase, dropConstraint, dropView, setTableBases } from "../core/catalog-ops";
 import { configureDatabase, DatabaseConfigError, describeDatabase } from "../core/database";
 import type { DatanotesSettings } from "../core/settings";
@@ -54,6 +54,7 @@ import { didYouMean, guide, GuidedError, guidanceOf, refusalGuidance, undoGuidan
 import { argumentsOf, checkArguments, toolDocs } from "../api/guidance";
 import { operationRoute } from "../api/requests";
 import { currentActor } from "../core/actor";
+import type { TokenFollow } from "./tokens";
 import { currentReadScope, READ_DENIED_GUIDANCE, ReadDeniedError, tableReadable } from "../core/read-scope";
 import { WriteDeniedError } from "../core/write-scope";
 import { pathHidden } from "../core/changeset-checks";
@@ -75,6 +76,11 @@ export interface HandlerOptions {
   cache?: () => ReadCache | null;
   /** The token behind the current call and its permissions: part of the read cache's keys. */
   scope?: () => string;
+  /**
+   * The named tokens that followed the renames of these journal entries (src/server/tokens.ts),
+   * for the owner's answer (`tokens_followed`); none for a named token's call.
+   */
+  tokensFollowed?: (migrationIds: string[]) => Promise<TokenFollow[]>;
 }
 
 export type Body = Record<string, unknown>;
@@ -326,6 +332,23 @@ export function redactBatchRollback(r: BatchResult, app: App, settings: Datanote
   };
 }
 
+/**
+ * A batch that did not apply, without the `tokens_followed` of the steps its rollback undid: those
+ * tables are back under their old names, and their tokens followed them back. A step whose undo
+ * failed keeps its rename, and lists the tokens that followed it.
+ */
+function withoutFollowed(r: BatchResult): BatchResult {
+  const undone = new Set((r.rollback ?? []).filter((u) => u.ok).map((u) => u.migration_id));
+  return {
+    ...r,
+    steps: r.steps.map((st) => {
+      if (!st.result || !("tokens_followed" in st.result) || !undone.has(st.migration_id!)) return st;
+      const { tokens_followed: _f, ...result } = st.result as OpResult & { tokens_followed?: unknown };
+      return { ...st, result };
+    }),
+  };
+}
+
 /** How to go on after a refused batch. */
 export function batchGuidance(r: { dry_run: boolean; failed_at?: number; rolled_back?: boolean }): Guidance {
   if (r.dry_run) return guide("Fix the operations marked refused, then send the batch again (dry_run checks each one against the vault as it is now).", "batch");
@@ -386,6 +409,18 @@ export function createHandlers(
 ): Record<string, Handler> {
   const s = getSettings;
   const opResponse = (r: OpResult): HandlerResponse => writeResponse(r, app, s());
+  /**
+   * A rename's answer (alter_table, undo_migration, a batch step) with the named tokens whose exact
+   * grants followed the table (`tokens_followed`), when there are some.
+   */
+  const withFollowed = async (res: HandlerResponse, migrationIds: readonly (string | undefined)[]): Promise<HandlerResponse> => {
+    const ids = migrationIds.filter((id): id is string => id !== undefined);
+    if (!options.tokensFollowed || res.status !== 200 || ids.length === 0) return res;
+    const follows = await options.tokensFollowed(ids);
+    if (follows.length === 0) return res;
+    const tokens_followed = follows.map((f) => ({ token: f.token, from: f.from, to: f.to, permissions: [...f.permissions] }));
+    return { ...res, json: { ...(res.json as Record<string, unknown>), tokens_followed } };
+  };
   const pub = api ?? createPublicApi(app, getSettings, saveSettings, semantic);
   const needSemantic = (): SemanticIndex => {
     if (!semantic) throw new BadRequest("semantic search is not available", SEMANTIC_OFF);
@@ -517,8 +552,7 @@ export function createHandlers(
       const instructions = text(b, "instructions");
       const archive = text(b, "archive");
       const partition = text(b, "partition");
-      return opResponse(
-        await alterTable(
+      const r = await alterTable(
           app,
           s(),
           {
@@ -546,8 +580,9 @@ export function createHandlers(
             ...(b.pack_after_days === "default" ? { packAfterDays: null } : b.pack_after_days !== undefined && b.pack_after_days !== null ? { packAfterDays: b.pack_after_days as number } : {}),
           },
           runOpts(b),
-        ),
-      );
+        );
+      // the named tokens whose exact grants followed a renamed or moved table
+      return withFollowed(opResponse(r), r.dry_run ? [] : [r.migration_id]);
     },
     clone_table: async (b) => {
       const copyRows = optBool(b, "copy_rows");
@@ -777,7 +812,7 @@ export function createHandlers(
       const forbidden = r.failed_at !== undefined ? (denied.has(r.failed_at) ? r.failed_at : undefined) : [...denied].sort((a, b) => a - b)[0];
       const status = r.ok ? 200 : r.rolled_back === false ? 500 : forbidden !== undefined ? 403 : writeStatus(failedStep, true);
       // each step's result is redacted already (opResponse); what the rollback reports is too
-      const answer = redactBatchRollback(r, app, s());
+      const answer = redactBatchRollback(r.ok ? r : withoutFollowed(r), app, s());
       if (status === 403) {
         // as the guard refuses a step: "operation <i>: <why>", with the step's hint and docs
         const step = answer.steps[forbidden!]!;
@@ -929,7 +964,10 @@ export function createHandlers(
     },
     undo_migration: async (b) => {
       const { touched: _touched, ...r } = await undoOperation(app, s(), str(b, "migration_id")!);
-      return { status: r.ok ? 200 : r.failed.length > 0 ? 500 : 409, json: r.ok ? r : { ...r, ...undoGuidance(r) } };
+      if (!r.ok) return { status: r.failed.length > 0 ? 500 : 409, json: { ...r, ...undoGuidance(r) } };
+      // a renamed table back under its old name: the tokens that followed it back (a batch's undo: its operations' undos)
+      const ids = r.migration_id !== undefined && options.tokensFollowed ? [r.migration_id, ...((await readJournal(app, s(), r.migration_id)).entry.members ?? [])] : [];
+      return withFollowed({ status: 200, json: r }, ids);
     },
     describe_history: async (b) => {
       const limit = optInt(b, "limit");

@@ -13,7 +13,7 @@ import { adoptCreatedNote } from "../core/auto-adopt";
 import { AutoRecompute } from "../core/auto-recompute";
 import { AUTO_PACK, AutoPack } from "../core/auto-pack";
 import type { Transport } from "../core/embeddings";
-import { emptyResult, engineWriting, logExternalEdits } from "../core/engine";
+import { emptyResult, engineWriting, logExternalEdits, onApplied } from "../core/engine";
 import { bumpVaultGeneration, invalidateFiles } from "../core/file-cache";
 import { appendLog, pruneLogs } from "../core/file-log";
 import { InverseWatcher } from "../core/inverse";
@@ -115,6 +115,8 @@ export class EngineRuntime {
   readonly api: DatanotesPublicApi;
   /** Named tokens and their permissions. */
   readonly tokens: TokenRegistry;
+  /** Stops following the tables renamed by operations (see start). */
+  private offTableMoves: (() => void) | null = null;
   /** The extensions installed in the database: their records. */
   readonly extensions: ExtensionRegistry;
   /** Models agents reported (start_session), kept across HTTP server restarts. */
@@ -286,6 +288,11 @@ export class EngineRuntime {
       scheduler: this.scheduler,
       cache: () => this.cache,
       scope: () => this.cacheScope(),
+      tokensFollowed: async (ids) => {
+        const follows = await this.tokens.takeFollowed(ids);
+        // the registry is the owner's: a named token's answer does not list other tokens
+        return tokenNameOf(currentActor()) ? [] : follows;
+      },
     });
     // DATANOTES_INDEX_CHECK=1 (index-check.ts): the indexes are checked against the vault after every operation
     const base: Record<string, Handler> = {};
@@ -700,6 +707,12 @@ export class EngineRuntime {
     this.started = true;
     const app = this.o.app;
     const s = this.o.getSettings;
+    // a table renamed or moved by an operation (or put back by an undo): the named tokens' exact
+    // grants follow it, once the operation is journaled; hand edits of metastore.yaml are not followed
+    this.offTableMoves = onApplied(app, (e) => {
+      // an operation that renamed tables is journaled: it has its id
+      if (e.tableMoves && e.tableMoves.length > 0) this.tokens.followTableMoves(e.migrationId!, e.tableMoves, e.undoes);
+    });
     // the read cache follows the vault's events from here on: it knows when an answer is stale
     this.cache = new ReadCache(app, s);
     // The metastore cache backs sync readers (listTables, row discovery): keep it current. The
@@ -1043,6 +1056,8 @@ export class EngineRuntime {
     const hooks = this.webhooks;
     this.webhooks = null;
     await hooks?.stop();
+    this.offTableMoves?.();
+    this.offTableMoves = null;
     await this.tokens.stop();
     await this.extensions.stop();
     await this.httpServer?.stop();

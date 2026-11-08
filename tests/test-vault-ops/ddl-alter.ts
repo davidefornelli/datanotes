@@ -99,8 +99,8 @@ export const scenarios: Scenario[] = [
       const empty = await t.ok<WriteResult>("drop_table", { table: "task_template" });
       expect(await t.refused("describe_table", { table: "task_template" })).toContain("task_template");
       expect(await t.refused("select_rows", { table: "sandbox.lab.task" })).toContain("sandbox.lab.task");
-      // the catalog and schema the clone created stay, empty
-      expect(t.read(METASTORE)).toContain("  sandbox:\n    schemas:\n      lab:\n        tables: {}\n");
+      // the schema the clone created goes with its last table; the catalog stays, empty
+      expect(t.read(METASTORE)).toContain("  sandbox:\n    schemas: {}\n");
       await undoBackTo(t, before, deep.migration_id, shallow.migration_id, archived.migration_id, empty.migration_id);
     },
   },

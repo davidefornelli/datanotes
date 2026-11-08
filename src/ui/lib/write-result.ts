@@ -97,3 +97,13 @@ export function summarize(a: WriteAnswer): string {
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : "Nothing to change";
 }
+
+/**
+ * The toast of an applied write: "Done", with the named tokens whose exact grants followed a
+ * renamed or moved table (`tokens_followed`, in the owner's answer), each named once.
+ */
+export function doneText(json: unknown): string {
+  const followed = (json as { tokens_followed?: { token: string }[] } | null)?.tokens_followed ?? [];
+  const names = [...new Set(followed.map((f) => f.token))];
+  return names.length > 0 ? `Done. Tokens that followed the table: ${names.join(", ")}` : "Done";
+}

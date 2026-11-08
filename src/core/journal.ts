@@ -12,7 +12,7 @@
  */
 
 import type { App } from "./host";
-import type { JournalEntry } from "./changeset";
+import type { JournalEntry, TableMove } from "./changeset";
 import { contentHash } from "./file-cache";
 import { actorName } from "./actor";
 import type { DatanotesSettings } from "./settings";
@@ -430,6 +430,35 @@ export async function batchMembership(app: App, settings: Settings): Promise<Map
   for (const f of (await storeList(app, journalDir(settings))).files.filter((x) => x.endsWith(".jsonl"))) {
     for (const l of parseLines((await storeRead(app, f))!)) { // listed just now
       if (l.type === "migration") for (const m of l.members ?? []) out.set(m, l.migration_id);
+    }
+  }
+  return out;
+}
+
+/** An operation that renamed or moved tables, as the journal holds it (see {@link journalTableMoves}). */
+export interface JournaledTableMoves {
+  migration_id: string;
+  table_moves: TableMove[];
+  /** For an undo: the operation it undid. */
+  undoes?: string;
+  /** Whether the operation failed partway (its rollback, or a later undo, puts it back). */
+  failed: boolean;
+}
+
+/**
+ * The operations that renamed or moved tables (`table_moves`), oldest first, as they were
+ * journaled: from the month of `fromId` on, or the whole journal without it. Named tokens catch
+ * up with them at start (src/server/tokens.ts).
+ */
+export async function journalTableMoves(app: App, settings: Settings, fromId?: string): Promise<JournaledTableMoves[]> {
+  const from = fromId === undefined ? "" : journalFileFor(settings, fromId);
+  // oldest month first; entries without a dated id (`undated.jsonl`) last
+  const files = (await storeList(app, journalDir(settings))).files.filter((f) => f.endsWith(".jsonl") && f >= from).sort();
+  const out: JournaledTableMoves[] = [];
+  for (const f of files) {
+    for (const l of parseLines((await storeRead(app, f))!)) { // listed just now
+      if (l.type !== "migration" || !l.table_moves) continue;
+      out.push({ migration_id: l.migration_id, table_moves: l.table_moves, ...(l.undoes ? { undoes: l.undoes } : {}), failed: l.failed.length > 0 });
     }
   }
   return out;

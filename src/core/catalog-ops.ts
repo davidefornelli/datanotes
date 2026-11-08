@@ -55,6 +55,7 @@ import {
   tableTags,
   constraintHints,
   tableInstructions,
+  withSelf,
   type CatalogRef,
   type CatalogTableEntry,
   type Metastore,
@@ -853,7 +854,9 @@ async function setTableBasesImpl(app: App, settings: DatanotesSettings, input: S
     }
     // The base's type wins (rows are validated against it), but a constraint of the own column
     // that the base does not have would be lost: refuse instead.
-    const lost = CONSTRAINT_KEYS.filter((k) => c[k] !== undefined && JSON.stringify(c[k]) !== JSON.stringify(inh[k]));
+    // `ref: self` on the own column is the table itself, as the base's column resolves it
+    const ownCol = withSelf(c, cat.ref.full);
+    const lost = CONSTRAINT_KEYS.filter((k) => ownCol[k] !== undefined && JSON.stringify(ownCol[k]) !== JSON.stringify(inh[k]));
     if (lost.length > 0) {
       throw new OperationInputError(
         `${cat.ref.full}: column "${String(c.name)}" has ${lost.join(", ")} that the base column does not; ` +

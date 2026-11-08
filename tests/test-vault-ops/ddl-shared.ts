@@ -3,7 +3,7 @@
  */
 
 import { expect } from "vitest";
-import { person, project, task, undoBackTo, type Rows, type Scenario, type WriteResult } from "./harness";
+import { METASTORE, person, project, task, undoBackTo, type Rows, type Scenario, type WriteResult } from "./harness";
 
 export const scenarios: Scenario[] = [
   {
@@ -71,6 +71,20 @@ export const scenarios: Scenario[] = [
       expect(row.planned_creates).toEqual(["Data/work/planning/task/Rename the folder back.md"]);
       await t.ok("configure_database", { root: "datanotes" });
       expect(t.files()).toEqual(before);
+    },
+  },
+  {
+    name: "set_table_bases: the project tree's own parent (ref: self) gives way to a base's like it, its rows untouched; undo",
+    ops: ["define_base", "set_table_bases", "undo_migration"],
+    async run(t) {
+      const before = t.files();
+      const parent = { name: "parent", type: "link", ref: "self", hierarchy: true, ref_by: { column: "kind", levels: ["area", "project", "workstream"] }, description: "One level up" };
+      const tree = await t.ok<WriteResult>("define_base", { name: "tree", description: "Rows in a tree", columns: [{ name: "kind", type: "enum", required: true, values: ["area", "project", "workstream"], description: "Its level in the tree" }, parent] });
+      const onProject = await t.ok<WriteResult>("set_table_bases", { table: "project", bases: ["dated", "tree"] });
+      expect(onProject.notes_changed).toBe(0);
+      const notes = Object.keys(before).filter((k) => k !== METASTORE);
+      expect(notes.filter((k) => t.files()[k] !== before[k])).toEqual([]);
+      await undoBackTo(t, before, tree.migration_id, onProject.migration_id);
     },
   },
 ];

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseDocument } from "yaml";
 import { docsUrl } from "../src/core/hints";
 import {
   AmbiguousCatalogRefError,
@@ -18,7 +19,9 @@ import {
   refOf,
   resolveCatalogRef,
   setBaseEntry,
+  setCatalogComment,
   setConfig,
+  setTableEntries,
   tableTags,
   withNewDatabaseConfig,
   withTableTags,
@@ -470,5 +473,167 @@ describe("edits of the metastore's text and its cache", () => {
     await primeWrittenMetastore(v.app, v.settings, `${text}# not what the file holds\n`);
     expect((await loadMetastore(v.app, v.settings))!.text).toBe(text);
     expect(reads).toBe(1);
+  });
+});
+
+describe("a schema the engine empties", () => {
+  const ops = async () => {
+    const [{ createTable, dropTable, INDEX_RETRY }, catalog, { alterTable }, { undoMigration }, { described }] = await Promise.all([
+      import("../src/core/engine"),
+      import("../src/core/catalog-ops"),
+      import("../src/core/rows"),
+      import("../src/core/changeset"),
+      import("./helpers/descriptions"),
+    ]);
+    INDEX_RETRY.delayMs = 1;
+    const v = createDbVault({});
+    const table = async (schema: string, name: string) => {
+      const r = await createTable(v.app, v.settings, described({ schema, name, options: { filename: "{title}" }, columns: [{ name: "title", type: "string" }] }));
+      expect(r.ok).toBe(true);
+    };
+    const schemas = () => Object.keys(parseMetastore(v.read(METASTORE)).catalogs.main!.schemas);
+    return { v, table, schemas, dropTable, alterTable, undoMigration, ...catalog };
+  };
+
+  it("goes from the file with its last table, when it has no views and no description", async () => {
+    const { v, table, schemas, dropTable } = await ops();
+    await table("lab", "keep");
+    await table("tmp", "only");
+    expect(schemas()).toEqual(["lab", "tmp"]);
+    expect((await dropTable(v.app, v.settings, { table: "main.tmp.only" })).ok).toBe(true);
+    expect(schemas()).toEqual(["lab"]);
+    expect(v.read(METASTORE)).not.toContain("tmp:");
+  });
+
+  it("stays while it holds a view", async () => {
+    const { v, table, schemas, dropTable, createView } = await ops();
+    await table("lab", "keep");
+    await table("tmp", "only");
+    expect((await createView(v.app, v.settings, { schema: "tmp", name: "shelf", query: { table: "main.lab.keep" } })).ok).toBe(true);
+    expect((await dropTable(v.app, v.settings, { table: "main.tmp.only" })).ok).toBe(true);
+    expect(schemas()).toEqual(["lab", "tmp"]);
+    expect(Object.keys(parseMetastore(v.read(METASTORE)).catalogs.main!.schemas.tmp!.views)).toEqual(["shelf"]);
+  });
+
+  it("stays when it has a description", async () => {
+    const { v, table, schemas, dropTable, commentOn } = await ops();
+    await table("lab", "keep");
+    await table("tmp", "only");
+    expect((await commentOn(v.app, v.settings, { catalog: "main", schema: "tmp", description: "Scratch tables" })).ok).toBe(true);
+    expect((await dropTable(v.app, v.settings, { table: "main.tmp.only" })).ok).toBe(true);
+    expect(schemas()).toEqual(["lab", "tmp"]);
+    expect(parseMetastore(v.read(METASTORE)).catalogs.main!.schemas.tmp!.description).toBe("Scratch tables");
+  });
+
+  it("goes when alter_table moves its only table to another schema; undo writes the text back", async () => {
+    const { v, table, schemas, alterTable, undoMigration } = await ops();
+    await table("lab", "keep");
+    await table("tmp", "only");
+    const before = v.read(METASTORE);
+    const r = await alterTable(v.app, v.settings, { table: "main.tmp.only", schema: "lab" });
+    expect(r.ok).toBe(true);
+    expect(schemas()).toEqual(["lab"]);
+    expect(Object.keys(parseMetastore(v.read(METASTORE)).catalogs.main!.schemas.lab!.tables)).toEqual(["keep", "only"]);
+    expect((await undoMigration(v.app, v.settings, r.migration_id!, new Date())).ok).toBe(true);
+    expect(v.read(METASTORE)).toBe(before);
+  });
+
+  it("goes with its last view, when it has no tables", async () => {
+    const { v, table, schemas, createView, dropView } = await ops();
+    await table("lab", "keep");
+    expect((await createView(v.app, v.settings, { schema: "views", name: "shelf", query: { table: "main.lab.keep" } })).ok).toBe(true);
+    expect(schemas()).toEqual(["lab", "views"]);
+    expect((await dropView(v.app, v.settings, { view: "main.views.shelf" })).ok).toBe(true);
+    expect(schemas()).toEqual(["lab"]);
+  });
+});
+
+describe("the prune of an emptied schema, on the text", () => {
+  const ref = refOf("c", "s", "t");
+  const schemasOf = (text: string) => Object.keys((parseDocument(text).toJSON() as { catalogs: { c: { schemas?: Record<string, unknown> } } }).catalogs.c.schemas ?? {});
+  const drop = (text: string) => setTableEntries(text, [[ref, null]]);
+  const keep = "      k:\n        tables:\n          x:\n            folder: k\n";
+
+  it("drops a schema whose `views:` is null when its last table goes", () => {
+    const text = "catalogs:\n  c:\n    schemas:\n" + keep + "      s:\n        tables:\n          t:\n            folder: t\n        views:\n";
+    expect(schemasOf(drop(text))).toEqual(["k"]);
+  });
+
+  it("drops a schema with no `views` key when its last table goes", () => {
+    const text = "catalogs:\n  c:\n    schemas:\n" + keep + "      s:\n        tables:\n          t:\n            folder: t\n";
+    expect(schemasOf(drop(text))).toEqual(["k"]);
+  });
+
+  it("drops a schema written in flow style when its last table goes", () => {
+    const text = "catalogs:\n  c:\n    schemas:\n" + keep + "      s: {tables: {t: {folder: t}}, views: {}}\n";
+    expect(schemasOf(drop(text))).toEqual(["k"]);
+  });
+
+  it("drops a schema whose description comment_on removes, when it holds nothing else; keeps one with a table", () => {
+    const bare = "catalogs:\n  c:\n    schemas:\n" + keep + "      s:\n        description: Scratch\n";
+    expect(schemasOf(setCatalogComment(bare, "c", "s", null))).toEqual(["k"]);
+    const full = "catalogs:\n  c:\n    schemas:\n" + keep + "      s:\n        description: Scratch\n        tables:\n          t:\n            folder: t\n";
+    const out = setCatalogComment(full, "c", "s", null);
+    expect(schemasOf(out)).toEqual(["k", "s"]);
+    expect(out).not.toContain("Scratch");
+    expect(out).toContain("folder: t");
+  });
+
+  it("leaves a schema written with nothing under it as it is", () => {
+    const text = "catalogs:\n  c:\n    schemas:\n" + keep + "      s:\n";
+    expect(setCatalogComment(text, "c", "s", null)).toBe(text);
+  });
+
+  it("keeps a catalog whose description goes, even with no schemas", () => {
+    const text = "catalogs:\n  c:\n    description: Lab\n    schemas: {}\n";
+    const out = setCatalogComment(text, "c", undefined, null);
+    expect(out).not.toContain("Lab");
+    expect(Object.keys(parseDocument(out).toJSON().catalogs)).toEqual(["c"]);
+  });
+});
+
+describe("set_table_bases on a column the table has as ref: self", () => {
+  const HIER = [{ name: "parent", type: "link", ref: "self", hierarchy: true }];
+  const setup = async (parent: Record<string, unknown>) => {
+    const [{ createTable, INDEX_RETRY }, { defineBase, setTableBases }, { insertRow }, { described, describedBase }] = await Promise.all([
+      import("../src/core/engine"),
+      import("../src/core/catalog-ops"),
+      import("../src/core/rows"),
+      import("./helpers/descriptions"),
+    ]);
+    INDEX_RETRY.delayMs = 1;
+    const v = createDbVault({});
+    expect((await defineBase(v.app, v.settings, describedBase({ name: "hierarchical", columns: HIER }))).ok).toBe(true);
+    await createTable(v.app, v.settings, described({ schema: "work", name: "other", options: { filename: "{name}" }, columns: [{ name: "name", type: "string" }] }));
+    const r = await createTable(v.app, v.settings, described({
+      schema: "work",
+      name: "task",
+      options: { filename: "{name}" },
+      columns: [{ name: "name", type: "string", required: true, dense: true }, { ...parent, label: "Parent task", description: "The task this one is part of" }],
+    }));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    return { v, setTableBases, insertRow };
+  };
+
+  it("lets the base's column take the place of the own one: rows untouched, its label kept", async () => {
+    const { v, setTableBases, insertRow } = await setup({ name: "parent", type: "link", ref: "self", hierarchy: true });
+    const T = "Datanotes/main/work/task";
+    expect((await insertRow(v.app, v.settings, { table: "task", values: { name: "Ship" } })).ok).toBe(true);
+    expect((await insertRow(v.app, v.settings, { table: "task", values: { name: "Write notes", parent: `[[${T}/Ship|Ship]]` } })).ok).toBe(true);
+    const child = v.read(`${T}/Write notes.md`);
+    const r = await setTableBases(v.app, v.settings, { table: "task", bases: ["hierarchical"] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.notes_changed).toBe(0);
+    expect(v.read(`${T}/Write notes.md`)).toBe(child);
+    const entry = parseMetastore(v.read(METASTORE)).catalogs.main!.schemas.work!.tables.task!;
+    expect(entry.bases).toEqual(["hierarchical"]);
+    expect(entry.columns.find((c) => c.name === "parent")).toEqual({ name: "parent", label: "Parent task", description: "The task this one is part of" });
+  });
+
+  it("still refuses an own column whose ref names another table", async () => {
+    const { v, setTableBases } = await setup({ name: "parent", type: "link", ref: "main.work.other" });
+    const before = v.read(METASTORE);
+    await expect(setTableBases(v.app, v.settings, { table: "task", bases: ["hierarchical"] })).rejects.toThrow('column "parent" has ref that the base column does not');
+    expect(v.read(METASTORE)).toBe(before);
   });
 });

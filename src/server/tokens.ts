@@ -21,6 +21,7 @@ import { tablesReadByView } from "../core/query-tables";
 import type { DatanotesSettings } from "../core/settings";
 import { storePath, storeRead, storeWrite } from "../core/store";
 import { telemetry } from "../core/telemetry";
+import { journalTableMoves } from "../core/journal";
 import { newToken } from "./http-server";
 import { OWNER_ADMIN_ROUTES, OWNER_OPERATIONS, READ_OPERATIONS, READ_ROUTES, READ_SCOPE_UNSUPPORTED, READ_SCOPE_UNSUPPORTED_HINT, READ_TABLE_ARGS, ROW_WRITES, SCHEMA_OPERATIONS, WRITE_SCOPE_UNSUPPORTED, WRITE_SCOPE_UNSUPPORTED_HINT } from "./token-routes";
 import { BadRequest, errorResponse, Forbidden, FORBIDDEN_HINT, isBatchOperation, operationOf, type Body, type Handler, type HandlerResponse } from "./rest";
@@ -54,7 +55,30 @@ export interface TokenRecord {
   createdAt: string;
   updatedAt: string;
   lastSeen?: string;
+  /**
+   * The journal id of the last table rename or move the lists reflect ("" before any). At start the
+   * registry catches up with the renames journaled after it: a stop between the journal and the save.
+   */
+  movesThrough?: string;
+  /** The lists before and after the latest renames that changed them (oldest first): an undo puts them back exactly. */
+  follows?: FollowRecord[];
 }
+
+/** A token's lists before and after a rename it followed (journal id `migration`). */
+export interface FollowRecord {
+  migration: string;
+  before: TokenLists;
+  after: TokenLists;
+}
+
+/** A token's `read` (absent: every table) and `write`. */
+export interface TokenLists {
+  read?: string[];
+  write: string[];
+}
+
+/** How many renames each token keeps its lists of, for an exact undo. */
+const FOLLOWS_KEPT = 10;
 
 /** A table or view of the permission matrix; a view names the tables it reads. */
 export interface PermissionObject {
@@ -103,6 +127,21 @@ export interface PublicToken {
   updated_at: string;
   last_seen?: string;
 }
+
+/**
+ * A token whose exact grant followed a table renamed or moved (alter_table, or the undo of one):
+ * `from` became `to` in the lists of `permissions` (guides/security/tokens#a-renamed-table-keeps-its-grants).
+ */
+export interface TokenFollow {
+  token: string;
+  from: string;
+  to: string;
+  /** The lists that changed: "read", "write" or both. */
+  permissions: ("read" | "write")[];
+}
+
+/** How many renames' followed tokens are kept for their answers (those never asked for go first). */
+const FOLLOWED_KEPT = 100;
 
 const FILE = "tokens.json";
 /** Kebab-case; "owner" is the owner's token in the journal. */
@@ -166,6 +205,14 @@ export class TokenRegistry {
   private loaded: Promise<void> | null = null;
   private saving: Promise<boolean> = Promise.resolve(true);
   private seenTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The renames being followed (see followTableMoves): stop() waits for them. */
+  private following: Promise<unknown> = Promise.resolve();
+  /** The tokens that followed each rename, by journal id, until its answer takes them. */
+  private followed = new Map<string, Promise<TokenFollow[]>>();
+  /** The journal id of the last rename the registry followed ("" before any; unknown before load). */
+  private movesThrough: string | undefined;
+  /** The renames followed at start (catchUp), by journal id: their apply hook changes nothing more. */
+  private caughtUp = new Map<string, TokenFollow[]>();
 
   constructor(private readonly deps: Deps) {}
 
@@ -178,21 +225,143 @@ export class TokenRegistry {
     this.loaded ??= (async () => {
       try {
         const text = await storeRead(this.deps.app, this.path(FILE));
-        if (text !== null) this.tokens = JSON.parse(text) as TokenRecord[];
+        if (text !== null) {
+          const records = JSON.parse(text) as unknown[];
+          // an entry edited by hand into a number, a string, null or a list is no token: skipped
+          this.tokens = records.filter((t): t is TokenRecord => t !== null && typeof t === "object" && !Array.isArray(t));
+          const skipped = records.length - this.tokens.length;
+          if (skipped > 0) telemetry().log("WARN", "datanotes skipped token registry entries that are not objects", { skipped });
+        }
       } catch (e) {
         telemetry().log("WARN", "datanotes could not read the token registry", { error: messageOf(e) });
         this.tokens = [];
       }
       this.reindex();
+      await this.catchUp();
     })();
     return this.loaded;
+  }
+
+  /**
+   * Follow the renames journaled after the registry's last save (a stop or crash between the
+   * journal and the save), in journal order, as the apply hook would have: each token from the
+   * rename after its own `movesThrough`. A token without one (written by an older engine, or by
+   * hand) starts from now. Then every token is marked as through the last rename, and saved.
+   */
+  private async catchUp(): Promise<void> {
+    try {
+      const marks = this.tokens.map((t) => t.movesThrough);
+      // the journal from the oldest month a token still needs; all of it to learn the last rename
+      const from = marks.length > 0 && marks.every((m) => typeof m === "string" && m !== "") ? (marks as string[]).sort()[0] : undefined;
+      const entries = await journalTableMoves(this.deps.app, this.deps.getSettings(), from);
+      // as the apply hook: a write that failed partway, and its rollback, renamed nothing
+      const skipped = new Set<string>();
+      const kept = entries.filter((e) => {
+        if (!e.failed && !(e.undoes !== undefined && skipped.has(e.undoes))) return true;
+        skipped.add(e.migration_id);
+        return false;
+      });
+      const ids = kept.map((e) => e.migration_id);
+      // where each token is: -1 before every rename kept (or its mark is gone with the journal's old entries)
+      const at = new Map(this.tokens.map((t) => [t, typeof t.movesThrough === "string" ? ids.indexOf(t.movesThrough) : ids.length - 1]));
+      let changed = false;
+      kept.forEach((e, i) => {
+        const behind = this.tokens.filter((t) => at.get(t)! < i);
+        if (behind.length === 0) return;
+        const follows = this.applyMoves(e.migration_id, e.table_moves, e.undoes, behind, true);
+        if (follows.length > 0) changed = true;
+        this.caughtUp.set(e.migration_id, follows);
+      });
+      const last = ids.at(-1) ?? "";
+      this.movesThrough = last;
+      for (const t of this.tokens) {
+        if (t.movesThrough === last) continue;
+        t.movesThrough = last;
+        changed = true;
+      }
+      if (changed) await this.save();
+    } catch (e) {
+      telemetry().log("WARN", "datanotes could not catch up with the renamed tables", { error: messageOf(e) });
+    }
+  }
+
+  /**
+   * Put each move's new name in the tokens' lists (followMove) and mark every token as through
+   * this rename. Returns the tokens that followed, each logged.
+   */
+  private applyMoves(migrationId: string, moves: readonly { from: string; to: string }[], undoes: string | undefined, tokens: readonly TokenRecord[], recovered = false): TokenFollow[] {
+    const follows: TokenFollow[] = [];
+    for (const t of tokens) {
+      let followed: TokenFollow[];
+      try {
+        followed = followRename(t, migrationId, moves, undoes);
+      } catch (e) {
+        // a record edited by hand into a wrong shape (no `write`): the others follow, the engine serves on
+        telemetry().log("WARN", "datanotes token could not follow a renamed table", { token_name: String(t.name), migration_id: migrationId, error: messageOf(e) });
+        continue;
+      }
+      for (const f of followed) {
+        follows.push(f);
+        telemetry().log("INFO", "datanotes token followed a renamed table", { token_name: t.name, from: f.from, to: f.to, permissions: f.permissions.join(","), migration_id: migrationId, ...(recovered ? { at_start: true } : {}) });
+      }
+    }
+    if (!recovered) {
+      this.movesThrough = migrationId;
+      for (const t of this.tokens) t.movesThrough = migrationId;
+    }
+    return follows;
   }
 
   /** Wait for the last save (the last-seen times are saved within a minute). */
   async stop(): Promise<void> {
     if (this.seenTimer) clearTimeout(this.seenTimer);
     this.seenTimer = null;
+    await this.following;
     await this.saving;
+  }
+
+  /**
+   * A table was renamed or moved (an operation the engine applied and journaled: alter_table, or
+   * an undo putting the old name back). Each token whose `read` or `write` holds exactly the old
+   * name gets the new one in its place; patterns (`catalog.schema.*`, `catalog.*`, `*`) are left
+   * as they are. Called by the engine's apply hook, in order: the change is made in memory at
+   * once (the next request sees it) and saved with the registry's other saves, one at a time.
+   */
+  followTableMoves(migrationId: string, moves: readonly { from: string; to: string }[], undoes?: string): void {
+    const done = this.load().then(async () => {
+      // journaled before the registry was read: followed at start already
+      const caught = this.caughtUp.get(migrationId);
+      if (caught) return caught;
+      const follows = this.applyMoves(migrationId, moves, undoes, this.tokens);
+      // a rename no token followed is not saved: the catch-up at start finds nothing to change either
+      if (follows.length > 0) await this.save();
+      return follows;
+    }).catch((e: unknown): TokenFollow[] => {
+      // never a rejection: the chain goes on, the rename's answer lists no token, the engine serves on
+      telemetry().log("WARN", "datanotes tokens could not follow a renamed table", { migration_id: migrationId, error: messageOf(e) });
+      return [];
+    });
+    this.following = this.following.then(() => done);
+    this.followed.set(migrationId, done);
+    for (const id of this.followed.keys()) {
+      if (this.followed.size <= FOLLOWED_KEPT) break;
+      this.followed.delete(id);
+    }
+  }
+
+  /**
+   * The tokens that followed the renames of these journal entries (once saved), each told once:
+   * what the answer of the rename (or its undo) lists for the owner.
+   */
+  async takeFollowed(migrationIds: readonly string[]): Promise<TokenFollow[]> {
+    const out: TokenFollow[] = [];
+    for (const id of migrationIds) {
+      const p = this.followed.get(id);
+      if (!p) continue;
+      this.followed.delete(id);
+      out.push(...(await p));
+    }
+    return out;
   }
 
   private reindex(): void {
@@ -321,6 +490,8 @@ export class TokenRegistry {
       ...(input.autolink !== undefined ? { autolink: input.autolink } : {}),
       createdAt: now,
       updatedAt: now,
+      // its lists are as they are now: the renames journaled so far are not followed again at start
+      ...(this.movesThrough !== undefined ? { movesThrough: this.movesThrough } : {}),
     };
     checkReadCoversPermissions(t);
     this.tokens.push(t);
@@ -569,6 +740,108 @@ export class TokenRegistry {
       },
     };
   }
+}
+
+/**
+ * A token follows the moves of one operation (journal id `migration`). The undo of a rename it
+ * followed (`undoes`) puts its lists back exactly as they were, unless they changed since: then,
+ * as for any rename, each move's new name takes the old one's place (followMove). The lists before
+ * and after are kept for an undo (the latest {@link FOLLOWS_KEPT}). Returns what changed, by move.
+ */
+export function followRename(t: TokenRecord, migration: string, moves: readonly { from: string; to: string }[], undoes?: string): TokenFollow[] {
+  const before = listsOf(t);
+  let kept = undoes !== undefined && Array.isArray(t.follows) ? t.follows.find((f) => isObject(f) && f.migration === undoes) : undefined;
+  if (kept && !restorable(t, kept)) {
+    // edited by hand into lists a token may not hold: the undo follows by name, as for an edited token
+    telemetry().log("WARN", "datanotes token's kept lists are not valid: its undo follows by name", { token_name: t.name, migration_id: migration });
+    kept = undefined;
+  }
+  let follows: TokenFollow[];
+  if (kept && sameLists(before, kept.after)) {
+    const permissions = (["read", "write"] as const).filter((k) => !sameList(before[k], kept.before[k]));
+    if (kept.before.read === undefined) delete t.read;
+    else t.read = [...kept.before.read];
+    t.write = [...kept.before.write];
+    follows = moves.map((m) => ({ token: t.name, from: m.from, to: m.to, permissions: [...permissions] }));
+  } else {
+    follows = moves.flatMap((m) => {
+      const permissions = followMove(t, m.from, m.to);
+      return permissions.length > 0 ? [{ token: t.name, from: m.from, to: m.to, permissions }] : [];
+    });
+  }
+  if (follows.length === 0) return [];
+  t.follows = [...(Array.isArray(t.follows) ? t.follows : []), { migration, before, after: listsOf(t) }].slice(-FOLLOWS_KEPT);
+  return follows;
+}
+
+function isObject(x: unknown): x is Record<string, unknown> {
+  return x !== null && typeof x === "object" && !Array.isArray(x);
+}
+
+function isStrings(x: unknown): x is string[] {
+  return Array.isArray(x) && x.every((s) => typeof s === "string");
+}
+
+function isLists(x: unknown): x is TokenLists {
+  return isObject(x) && isStrings(x.write) && (x.read === undefined || isStrings(x.read));
+}
+
+/**
+ * Can an undo put back the lists a token kept (`follows`)? Both lists of each side are lists of
+ * strings, and the lists before pass the rules of a token's create and update.
+ */
+function restorable(t: TokenRecord, f: FollowRecord): boolean {
+  if (!isLists(f.before) || !isLists(f.after)) return false;
+  try {
+    checkPatterns(f.before.write, "write");
+    if (f.before.read !== undefined) checkPatterns(f.before.read, "read");
+    const { read: _read, ...rest } = t;
+    checkReadCoversPermissions({ ...rest, ...(f.before.read !== undefined ? { read: f.before.read } : {}), write: f.before.write });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function listsOf(t: TokenRecord): TokenLists {
+  return { ...(t.read !== undefined ? { read: [...t.read] } : {}), write: [...t.write] };
+}
+
+function sameList(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function sameLists(a: TokenLists, b: TokenLists): boolean {
+  return sameList(a.read, b.read) && sameList(a.write, b.write);
+}
+
+/**
+ * Put `to` where a token's `read` and `write` hold exactly `from` (same place; dropped when `to`
+ * is there already). A write that follows needs read too: a restricted `read` that no longer
+ * covers `to` (it matched `from` by a pattern) gets `to` as well. Returns the lists that changed;
+ * the token's times (`updatedAt`, `lastSeen`) stay as they are.
+ */
+export function followMove(t: TokenRecord, from: string, to: string): ("read" | "write")[] {
+  const changed: ("read" | "write")[] = [];
+  const renamed = (list: readonly string[]): string[] | null => {
+    const i = list.indexOf(from);
+    if (i < 0) return null;
+    return list.includes(to) ? list.filter((p) => p !== from) : list.map((p) => (p === from ? to : p));
+  };
+  const write = renamed(t.write);
+  if (write) {
+    t.write = write;
+    changed.push("write");
+  }
+  if (t.read !== undefined) {
+    let read = renamed(t.read);
+    if (write && !(read ?? t.read).some((r) => readCovers(r, to))) read = [...(read ?? t.read), to];
+    if (read) {
+      t.read = read;
+      changed.unshift("read");
+    }
+  }
+  return changed;
 }
 
 /** Why a token may not read a view: its name, its unknown tables, or the tables it may not read. */
