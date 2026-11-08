@@ -196,8 +196,8 @@ describe("token registry: creating a token", () => {
     const { entry, token } = await create(s, { name: "pantry", description: "the kitchen tablet", write: ["personal.food.*", "personal.food.pantry", "personal.food.*"], ddl: true, maintain: true });
     expect(token).toMatch(/^[0-9a-f]{48}$/);
     expect(entry).toEqual({ name: "pantry", description: "the kitchen tablet", read: ["*"], write: ["personal.food.*", "personal.food.pantry"], ddl: true, maintain: true, created_at: NOW, updated_at: NOW });
-    // the file keeps its own keys (camelCase); the answer is snake_case
-    expect(s.tokensFile()).toEqual([{ name: "pantry", description: "the kitchen tablet", tokenHash: await sha256Hex(token), write: ["personal.food.*", "personal.food.pantry"], ddl: true, maintain: true, createdAt: NOW, updatedAt: NOW }]);
+    // the file keeps its own keys (camelCase); the answer is snake_case. `movesThrough`: no table renamed yet
+    expect(s.tokensFile()).toEqual([{ name: "pantry", description: "the kitchen tablet", tokenHash: await sha256Hex(token), write: ["personal.food.*", "personal.food.pantry"], ddl: true, maintain: true, createdAt: NOW, updatedAt: NOW, movesThrough: "" }]);
     expect(s.v.read("store:tokens.json")).not.toContain(token);
     expect(logged("datanotes token created")).toEqual([{ severity: "INFO", body: "datanotes token created", attributes: { token_name: "pantry" } }]);
   });

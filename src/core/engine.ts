@@ -27,6 +27,7 @@ import {
   undoMigration,
   type JournalEntry,
   type UndoConflict,
+  type TableMove,
   type UndoResult,
   applyChangeSet,
   diffOrdered,
@@ -606,6 +607,8 @@ export async function finish(
       moves: cs.moves.map((m) => ({ ...m })),
       deletes: [...cs.deletes],
       ...(currentActor() ? { actor: currentActor() } : {}),
+      // a write that failed partway and stayed half-written renamed nothing for sure: no move is told
+      ...(applied.ok && cs.tableMoves ? { tableMoves: cs.tableMoves.map((m) => ({ from: m.from, to: m.to })) } : {}),
     });
     return { applied, commits, rollback };
   }));
@@ -761,6 +764,13 @@ export interface AppliedOperation {
   databaseMove?: { from: string; to: string; by: "configure_database" | "hand"; entries?: string[] };
   /** The links repaired after notes moved by hand (`repair_links`): those moves (old path → new path). */
   handMoves?: { from: string; to: string }[];
+  /**
+   * Tables renamed or moved (qualified name before and after), in order: alter_table, and the undo
+   * of one (the old names back). Named tokens' exact grants follow them (src/server/tokens.ts).
+   */
+  tableMoves?: TableMove[];
+  /** For an undo: the operation it undid (its journal id). */
+  undoes?: string;
 }
 
 type ApplyListener = (e: AppliedOperation) => void;
@@ -1777,7 +1787,7 @@ export const alterColumn = instrumented("alter_column", alterColumnImpl, (i) => 
  * other writes do, whether it was undone or refused.
  */
 export async function undoOperation(app: App, settings: DatanotesSettings, migrationId: string): Promise<UndoOperationResult> {
-  const { ok, left: _left, ...rest } = await undoAny(app, settings, migrationId);
+  const { ok, left: _left, tableMoves: _moves, ...rest } = await undoAny(app, settings, migrationId);
   return { ok, op: "undo_migration", ...rest };
 }
 
@@ -1896,6 +1906,7 @@ function undoOne(
             moves: [],
             deletes: [],
             ...(currentActor() ? { actor: currentActor() } : {}),
+            ...(r.tableMoves ? { tableMoves: r.tableMoves, undoes: migrationId } : {}),
           });
           await logChanges(app, settings, {
             operation: "UNDO",

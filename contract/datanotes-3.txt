@@ -57,6 +57,13 @@ answer add_column.schema_references[].key: string
 answer add_column.schema_references[].table: string
 answer add_column.schema_references[].to: string
 answer add_column.schema_references[].view: string
+answer add_column.tokens_followed: object[]
+answer add_column.tokens_followed[].from: string
+answer add_column.tokens_followed[].permissions = "read"
+answer add_column.tokens_followed[].permissions = "write"
+answer add_column.tokens_followed[].permissions: string[]
+answer add_column.tokens_followed[].to: string
+answer add_column.tokens_followed[].token: string
 answer add_column.violations: object[]
 answer add_column.violations[].path: string
 answer add_column.violations[].violations: object[]
@@ -146,6 +153,13 @@ answer add_constraint.schema_references[].key: string
 answer add_constraint.schema_references[].table: string
 answer add_constraint.schema_references[].to: string
 answer add_constraint.schema_references[].view: string
+answer add_constraint.tokens_followed: object[]
+answer add_constraint.tokens_followed[].from: string
+answer add_constraint.tokens_followed[].permissions = "read"
+answer add_constraint.tokens_followed[].permissions = "write"
+answer add_constraint.tokens_followed[].permissions: string[]
+answer add_constraint.tokens_followed[].to: string
+answer add_constraint.tokens_followed[].token: string
 answer add_constraint.violations: object[]
 answer add_constraint.violations[].path: string
 answer add_constraint.violations[].violations: object[]
@@ -235,6 +249,13 @@ answer adopt_rows.schema_references[].key: string
 answer adopt_rows.schema_references[].table: string
 answer adopt_rows.schema_references[].to: string
 answer adopt_rows.schema_references[].view: string
+answer adopt_rows.tokens_followed: object[]
+answer adopt_rows.tokens_followed[].from: string
+answer adopt_rows.tokens_followed[].permissions = "read"
+answer adopt_rows.tokens_followed[].permissions = "write"
+answer adopt_rows.tokens_followed[].permissions: string[]
+answer adopt_rows.tokens_followed[].to: string
+answer adopt_rows.tokens_followed[].token: string
 answer adopt_rows.violations: object[]
 answer adopt_rows.violations[].path: string
 answer adopt_rows.violations[].violations: object[]
@@ -324,6 +345,13 @@ answer align_relations.schema_references[].key: string
 answer align_relations.schema_references[].table: string
 answer align_relations.schema_references[].to: string
 answer align_relations.schema_references[].view: string
+answer align_relations.tokens_followed: object[]
+answer align_relations.tokens_followed[].from: string
+answer align_relations.tokens_followed[].permissions = "read"
+answer align_relations.tokens_followed[].permissions = "write"
+answer align_relations.tokens_followed[].permissions: string[]
+answer align_relations.tokens_followed[].to: string
+answer align_relations.tokens_followed[].token: string
 answer align_relations.violations: object[]
 answer align_relations.violations[].path: string
 answer align_relations.violations[].violations: object[]
@@ -413,6 +441,13 @@ answer alter_column.schema_references[].key: string
 answer alter_column.schema_references[].table: string
 answer alter_column.schema_references[].to: string
 answer alter_column.schema_references[].view: string
+answer alter_column.tokens_followed: object[]
+answer alter_column.tokens_followed[].from: string
+answer alter_column.tokens_followed[].permissions = "read"
+answer alter_column.tokens_followed[].permissions = "write"
+answer alter_column.tokens_followed[].permissions: string[]
+answer alter_column.tokens_followed[].to: string
+answer alter_column.tokens_followed[].token: string
 answer alter_column.violations: object[]
 answer alter_column.violations[].path: string
 answer alter_column.violations[].violations: object[]
@@ -502,6 +537,13 @@ answer alter_table.schema_references[].key: string
 answer alter_table.schema_references[].table: string
 answer alter_table.schema_references[].to: string
 answer alter_table.schema_references[].view: string
+answer alter_table.tokens_followed: object[]
+answer alter_table.tokens_followed[].from: string
+answer alter_table.tokens_followed[].permissions = "read"
+answer alter_table.tokens_followed[].permissions = "write"
+answer alter_table.tokens_followed[].permissions: string[]
+answer alter_table.tokens_followed[].to: string
+answer alter_table.tokens_followed[].token: string
 answer alter_table.violations: object[]
 answer alter_table.violations[].path: string
 answer alter_table.violations[].violations: object[]
@@ -604,6 +646,13 @@ answer batch.steps[].result.schema_references[].key: string
 answer batch.steps[].result.schema_references[].table: string
 answer batch.steps[].result.schema_references[].to: string
 answer batch.steps[].result.schema_references[].view: string
+answer batch.steps[].result.tokens_followed: object[]
+answer batch.steps[].result.tokens_followed[].from: string
+answer batch.steps[].result.tokens_followed[].permissions = "read"
+answer batch.steps[].result.tokens_followed[].permissions = "write"
+answer batch.steps[].result.tokens_followed[].permissions: string[]
+answer batch.steps[].result.tokens_followed[].to: string
+answer batch.steps[].result.tokens_followed[].token: string
 answer batch.steps[].result.violations: object[]
 answer batch.steps[].result.violations[].path: string
 answer batch.steps[].result.violations[].violations: object[]
@@ -736,6 +785,13 @@ answer clone_table.schema_references[].key: string
 answer clone_table.schema_references[].table: string
 answer clone_table.schema_references[].to: string
 answer clone_table.schema_references[].view: string
+answer clone_table.tokens_followed: object[]
+answer clone_table.tokens_followed[].from: string
+answer clone_table.tokens_followed[].permissions = "read"
+answer clone_table.tokens_followed[].permissions = "write"
+answer clone_table.tokens_followed[].permissions: string[]
+answer clone_table.tokens_followed[].to: string
+answer clone_table.tokens_followed[].token: string
 answer clone_table.violations: object[]
 answer clone_table.violations[].path: string
 answer clone_table.violations[].violations: object[]
@@ -825,6 +881,13 @@ answer comment_on.schema_references[].key: string
 answer comment_on.schema_references[].table: string
 answer comment_on.schema_references[].to: string
 answer comment_on.schema_references[].view: string
+answer comment_on.tokens_followed: object[]
+answer comment_on.tokens_followed[].from: string
+answer comment_on.tokens_followed[].permissions = "read"
+answer comment_on.tokens_followed[].permissions = "write"
+answer comment_on.tokens_followed[].permissions: string[]
+answer comment_on.tokens_followed[].to: string
+answer comment_on.tokens_followed[].token: string
 answer comment_on.violations: object[]
 answer comment_on.violations[].path: string
 answer comment_on.violations[].violations: object[]
@@ -956,6 +1019,13 @@ answer create_table.schema_references[].key: string
 answer create_table.schema_references[].table: string
 answer create_table.schema_references[].to: string
 answer create_table.schema_references[].view: string
+answer create_table.tokens_followed: object[]
+answer create_table.tokens_followed[].from: string
+answer create_table.tokens_followed[].permissions = "read"
+answer create_table.tokens_followed[].permissions = "write"
+answer create_table.tokens_followed[].permissions: string[]
+answer create_table.tokens_followed[].to: string
+answer create_table.tokens_followed[].token: string
 answer create_table.violations: object[]
 answer create_table.violations[].path: string
 answer create_table.violations[].violations: object[]
@@ -1045,6 +1115,13 @@ answer create_view.schema_references[].key: string
 answer create_view.schema_references[].table: string
 answer create_view.schema_references[].to: string
 answer create_view.schema_references[].view: string
+answer create_view.tokens_followed: object[]
+answer create_view.tokens_followed[].from: string
+answer create_view.tokens_followed[].permissions = "read"
+answer create_view.tokens_followed[].permissions = "write"
+answer create_view.tokens_followed[].permissions: string[]
+answer create_view.tokens_followed[].to: string
+answer create_view.tokens_followed[].token: string
 answer create_view.violations: object[]
 answer create_view.violations[].path: string
 answer create_view.violations[].violations: object[]
@@ -1159,6 +1236,13 @@ answer define_base.schema_references[].key: string
 answer define_base.schema_references[].table: string
 answer define_base.schema_references[].to: string
 answer define_base.schema_references[].view: string
+answer define_base.tokens_followed: object[]
+answer define_base.tokens_followed[].from: string
+answer define_base.tokens_followed[].permissions = "read"
+answer define_base.tokens_followed[].permissions = "write"
+answer define_base.tokens_followed[].permissions: string[]
+answer define_base.tokens_followed[].to: string
+answer define_base.tokens_followed[].token: string
 answer define_base.violations: object[]
 answer define_base.violations[].path: string
 answer define_base.violations[].violations: object[]
@@ -1248,6 +1332,13 @@ answer delete_rows.schema_references[].key: string
 answer delete_rows.schema_references[].table: string
 answer delete_rows.schema_references[].to: string
 answer delete_rows.schema_references[].view: string
+answer delete_rows.tokens_followed: object[]
+answer delete_rows.tokens_followed[].from: string
+answer delete_rows.tokens_followed[].permissions = "read"
+answer delete_rows.tokens_followed[].permissions = "write"
+answer delete_rows.tokens_followed[].permissions: string[]
+answer delete_rows.tokens_followed[].to: string
+answer delete_rows.tokens_followed[].token: string
 answer delete_rows.violations: object[]
 answer delete_rows.violations[].path: string
 answer delete_rows.violations[].violations: object[]
@@ -1464,6 +1555,13 @@ answer drop_column.schema_references[].key: string
 answer drop_column.schema_references[].table: string
 answer drop_column.schema_references[].to: string
 answer drop_column.schema_references[].view: string
+answer drop_column.tokens_followed: object[]
+answer drop_column.tokens_followed[].from: string
+answer drop_column.tokens_followed[].permissions = "read"
+answer drop_column.tokens_followed[].permissions = "write"
+answer drop_column.tokens_followed[].permissions: string[]
+answer drop_column.tokens_followed[].to: string
+answer drop_column.tokens_followed[].token: string
 answer drop_column.violations: object[]
 answer drop_column.violations[].path: string
 answer drop_column.violations[].violations: object[]
@@ -1553,6 +1651,13 @@ answer drop_constraint.schema_references[].key: string
 answer drop_constraint.schema_references[].table: string
 answer drop_constraint.schema_references[].to: string
 answer drop_constraint.schema_references[].view: string
+answer drop_constraint.tokens_followed: object[]
+answer drop_constraint.tokens_followed[].from: string
+answer drop_constraint.tokens_followed[].permissions = "read"
+answer drop_constraint.tokens_followed[].permissions = "write"
+answer drop_constraint.tokens_followed[].permissions: string[]
+answer drop_constraint.tokens_followed[].to: string
+answer drop_constraint.tokens_followed[].token: string
 answer drop_constraint.violations: object[]
 answer drop_constraint.violations[].path: string
 answer drop_constraint.violations[].violations: object[]
@@ -1642,6 +1747,13 @@ answer drop_table.schema_references[].key: string
 answer drop_table.schema_references[].table: string
 answer drop_table.schema_references[].to: string
 answer drop_table.schema_references[].view: string
+answer drop_table.tokens_followed: object[]
+answer drop_table.tokens_followed[].from: string
+answer drop_table.tokens_followed[].permissions = "read"
+answer drop_table.tokens_followed[].permissions = "write"
+answer drop_table.tokens_followed[].permissions: string[]
+answer drop_table.tokens_followed[].to: string
+answer drop_table.tokens_followed[].token: string
 answer drop_table.violations: object[]
 answer drop_table.violations[].path: string
 answer drop_table.violations[].violations: object[]
@@ -1731,6 +1843,13 @@ answer drop_view.schema_references[].key: string
 answer drop_view.schema_references[].table: string
 answer drop_view.schema_references[].to: string
 answer drop_view.schema_references[].view: string
+answer drop_view.tokens_followed: object[]
+answer drop_view.tokens_followed[].from: string
+answer drop_view.tokens_followed[].permissions = "read"
+answer drop_view.tokens_followed[].permissions = "write"
+answer drop_view.tokens_followed[].permissions: string[]
+answer drop_view.tokens_followed[].to: string
+answer drop_view.tokens_followed[].token: string
 answer drop_view.violations: object[]
 answer drop_view.violations[].path: string
 answer drop_view.violations[].violations: object[]
@@ -1889,6 +2008,13 @@ answer insert_row.schema_references[].key: string
 answer insert_row.schema_references[].table: string
 answer insert_row.schema_references[].to: string
 answer insert_row.schema_references[].view: string
+answer insert_row.tokens_followed: object[]
+answer insert_row.tokens_followed[].from: string
+answer insert_row.tokens_followed[].permissions = "read"
+answer insert_row.tokens_followed[].permissions = "write"
+answer insert_row.tokens_followed[].permissions: string[]
+answer insert_row.tokens_followed[].to: string
+answer insert_row.tokens_followed[].token: string
 answer insert_row.violations: object[]
 answer insert_row.violations[].path: string
 answer insert_row.violations[].violations: object[]
@@ -2128,6 +2254,13 @@ answer merge_rows.schema_references[].key: string
 answer merge_rows.schema_references[].table: string
 answer merge_rows.schema_references[].to: string
 answer merge_rows.schema_references[].view: string
+answer merge_rows.tokens_followed: object[]
+answer merge_rows.tokens_followed[].from: string
+answer merge_rows.tokens_followed[].permissions = "read"
+answer merge_rows.tokens_followed[].permissions = "write"
+answer merge_rows.tokens_followed[].permissions: string[]
+answer merge_rows.tokens_followed[].to: string
+answer merge_rows.tokens_followed[].token: string
 answer merge_rows.violations: object[]
 answer merge_rows.violations[].path: string
 answer merge_rows.violations[].violations: object[]
@@ -2217,6 +2350,13 @@ answer move_rows.schema_references[].key: string
 answer move_rows.schema_references[].table: string
 answer move_rows.schema_references[].to: string
 answer move_rows.schema_references[].view: string
+answer move_rows.tokens_followed: object[]
+answer move_rows.tokens_followed[].from: string
+answer move_rows.tokens_followed[].permissions = "read"
+answer move_rows.tokens_followed[].permissions = "write"
+answer move_rows.tokens_followed[].permissions: string[]
+answer move_rows.tokens_followed[].to: string
+answer move_rows.tokens_followed[].token: string
 answer move_rows.violations: object[]
 answer move_rows.violations[].path: string
 answer move_rows.violations[].violations: object[]
@@ -2314,6 +2454,13 @@ answer pack_rows.schema_references[].key: string
 answer pack_rows.schema_references[].table: string
 answer pack_rows.schema_references[].to: string
 answer pack_rows.schema_references[].view: string
+answer pack_rows.tokens_followed: object[]
+answer pack_rows.tokens_followed[].from: string
+answer pack_rows.tokens_followed[].permissions = "read"
+answer pack_rows.tokens_followed[].permissions = "write"
+answer pack_rows.tokens_followed[].permissions: string[]
+answer pack_rows.tokens_followed[].to: string
+answer pack_rows.tokens_followed[].token: string
 answer pack_rows.violations: object[]
 answer pack_rows.violations[].path: string
 answer pack_rows.violations[].violations: object[]
@@ -2413,6 +2560,13 @@ answer recompute_columns.schema_references[].key: string
 answer recompute_columns.schema_references[].table: string
 answer recompute_columns.schema_references[].to: string
 answer recompute_columns.schema_references[].view: string
+answer recompute_columns.tokens_followed: object[]
+answer recompute_columns.tokens_followed[].from: string
+answer recompute_columns.tokens_followed[].permissions = "read"
+answer recompute_columns.tokens_followed[].permissions = "write"
+answer recompute_columns.tokens_followed[].permissions: string[]
+answer recompute_columns.tokens_followed[].to: string
+answer recompute_columns.tokens_followed[].token: string
 answer recompute_columns.violations: object[]
 answer recompute_columns.violations[].path: string
 answer recompute_columns.violations[].violations: object[]
@@ -2502,6 +2656,13 @@ answer rename_column.schema_references[].key: string
 answer rename_column.schema_references[].table: string
 answer rename_column.schema_references[].to: string
 answer rename_column.schema_references[].view: string
+answer rename_column.tokens_followed: object[]
+answer rename_column.tokens_followed[].from: string
+answer rename_column.tokens_followed[].permissions = "read"
+answer rename_column.tokens_followed[].permissions = "write"
+answer rename_column.tokens_followed[].permissions: string[]
+answer rename_column.tokens_followed[].to: string
+answer rename_column.tokens_followed[].token: string
 answer rename_column.violations: object[]
 answer rename_column.violations[].path: string
 answer rename_column.violations[].violations: object[]
@@ -2591,6 +2752,13 @@ answer rename_value.schema_references[].key: string
 answer rename_value.schema_references[].table: string
 answer rename_value.schema_references[].to: string
 answer rename_value.schema_references[].view: string
+answer rename_value.tokens_followed: object[]
+answer rename_value.tokens_followed[].from: string
+answer rename_value.tokens_followed[].permissions = "read"
+answer rename_value.tokens_followed[].permissions = "write"
+answer rename_value.tokens_followed[].permissions: string[]
+answer rename_value.tokens_followed[].to: string
+answer rename_value.tokens_followed[].token: string
 answer rename_value.violations: object[]
 answer rename_value.violations[].path: string
 answer rename_value.violations[].violations: object[]
@@ -2774,6 +2942,13 @@ answer restore_table.schema_references[].key: string
 answer restore_table.schema_references[].table: string
 answer restore_table.schema_references[].to: string
 answer restore_table.schema_references[].view: string
+answer restore_table.tokens_followed: object[]
+answer restore_table.tokens_followed[].from: string
+answer restore_table.tokens_followed[].permissions = "read"
+answer restore_table.tokens_followed[].permissions = "write"
+answer restore_table.tokens_followed[].permissions: string[]
+answer restore_table.tokens_followed[].to: string
+answer restore_table.tokens_followed[].token: string
 answer restore_table.violations: object[]
 answer restore_table.violations[].path: string
 answer restore_table.violations[].violations: object[]
@@ -2901,6 +3076,13 @@ answer set_table_bases.schema_references[].key: string
 answer set_table_bases.schema_references[].table: string
 answer set_table_bases.schema_references[].to: string
 answer set_table_bases.schema_references[].view: string
+answer set_table_bases.tokens_followed: object[]
+answer set_table_bases.tokens_followed[].from: string
+answer set_table_bases.tokens_followed[].permissions = "read"
+answer set_table_bases.tokens_followed[].permissions = "write"
+answer set_table_bases.tokens_followed[].permissions: string[]
+answer set_table_bases.tokens_followed[].to: string
+answer set_table_bases.tokens_followed[].token: string
 answer set_table_bases.violations: object[]
 answer set_table_bases.violations[].path: string
 answer set_table_bases.violations[].violations: object[]
@@ -2961,6 +3143,13 @@ answer undo_migration.failed[].path: string
 answer undo_migration.migration_id: string
 answer undo_migration.ok: boolean
 answer undo_migration.op: string
+answer undo_migration.tokens_followed: object[]
+answer undo_migration.tokens_followed[].from: string
+answer undo_migration.tokens_followed[].permissions = "read"
+answer undo_migration.tokens_followed[].permissions = "write"
+answer undo_migration.tokens_followed[].permissions: string[]
+answer undo_migration.tokens_followed[].to: string
+answer undo_migration.tokens_followed[].token: string
 answer undo_migration.undoes: string
 answer unpack_rows.ambiguous_mentions: object[]
 answer unpack_rows.ambiguous_mentions[].candidates: string[]
@@ -3026,6 +3215,13 @@ answer unpack_rows.schema_references[].key: string
 answer unpack_rows.schema_references[].table: string
 answer unpack_rows.schema_references[].to: string
 answer unpack_rows.schema_references[].view: string
+answer unpack_rows.tokens_followed: object[]
+answer unpack_rows.tokens_followed[].from: string
+answer unpack_rows.tokens_followed[].permissions = "read"
+answer unpack_rows.tokens_followed[].permissions = "write"
+answer unpack_rows.tokens_followed[].permissions: string[]
+answer unpack_rows.tokens_followed[].to: string
+answer unpack_rows.tokens_followed[].token: string
 answer unpack_rows.violations: object[]
 answer unpack_rows.violations[].path: string
 answer unpack_rows.violations[].violations: object[]
@@ -3115,6 +3311,13 @@ answer update_row.schema_references[].key: string
 answer update_row.schema_references[].table: string
 answer update_row.schema_references[].to: string
 answer update_row.schema_references[].view: string
+answer update_row.tokens_followed: object[]
+answer update_row.tokens_followed[].from: string
+answer update_row.tokens_followed[].permissions = "read"
+answer update_row.tokens_followed[].permissions = "write"
+answer update_row.tokens_followed[].permissions: string[]
+answer update_row.tokens_followed[].to: string
+answer update_row.tokens_followed[].token: string
 answer update_row.violations: object[]
 answer update_row.violations[].path: string
 answer update_row.violations[].violations: object[]
@@ -3204,6 +3407,13 @@ answer update_rows.schema_references[].key: string
 answer update_rows.schema_references[].table: string
 answer update_rows.schema_references[].to: string
 answer update_rows.schema_references[].view: string
+answer update_rows.tokens_followed: object[]
+answer update_rows.tokens_followed[].from: string
+answer update_rows.tokens_followed[].permissions = "read"
+answer update_rows.tokens_followed[].permissions = "write"
+answer update_rows.tokens_followed[].permissions: string[]
+answer update_rows.tokens_followed[].to: string
+answer update_rows.tokens_followed[].token: string
 answer update_rows.violations: object[]
 answer update_rows.violations[].path: string
 answer update_rows.violations[].violations: object[]

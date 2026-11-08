@@ -107,6 +107,47 @@ To allow the write, add that table to the token's `write` with `tokens/update/`.
 
 The owner token and a token with `"write": ["*"]` write every table, so these checks never refuse them. Schema changes with `ddl`, and undo and restore with `maintain`, aren't row writes and keep their own rules.
 
+## A renamed table keeps its grants
+
+A token's grants follow a table when `alter_table` renames it or moves it to another schema or catalog. Each exact name in `read` or `write` changes to the new name, in the same place. Say the token `planner` writes `work.planning.task`, and you rename the table:
+
+```bash
+curl -X POST http://127.0.0.1:27150/datanotes/operations/alter_table/ \
+  -H "Authorization: Bearer your_owner_token" \
+  -H "Content-Type: application/json" \
+  -d '{"table": "work.planning.task", "name": "activity"}'
+```
+
+The token now writes `work.planning.activity` and keeps working without a change. The owner's answer lists the tokens that followed, in `tokens_followed`:
+
+```json
+{
+  "tokens_followed": [
+    {
+      "token": "planner",
+      "from": "work.planning.task",
+      "to": "work.planning.activity",
+      "permissions": ["read", "write"]
+    }
+  ]
+}
+```
+
+The engine also logs one line per token at `INFO`, with no secret. The token's `last_seen` doesn't change.
+
+These rules apply:
+
+- **Patterns stay as they are.** `work.planning.*`, `work.*` and `*` still match by name. A move to another schema can take the table out of a pattern.
+- **No duplicates.** When the list already holds the new name, the old one goes.
+- **A write keeps its read.** Sometimes a `read` pattern covered the old name and misses the new one. The token then gets the new name in `read` too.
+- **Undo follows back.** `undo_migration` of the rename puts the token's `read` and `write` back exactly as they were. Undoing that undo renames it once more.
+- **An edited token follows by name.** Say you changed the token after the rename. Its undo then only puts the old name back.
+- **Only applied renames count.** A dry run, a refused rename or a rolled-back batch changes no token.
+- **A restart catches up.** The engine may stop after a rename but before it saves the tokens. At the next start, the tokens follow the renames in the journal.
+- **Only operations count.** A hand edit of `metastore.yaml` or a `git pull` that renames a table changes no token.
+
+`restore_table` and `restore_database` keep the table's current name, so no token changes. A view can't be renamed, so its grants never move. Only the owner's answer lists `tokens_followed`, because the registry is the owner's.
+
 ## Limit what a token can read
 
 By default, a named token reads every table. Give it `read` patterns, and it reads only the tables they match. Use them for an agent that works on one part of your notes, so it never sees the rest.

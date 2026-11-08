@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { Button, ConfirmDialog, ErrorBox, errorBodyOf, Spinner, WriteResult } from "../../components";
 import type { ApiAnswer, ErrorBody } from "../../lib/api";
 import { undoable } from "../../lib/format";
-import { isWriteAnswer } from "../../lib/write-result";
+import { doneText, isWriteAnswer } from "../../lib/write-result";
 import { useApp } from "../../state";
 
 /** describe_table's answer, as far as the screens read it. */
@@ -91,7 +91,8 @@ export function DdlRunner(props: DdlRunnerProps): JSX.Element | null {
       setAnswer(a);
       const id = (a.json as { migration_id?: unknown }).migration_id;
       if (a.ok && !dryRun) {
-        toast({ text: "Done", kind: "ok", ...(typeof id === "string" && undoable(props.op) ? { undo: id } : {}) });
+        // a renamed or moved table: the named tokens whose exact grants followed it (owner only)
+        toast({ text: doneText(a.json), kind: "ok", ...(typeof id === "string" && undoable(props.op) ? { undo: id } : {}) });
         await catalog.refresh().catch(() => undefined);
         props.onApplied?.(a);
       }

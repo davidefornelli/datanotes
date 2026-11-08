@@ -215,6 +215,8 @@ async function relocateTable(
     if (from !== ref.full) ({ text: after, references } = movedReferences(after, model, from, ref.full));
     cs = emptyChangeSet("alter_table", from === ref.full ? `alter table ${from}` : `move table ${from} to ${ref.full}`, catalogTablePath(settings, ref.full));
     if (after !== text) cs.texts.push({ path: metastorePath(settings), before: text, after });
+    // the new name is journaled: named tokens' exact grants follow it, and back on undo
+    if (from !== ref.full) cs.tableMoves = [{ from, to: ref.full }];
     // The transaction log follows the table to its new name.
     if (t.catalog.ref.full !== ref.full) {
       const oldDir = transactionLogDir(settings, t.catalog.ref.full);

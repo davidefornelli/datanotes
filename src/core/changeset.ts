@@ -120,6 +120,17 @@ export interface ChangeSet {
   skipInverse?: boolean;
   /** Rows going into packs or coming out (after the texts). */
   packs?: PackChange[];
+  /**
+   * Tables whose qualified name the change set changes (alter_table: a rename or a move), journaled
+   * as `table_moves`. Named tokens' exact grants follow them (src/server/tokens.ts).
+   */
+  tableMoves?: TableMove[];
+}
+
+/** A table's qualified name before and after an operation (catalog.schema.table). */
+export interface TableMove {
+  from: string;
+  to: string;
 }
 
 export function emptyChangeSet(op: string, summary: string, schema?: string): ChangeSet {
@@ -246,6 +257,8 @@ export interface JournalEntry {
   packs?: PackChange[];
   /** For op "set_engine_settings": the settings changed, with their values before and after; secrets left out (redacted). */
   settings?: JournalSettingChange[];
+  /** Tables the operation renamed or moved (alter_table), in order; its undo journals them reversed. */
+  table_moves?: TableMove[];
 }
 
 /** One setting changed by `set_engine_settings`: its value before and after, none for a secret (redacted). */
@@ -582,6 +595,7 @@ async function applyChangeSetImpl(
       deleted,
       failed,
       ...(packs.length > 0 ? { packs } : {}),
+      ...(cs.tableMoves ? { table_moves: cs.tableMoves.map((m) => ({ from: m.from, to: m.to })) } : {}),
     },
     now,
   );
@@ -616,6 +630,8 @@ export interface UndoResult {
   touched?: string[];
   /** When the undo failed: the files it did not put back (the one that failed first). */
   left?: string[];
+  /** The tables the undo renamed or moved back (the undone entry's `table_moves`, reversed). Not part of the answer. */
+  tableMoves?: TableMove[];
 }
 
 export async function trash(app: App, file: TFile): Promise<void> {
@@ -937,6 +953,8 @@ export async function undoMigration(
     failed.push({ path: "undo", error: messageOf(e) });
   }
 
+  // the tables the operation renamed get their old names back, last move first
+  const tableMoves: TableMove[] = [...(entry.table_moves ?? [])].reverse().map((m) => ({ from: m.to, to: m.from }));
   const journal = await writeJournal(
     app,
     settings,
@@ -955,6 +973,7 @@ export async function undoMigration(
       failed,
       undoes: migrationId,
       ...(undoPacks.length > 0 ? { packs: undoPacks } : {}),
+      ...(tableMoves.length > 0 ? { table_moves: tableMoves } : {}),
     },
     now,
   );
@@ -968,6 +987,7 @@ export async function undoMigration(
     conflicts: [],
     failed,
     ...(failed.length > 0 ? { left: [...new Set(steps.slice(done).map((s) => s.path))] } : {}),
+    ...(tableMoves.length > 0 ? { tableMoves } : {}),
     touched: [
       ...entry.rows.map((r) => r.path),
       ...entry.creates,

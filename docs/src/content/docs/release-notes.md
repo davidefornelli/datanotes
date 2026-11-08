@@ -5,6 +5,32 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.8.0
+
+Datanotes 3.8.0 keeps a named token's grants on a table when you rename or move it, removes a schema left empty and lets `set_table_bases` take over a table's own `ref: self` column. No operation, argument or setting goes away.
+
+### Tokens follow a renamed table
+
+[A renamed table keeps its grants](/guides/security/tokens/#a-renamed-table-keeps-its-grants) explains the rules.
+
+- **Exact names follow**: `alter_table` renames a table or moves it to another schema or catalog. Each exact name in a token's `read` or `write` becomes the new name.
+- **Patterns stay**: `catalog.schema.*`, `catalog.*` and `*` still match by name.
+- **Undo follows back**: `undo_migration` of the rename puts the tokens' lists back exactly as they were.
+- **A restart catches up**: a stop between a rename and the save of `tokens.json` loses nothing. The next start follows the journaled renames.
+- **`tokens_followed`**: a new answer field of the writes, in the owner's answer. It lists the tokens that followed a rename or its undo.
+
+### Schemas and bases
+
+- **Empty schemas go**: a schema left with no tables, no views and no description is removed from `metastore.yaml` by the write that empties it (dropping or moving its last table or view, or removing its description with `comment_on`); undo brings it back.
+- **`ref: self` meets a base**: `set_table_bases` accepts a base column that a table already has as `ref: self`. The table's own `parent` gives way to the base's, its rows untouched.
+
+### Before you update
+
+- **Programs**: `describe_database` no longer lists a schema left with no tables, no views and no description, and `comment_on` on such a schema answers that the schema is unknown. Create a table in it first, or give it a description before you empty it.
+- **Tokens of tables renamed before**: they keep the old name. Update them with `tokens/update/`.
+- **Renames by hand**: a hand edit of `metastore.yaml` or a `git pull` still changes no token.
+- **Going back to 3.7**: after you update again, the tokens follow at start the renames made under 3.7 too. A grant can move away from a new table that took the old name. Check them with `tokens/permissions/`.
+
 ## 3.7.0
 
 Datanotes 3.7.0 brings a database browser, served by the engine at `/datanotes/ui/`. It only adds to 3.6: no operation, argument or setting goes away.

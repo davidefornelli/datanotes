@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isWriteAnswer, summarize, violationsFor, type WriteAnswer } from "../src/ui/lib/write-result";
+import { doneText, isWriteAnswer, summarize, violationsFor, type WriteAnswer } from "../src/ui/lib/write-result";
 
 const BASE = {
   notes_changed: 0,
@@ -135,5 +135,22 @@ describe("write answers", () => {
     ).toBe("2 notes changed, 2 files created, 1 file moved, 3 files deleted, 1 reference updated");
     expect(summarize({ ...DONE, notes_changed: 1, files_created: 0, references_updated: 2 })).toBe("1 note changed, 2 references updated");
     expect(summarize({ ...DONE, files_created: 0 })).toBe("Nothing to change");
+  });
+});
+
+describe("doneText: the toast of an applied write", () => {
+  it("says Done, and names once each token that followed a renamed table", () => {
+    expect(doneText({ ok: true })).toBe("Done");
+    expect(doneText(null)).toBe("Done");
+    expect(doneText({ tokens_followed: [] })).toBe("Done");
+    // alter_table moved main.public.task: planner followed it in read and write, reporter in read
+    const followed = {
+      tokens_followed: [
+        { token: "planner", from: "main.public.task", to: "main.work.task", permissions: ["read", "write"] },
+        { token: "reporter", from: "main.public.task", to: "main.work.task", permissions: ["read"] },
+        { token: "planner", from: "main.public.log", to: "main.work.log", permissions: ["read"] },
+      ],
+    };
+    expect(doneText(followed)).toBe("Done. Tokens that followed the table: planner, reporter");
   });
 });
