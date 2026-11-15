@@ -48,6 +48,7 @@ const FULL = [
   "src/core/changeset.ts",
   "src/core/check-links.ts",
   "src/core/chunk.ts",
+  "src/core/column-aliases.ts",
   "src/core/computed-columns.ts",
   "src/core/database-history.ts",
   "src/core/datetime.ts",
@@ -145,6 +146,8 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     // the engine's data home is a temporary folder: tests never write to the user's
     setupFiles: ["tests/setup.ts"],
+    // one temporary folder per run (TMPDIR of the workers and their children), removed at the end
+    globalSetup: ["tests/global-setup.ts"],
     sequence: { sequencer: ExamplesFirst },
     coverage: {
       provider: "v8",

@@ -100,6 +100,7 @@ export const PAGES: GuidePage[] = [
       ["columns", "Rename an enum value"],
       ["columns", "Describe what each enum value means"],
       ["columns", "Change a column’s attributes"],
+      ["columns", "Use a column’s aliases in reads and writes"],
       ["columns", "Rename a column"],
       ["columns", "Drop a column and undo the drop"],
       ["columns", "Default to today’s date or the current time"],

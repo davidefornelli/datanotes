@@ -16,6 +16,7 @@ import { basenameOf } from "./path-templates";
 import { hasThisTokens } from "./this-tokens";
 import { guide, unknownColumn, unknownOperator, type Guidance } from "./hints";
 import { assertTableReadable, currentReadScope, pathReadable } from "./read-scope";
+import { tableAliases, type ColumnAliases } from "./column-aliases";
 
 const LOGICAL_HINT = guide(`"and" and "or" take a list of where objects, "not" one: {"or": [{"status": "watched"}, {"rating": {"gte": 4}}]}.`, "logical");
 
@@ -279,6 +280,9 @@ export async function resolveWithin(app: App, settings: DatanotesSettings, t: Lo
   let out: Where | undefined;
   /** Dotted keys on a link column the where also tests: added to its `and` once every key is read (whatever their order). */
   const extra: Where[] = [];
+  let aliases: ColumnAliases | undefined;
+  /** A column's alias stands for the column (column-aliases.ts). */
+  const resolve = (name: string) => (aliases ??= tableAliases(t, readableKeys(t, settings))).resolve(name);
   for (const [col, cond] of Object.entries(where)) {
     if (LOGICAL_KEYS.has(col)) {
       const parts = await Promise.all(logicalParts(col, cond).map((w) => resolveWithin(app, settings, t, w)));
@@ -290,7 +294,7 @@ export async function resolveWithin(app: App, settings: DatanotesSettings, t: Lo
     if (dot > 0) {
       // `{ "projects.area": { within: House } }`: follow the link column to the rows it names and test
       // their column there; the row matches when any linked row does (nests: "a.b.c").
-      const head = col.slice(0, dot);
+      const head = resolve(col.slice(0, dot));
       const tail = col.slice(dot + 1);
       const via = t.def.columns.find((c) => c.name === head);
       const viaLink = via && (via.type === "link" || (via.type === "list" && via.items === "link"));
@@ -309,7 +313,7 @@ export async function resolveWithin(app: App, settings: DatanotesSettings, t: Lo
       continue;
     }
     if (!isOperatorObject(cond) || !("within" in cond)) continue;
-    const spec = t.def.columns.find((c) => c.name === col);
+    const spec = t.def.columns.find((c) => c.name === resolve(col));
     const isLink = spec && (spec.type === "link" || (spec.type === "list" && spec.items === "link"));
     if (!spec || !isLink || !spec.ref) throw new OperationInputError(`"within" needs a link column with ref: "${col}" is not one`, notALink(col, t));
     const target = spec.ref === t.catalog.ref.full ? t : await loadTable(app, settings, spec.ref);
@@ -356,8 +360,16 @@ export function compileWhere(
   get: RowGetter = rowGetter(null, t, settings),
   /** CHECKs only: dotted keys follow links to the rows loaded there (see CheckLinks). */
   links?: WhereLinks,
+  /**
+   * A stored rule (a CHECK, a ref_where): it names real columns only, so that renaming or dropping
+   * a column finds every rule that reads it. A query may name a column by an alias.
+   */
+  rule = false,
 ): (row: LoadedRow) => boolean {
-  return compileWhereOn(where, t, readableKeys(t, settings), new Map(t.def.columns.map((c) => [c.name, c])), get, links);
+  const known = readableKeys(t, settings);
+  const aliases = tableAliases(t, known);
+  const resolving: ColumnAliases = rule ? { resolve: (name) => name, words: aliases.words } : aliases;
+  return compileWhereOn(where, t, known, new Map(t.def.columns.map((c) => [c.name, c])), get, links, resolving);
 }
 
 /** {@link compileWhere} with the table's keys and column specs computed once for every logical branch. */
@@ -368,18 +380,22 @@ function compileWhereOn(
   specs: ReadonlyMap<string, ColumnSpec>,
   get: RowGetter,
   links: WhereLinks | undefined,
+  aliases: ColumnAliases,
 ): (row: LoadedRow) => boolean {
   if (where == null) return () => true;
   if (typeof where !== "object" || Array.isArray(where)) throw new OperationInputError(`"where" must be an object`, guide(`Write "where" as an object of conditions: {"status": "watched", "rating": {"gte": 4}}.`, "filters"));
-  const tests: ((row: LoadedRow) => boolean)[] = Object.entries(where).map(([col, cond]) => {
-    if (LOGICAL_KEYS.has(col)) {
-      const parts = logicalParts(col, cond).map((w) => compileWhereOn(w, t, known, specs, get, links));
+  const tests: ((row: LoadedRow) => boolean)[] = Object.entries(where).map(([key, cond]) => {
+    if (LOGICAL_KEYS.has(key)) {
+      const col = key;
+      const parts = logicalParts(col, cond).map((w) => compileWhereOn(w, t, known, specs, get, links, aliases));
       if (col === "or") return (row) => parts.some((p) => p(row));
       if (col === "and") return (row) => parts.every((p) => p(row));
       return (row) => !parts[0]!(row);
     }
-    if (links && !known.has(col) && col.indexOf(".") > 0) return links.test(t, col, cond);
-    if (!known.has(col)) throw new OperationInputError(`unknown column in where: "${col}"`, unknownColumn(col, [...known], t.catalog.ref.full, "select"));
+    if (links && !known.has(key) && key.indexOf(".") > 0) return links.test(t, key, cond);
+    // a column's alias stands for the column (column-aliases.ts)
+    const col = aliases.resolve(key);
+    if (!known.has(col)) throw new OperationInputError(`unknown column in where: "${col}"`, unknownColumn(col, [...known], t.catalog.ref.full, "select", "", aliases.words));
     refuseInternalOp(col, cond);
     if (!isOperatorObject(cond) && cond !== null && typeof cond === "object" && !Array.isArray(cond) && specs.has(col) && specs.get(col)!.type !== "json") {
       // On a typed column an object is operators (json columns may hold literal objects): a typo must not silently match nothing.
@@ -428,7 +444,7 @@ export function compileCheck(where: Where, t: LoadedTable, settings: DatanotesSe
     // a dotted key is empty when its link column is
     col: col.indexOf(".") > 0 ? col.slice(0, col.indexOf(".")) : col,
     always: col === "path" || LOGICAL_KEYS.has(col),
-    test: compileWhere({ [col]: cond } as Where, t, settings, rowGetter(null, t, settings), links),
+    test: compileWhere({ [col]: cond } as Where, t, settings, rowGetter(null, t, settings), links, true),
   }));
   return (row) => parts.every((p) => (!p.always && isEmptyValue(fmGet(row.ordered, p.col))) || p.test(row));
 }

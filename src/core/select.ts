@@ -32,6 +32,7 @@ import { SYSTEM_ID_COLUMN, type ColumnSpec } from "./types-table";
 import { readDatabaseConfig } from "./database";
 import { isArchivedPath, tableNotFound, TableNotFoundError } from "./table-registry";
 import { guide, unknownColumn, unknownName } from "./hints";
+import { resolveNameList, tableAliases, type ColumnAliases } from "./column-aliases";
 
 const JOIN_HINT = guide(`Write join as {"table": "<other table>", "on": {"<left column or expression>": "<right column or expression>"}}, e.g. {"table": "watch", "on": {"title": "film"}}.`, "join");
 const UNION_HINT = guide(`Write a union as {"union": [{"table": "a", "where": {...}}, {"table": "b"}]}, with at least two branches; order_by, limit and columns apply to the stacked rows.`, "union");
@@ -225,6 +226,7 @@ interface LoadedJoin {
   kept: LoadedRow[];
   columns?: string[];
   known: Set<string>;
+  aliases: ColumnAliases;
   specs: Map<string, ColumnSpec>;
 }
 
@@ -249,13 +251,17 @@ async function loadJoin(
   // the caller named it: refused when the token may not read it (before a row is read)
   assertTableReadable(rt.catalog.ref.full);
   const rKnown = readableKeys(rt, settings);
+  const rAliases = tableAliases(rt, rKnown);
   const lGet = rowGetter(app, t, settings, env.tz);
   const rGet = rowGetter(app, rt, settings, env.tz);
-  for (const c of join.columns ?? []) {
-    if (!rKnown.has(c)) throw new OperationInputError(`unknown column in join.columns: "${c}"`, unknownColumn(c, [...rKnown], rt.catalog.ref.full, "join"));
+  // a column's alias stands for the column (column-aliases.ts); the matches keep the real names
+  const columns = join.columns ? resolveNameList(join.columns, rAliases) : undefined;
+  for (const c of columns ?? []) {
+    if (!rKnown.has(c)) throw new OperationInputError(`unknown column in join.columns: "${c}"`, unknownColumn(c, [...rKnown], rt.catalog.ref.full, "join", "", rAliases.words));
   }
-  const leftOn = compileExpr(leftText, readableKeys(t, settings), new Map(t.def.columns.map((c) => [c.name, c])));
-  const rightOn = compileExpr(rightText, rKnown, new Map(rt.def.columns.map((c) => [c.name, c])));
+  const lKnown = readableKeys(t, settings);
+  const leftOn = compileExpr(leftText, lKnown, new Map(t.def.columns.map((c) => [c.name, c])), tableAliases(t, lKnown));
+  const rightOn = compileExpr(rightText, rKnown, new Map(rt.def.columns.map((c) => [c.name, c])), rAliases);
   const rWhere = await resolveWithin(app, settings, rt, resolveDateTokens(join.where, env.tz, env.now));
   const rightRows = (hist?.rows ?? (await loadRows(app, settings, rt))).filter(compileWhere(rWhere, rt, settings, rGet));
   const joined = joinRows(left.map((r) => asQueryRow(r, lGet)), leftOn, {
@@ -269,8 +275,9 @@ async function loadJoin(
     alias: join.as ?? rt.def.name,
     matchesOf,
     kept: joined.map((j) => j.row.src),
-    ...(join.columns ? { columns: join.columns } : {}),
+    ...(columns ? { columns } : {}),
     known: rKnown,
+    aliases: rAliases,
     specs: new Map(rt.def.columns.map((c) => [c.name, c])),
   };
 }
@@ -456,8 +463,12 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
   const get = rowGetter(app, t, settings, tz);
   const hidden = new Set([settings.tableKey]);
   const specs = new Map(t.def.columns.map((c) => [c.name, c]));
-  for (const c of [...(input.columns ?? []), ...(input.expand ?? [])]) {
-    if (!known.has(c)) throw new OperationInputError(`unknown column: "${c}"`, unknownColumn(c, [...known], t.catalog.ref.full, "select"));
+  // a column's alias stands for the column (column-aliases.ts); the answer keeps the real names
+  const aliases = tableAliases(t, known);
+  const columns = input.columns ? resolveNameList(input.columns, aliases) : undefined;
+  const expandList = input.expand ? resolveNameList(input.expand, aliases) : undefined;
+  for (const c of [...(columns ?? []), ...(expandList ?? [])]) {
+    if (!known.has(c)) throw new OperationInputError(`unknown column: "${c}"`, unknownColumn(c, [...known], t.catalog.ref.full, "select", "", aliases.words));
   }
   const limit = Math.min(Math.max(input.limit ?? 100, 0), 1000);
   const offset = Math.max(input.offset ?? 0, 0);
@@ -476,15 +487,15 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
   if (join) rows = join.kept;
 
   if (input.groupBy !== undefined || input.aggregates !== undefined) {
-    return phase("engine.query.group", () => groupSelect(t, rows, join, input, known, specs, limit, offset, get), { "datanotes.rows_in": rows.length });
+    return phase("engine.query.group", () => groupSelect(t, rows, join, input, known, specs, limit, offset, get, aliases), { "datanotes.rows_in": rows.length });
   }
 
-  const order = parseOrder(input.orderBy);
-  for (const o of order) if (!known.has(o.col)) throw new OperationInputError(`unknown column in order_by: "${o.col}"`, unknownColumn(o.col, [...known], t.catalog.ref.full, "select"));
+  const order = parseOrder(input.orderBy).map((o) => ({ ...o, col: aliases.resolve(o.col) }));
+  for (const o of order) if (!known.has(o.col)) throw new OperationInputError(`unknown column in order_by: "${o.col}"`, unknownColumn(o.col, [...known], t.catalog.ref.full, "select", "", aliases.words));
   // each row's sort values read once (a date parsed, a link named, `file_modified` formatted), and
   // only the rows up to the page's end put in order
   const page = phase("engine.query.sort", () => orderBy(rows, order, (r, col) => comparable(specs.get(col), get(r, col)), offset + limit).slice(offset, offset + limit), { "datanotes.rows_in": rows.length });
-  const expand = new Set(input.expand ?? []);
+  const expand = new Set(expandList ?? []);
   const expandLink = (sourcePath: string, v: unknown): unknown => {
     const linkpath = wikilinkTarget(v, app.packs !== undefined);
     if (linkpath == null) return v;
@@ -505,7 +516,7 @@ async function selectOn(app: App, settings: DatanotesSettings, input: SelectInpu
       const b = withBodies?.[i];
       if (b === null) return []; // deleted since the scan
       const row = b ?? r;
-      const cols = input.columns ?? row.ordered.map(([k]) => k).filter((k) => !hidden.has(k));
+      const cols = columns ?? row.ordered.map(([k]) => k).filter((k) => !hidden.has(k));
       const out: Record<string, unknown> = { path: row.file.path };
       for (const c of cols) {
         if (c === "path") continue;
@@ -533,21 +544,27 @@ function groupSelect(
   limit: number,
   offset: number,
   get: RowGetter,
+  aliases: ColumnAliases,
 ): SelectResult {
   const groupTexts = input.groupBy === undefined ? [] : Array.isArray(input.groupBy) ? input.groupBy : [input.groupBy];
-  const groupExprs = groupTexts.map((g) => compileExpr(g, known, specs));
-  const aggs = parseAggregates(input.aggregates);
-  for (const a of aggs) {
-    if (a.column === undefined) continue;
+  // a column's alias stands for the column: a group by an alias is keyed by the column's name
+  const groupExprs = groupTexts.map((g) => compileExpr(g, known, specs, aliases));
+  const aggs = parseAggregates(input.aggregates).map((a) => {
+    if (a.column === undefined) return a;
     const dot = a.column.indexOf(".");
     if (dot > 0 && join && a.column.slice(0, dot) === join.alias) {
-      if (!join.known.has(a.column.slice(dot + 1))) {
-        throw new OperationInputError(`aggregate "${a.name}": unknown column "${a.column}"`, unknownName(a.column.slice(dot + 1), [...join.known], `columns of ${join.alias}`, "describe_table lists them.", "groupBy"));
+      const col = join.aliases.resolve(a.column.slice(dot + 1));
+      if (!join.known.has(col)) {
+        throw new OperationInputError(`aggregate "${a.name}": unknown column "${a.column}"`, unknownName(col, [...join.known], `columns of ${join.alias}`, "describe_table lists them.", "groupBy", join.aliases.words));
       }
-    } else if (!known.has(a.column)) {
-      throw new OperationInputError(`aggregate "${a.name}": unknown column "${a.column}"`, unknownColumn(a.column, [...known], t.catalog.ref.full, "groupBy"));
+      return { ...a, column: `${join.alias}.${col}` };
     }
-  }
+    const col = aliases.resolve(a.column);
+    if (!known.has(col)) {
+      throw new OperationInputError(`aggregate "${a.name}": unknown column "${a.column}"`, unknownColumn(col, [...known], t.catalog.ref.full, "groupBy", "", aliases.words));
+    }
+    return { ...a, column: col };
+  });
   const groups = new Map<string, { key: unknown[]; rows: LoadedRow[] }>();
   for (const r of rows) {
     const q = asQueryRow(r, get);
@@ -600,7 +617,10 @@ function groupSelect(
   });
   const outputs = new Set([...groupExprs.map((e) => e.text), ...aggs.map((a) => a.name)]);
   const order =
-    input.orderBy === undefined ? groupExprs.map((e) => ({ col: e.text, desc: false })) : parseOrder(input.orderBy);
+    input.orderBy === undefined
+      ? groupExprs.map((e) => ({ col: e.text, desc: false }))
+      : // an alias of a grouped column orders by that column's group
+        parseOrder(input.orderBy).map((o) => (outputs.has(o.col) ? o : { ...o, col: aliases.resolve(o.col) }));
   for (const o of order) {
     if (!outputs.has(o.col)) {
       throw new OperationInputError(

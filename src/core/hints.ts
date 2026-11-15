@@ -19,6 +19,7 @@ export const DOCS = {
   errors: "/guides/agents/reading-errors.md",
   findTable: "/guides/database-objects/tables.md#find-the-table-that-matches-a-request",
   describeTable: "/guides/database-objects/tables.md#describe-a-table-before-writing-to-it",
+  columnAliases: "/guides/database-objects/columns.md#use-a-columns-aliases-in-reads-and-writes",
   createTable: "/guides/database-objects/tables.md#create-a-table-with-typed-columns",
   descriptions: "/guides/database-objects/tables.md#describe-every-table-and-column",
   badValues: "/guides/data-quality/validation.md#see-how-the-engine-refuses-bad-values",
@@ -190,9 +191,9 @@ const fold = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
  * The real names closest to a wrong one, best first (at most `max`): the same name in another case
  * or spelling (`Film`, `film-title` for `film_title`), a name that contains it or that it
  * contains, then names a few edits away (about one edit in three letters). `aliases` maps other
- * words for a name (a table's aliases) to it.
+ * words for a name (a table's aliases; a column's aliases and label) to it, ahead of any spelling.
  */
-export function closestNames(input: string, candidates: Iterable<string>, opts: { max?: number; aliases?: ReadonlyMap<string, string> } = {}): string[] {
+export function closestNames(input: string, candidates: Iterable<string>, opts: { max?: number; aliases?: Iterable<readonly [string, string]> } = {}): string[] {
   const max = opts.max ?? 3;
   const wanted = fold(input);
   const scored = new Map<string, number>();
@@ -222,7 +223,7 @@ export function closestNames(input: string, candidates: Iterable<string>, opts: 
 const quoted = (names: readonly string[]) => names.map((n) => `"${n}"`);
 
 /** `Did you mean "x"?` / `Did you mean "x" or "y"?`, or "" when nothing is close. */
-export function didYouMean(input: string, candidates: Iterable<string>, opts: { aliases?: ReadonlyMap<string, string> } = {}): string {
+export function didYouMean(input: string, candidates: Iterable<string>, opts: { aliases?: Iterable<readonly [string, string]> } = {}): string {
   const near = quoted(closestNames(input, candidates, opts));
   if (near.length === 0) return "";
   return `Did you mean ${near.length === 1 ? near[0] : `${near.slice(0, -1).join(", ")} or ${near[near.length - 1]}`}?`;
@@ -242,7 +243,7 @@ export function nameList(names: readonly string[], max = 25): string {
  * Guidance for a name that is not one of `candidates`: the closest real names, the list of them
  * when it is short, and the operation that lists them all (`lister`).
  */
-export function unknownName(input: string, candidates: readonly string[], what: string, lister: string, topic: DocsTopic, aliases?: ReadonlyMap<string, string>): Guidance {
+export function unknownName(input: string, candidates: readonly string[], what: string, lister: string, topic: DocsTopic, aliases?: Iterable<readonly [string, string]>): Guidance {
   const sorted = [...new Set(candidates)].sort();
   const near = didYouMean(input, sorted, aliases ? { aliases } : {});
   const known = sorted.length === 0 ? `There are no ${what} yet.` : `${capital(what)}: ${nameList(sorted)}.`;
@@ -253,14 +254,17 @@ function capital(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** Guidance for a column a table does not have. */
-export function unknownColumn(input: string, columns: readonly string[], table: string, topic: DocsTopic = "describeTable", more = ""): Guidance {
-  return unknownName(input, columns, `columns of ${table}`, sentences(`describe_table("${table}") lists them with their types and allowed values.`, more), topic);
+/**
+ * Guidance for a column a table does not have. `words` are the columns' other words (aliases and
+ * labels, word → column): one that matches the name leads to its column before a near spelling.
+ */
+export function unknownColumn(input: string, columns: readonly string[], table: string, topic: DocsTopic = "describeTable", more = "", words?: Iterable<readonly [string, string]>): Guidance {
+  return unknownName(input, columns, `columns of ${table}`, sentences(`describe_table("${table}") lists them with their types and allowed values.`, more), topic, words);
 }
 
 /** Guidance for a column a write names that the table does not have. */
-export function unknownWriteColumn(input: string, columns: readonly string[], table: string): Guidance {
-  return unknownColumn(input, columns, table, "describeTable", "To keep a new front matter key, add_column first.");
+export function unknownWriteColumn(input: string, columns: readonly string[], table: string, words?: Iterable<readonly [string, string]>): Guidance {
+  return unknownColumn(input, columns, table, "describeTable", "To keep a new front matter key, add_column first.", words);
 }
 
 /** A name that is not lowercase letters, digits and `_`: the name it could be. */

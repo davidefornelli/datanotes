@@ -54,7 +54,7 @@ The `Docs:` line of the text names the page in two ways:
 When the answer is data, the hint reads it from your database:
 
 - **A table or view that doesn’t exist**: the closest names, by spelling, by case and by the table’s `aliases`. `movies` leads to `film`, and a short database lists every table and view.
-- **A column that doesn’t exist**: the closest column and the table’s columns. This works wherever a call names a column: `values`, `where`, `columns`, `order_by`, `join`, `group_by` and `aggregates`.
+- **A column that doesn’t exist**: the closest column and the table’s columns. A column whose `aliases` or `label` match the name comes first, before a near spelling. This works wherever a call names a column: `values`, `where`, `columns`, `order_by`, `join`, `group_by` and `aggregates`. An exact alias needs no hint: the engine reads it as its column.
 - **A value outside an enum**: the allowed values, each with its meaning from `value_descriptions`.
 - **A wrong operator in a filter**: the operator you meant, from a typo (`gtee`) or another language’s word (`>=`, `like`, `not_in`, `is_null`). Then every operator.
 - **A link to a row that doesn’t exist**: `list_link_targets`, which lists the rows the link column accepts.

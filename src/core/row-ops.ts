@@ -54,6 +54,7 @@ import {
 import { basenameOf, claimFreeName, renderPathTemplate, renderRowTemplate } from "./path-templates";
 import { computedColumnNames, fileCreated, normalizeDatetimes, withGenerated, withIdentity } from "./computed-columns";
 import { compileWhere, knownKeys, resolveWithin, type Where } from "./where";
+import { resolveNameList, resolveValueKeys, tableAliases } from "./column-aliases";
 import { constraintViolations, hierarchyViolations } from "./row-checks";
 import { linkedCheckViolations, pathHidden } from "./changeset-checks";
 import { autolinkFragments, autolinkOn, withLinkReport, type AutolinkReport } from "./autolink";
@@ -96,13 +97,16 @@ function planInsert(
   const known = knownKeys(t, settings);
   known.delete("path");
   known.delete(settings.tableKey);
-  for (const k of Object.keys(input.values)) {
-    if (!known.has(k)) throw new OperationInputError(`unknown column "${k}" for table "${t.def.name}"`, unknownWriteColumn(k, [...known], t.catalog.ref.full));
+  // a column's alias stands for the column (column-aliases.ts); a column given twice is refused
+  const aliases = tableAliases(t, knownKeys(t, settings));
+  const vals = resolveValueKeys(input.values, aliases, "values");
+  for (const k of Object.keys(vals)) {
+    if (!known.has(k)) throw new OperationInputError(`unknown column "${k}" for table "${t.def.name}"`, unknownWriteColumn(k, [...known], t.catalog.ref.full, aliases.words));
   }
   const computed = computedColumnNames(t);
   // A file-name identity column may be given: it names the new note (then holds the name it got).
   for (const c of t.def.columns) if (c.identity === "filename") computed.delete(c.name);
-  for (const k of Object.keys(input.values)) {
+  for (const k of Object.keys(vals)) {
     if (computed.has(k)) throw new OperationInputError(`"${k}" is a generated column: its value is computed`, GENERATED_HINT);
   }
   const specByName = new Map<string, TableColumn>(t.def.columns.map((c) => [c.name, c]));
@@ -115,14 +119,14 @@ function planInsert(
   // Dense/untyped fields in schema order, then sparse columns in declaration order.
   const schemaKeys = t.ordered.map(([k]) => k).filter((k) => known.has(k));
   for (const k of schemaKeys) {
-    const given = Object.prototype.hasOwnProperty.call(input.values, k);
-    let v: unknown = given ? input.values[k] : resolveDefault(specByName.get(k)?.default ?? fmGet(t.ordered, k), now, tz);
+    const given = Object.prototype.hasOwnProperty.call(vals, k);
+    let v: unknown = given ? vals[k] : resolveDefault(specByName.get(k)?.default ?? fmGet(t.ordered, k), now, tz);
     ordered = fmSet(ordered, k, v === undefined ? null : v);
   }
   for (const c of t.def.columns) {
     if (c.dense) continue;
-    const given = Object.prototype.hasOwnProperty.call(input.values, c.name);
-    const v = given ? input.values[c.name] : resolveDefault(c.default, now, tz);
+    const given = Object.prototype.hasOwnProperty.call(vals, c.name);
+    const v = given ? vals[c.name] : resolveDefault(c.default, now, tz);
     if (!isEmptyValue(v)) ordered = fmSet(ordered, c.name, v);
   }
   ordered = normalizeDatetimes(t.def.columns, ordered, tz);
@@ -225,8 +229,15 @@ async function mergeRowsImpl(
   if (!Array.isArray(input.on) || input.on.length === 0) throw new OperationInputError(`"on" needs at least one key column`, MERGE_HINT);
   if (!Array.isArray(input.rows) || input.rows.length === 0) throw new OperationInputError(`"rows" needs at least one row`, MERGE_HINT);
   const known = knownKeys(t, settings);
+  // a column's alias stands for the column (column-aliases.ts), in "on" and in the rows
+  const aliases = tableAliases(t, known);
+  input = {
+    ...input,
+    on: resolveNameList(input.on, aliases),
+    rows: input.rows.map((r, i) => (r && typeof r === "object" && !Array.isArray(r) ? resolveValueKeys(r, aliases, `rows[${i}]`) : r)),
+  };
   for (const c of input.on) {
-    if (!known.has(c) || c === "path") throw new OperationInputError(`unknown key column "${c}"`, unknownName(c, [...known].filter((k) => k !== "path"), `columns of ${t.catalog.ref.full}`, "The key columns identify a row, e.g. on: [\"title\"].", "merge"));
+    if (!known.has(c) || c === "path") throw new OperationInputError(`unknown key column "${c}"`, unknownName(c, [...known].filter((k) => k !== "path"), `columns of ${t.catalog.ref.full}`, "The key columns identify a row, e.g. on: [\"title\"].", "merge", aliases.words));
   }
   const computed = computedColumnNames(t);
   const cfg = await readDatabaseConfig(app, settings);
@@ -268,7 +279,7 @@ async function mergeRowsImpl(
       for (const [k, v] of normalized) {
         if (input.on.includes(k)) continue;
         if (!known.has(k) || k === "path" || k === settings.tableKey) {
-          throw new OperationInputError(`unknown column "${k}" for table "${t.def.name}"`, unknownWriteColumn(k, [...known].filter((c) => c !== "path" && c !== settings.tableKey), t.catalog.ref.full));
+          throw new OperationInputError(`unknown column "${k}" for table "${t.def.name}"`, unknownWriteColumn(k, [...known].filter((c) => c !== "path" && c !== settings.tableKey), t.catalog.ref.full, aliases.words));
         }
         if (computed.has(k)) throw new OperationInputError(`"${k}" is a generated column: its value is computed`, GENERATED_HINT);
         after = fmSet(after, k, v);
@@ -428,8 +439,10 @@ async function updateRowsImpl(
   const known = knownKeys(t, settings);
   known.delete("path");
   known.delete(settings.tableKey);
-  const set = input.set ?? {};
-  const unset = input.unset ?? [];
+  // a column's alias stands for the column (column-aliases.ts); a column set twice is refused
+  const aliases = tableAliases(t, knownKeys(t, settings));
+  const set = resolveValueKeys(input.set ?? {}, aliases, "set");
+  const unset = resolveNameList(input.unset ?? [], aliases);
   if (Object.keys(set).length === 0 && unset.length === 0 && !bodyFor) {
     throw new OperationInputError(
       op === "update_row" ? `nothing to update: pass "set", "unset", "body" or a part of the body` : `nothing to update: pass "set" or "unset"`,
@@ -439,7 +452,7 @@ async function updateRowsImpl(
     );
   }
   for (const k of Object.keys(set)) {
-    if (!known.has(k)) throw new OperationInputError(`unknown column "${k}" for table "${t.def.name}"`, unknownWriteColumn(k, [...known], t.catalog.ref.full));
+    if (!known.has(k)) throw new OperationInputError(`unknown column "${k}" for table "${t.def.name}"`, unknownWriteColumn(k, [...known], t.catalog.ref.full, aliases.words));
   }
   // `unset` may also remove keys that are not columns (strays check_table reports as unknown_column,
   // e.g. a timestamp another plugin added); only the table membership key is protected.
@@ -609,7 +622,7 @@ async function updateRowImpl(app: App, settings: DatanotesSettings, input: Updat
       const res = emptyResult("update_row", opts.dryRun === true);
       res.conflicts = stale.map(([col, value]) => ({
         path: row.file.path,
-        message: `row changed: expected ${col} = ${JSON.stringify(value)}, found ${JSON.stringify(fmGet(row.ordered, col) ?? null)} — read it again`,
+        message: `row changed: expected ${col} = ${JSON.stringify(value)}, found ${JSON.stringify(fmGet(row.ordered, tableAliases(t, knownKeys(t, settings)).resolve(col)) ?? null)} — read it again`,
       }));
       return res;
     }
