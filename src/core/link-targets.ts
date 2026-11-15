@@ -62,7 +62,7 @@ export function byName(a: string, b: string): number {
 async function linkTargetRule(t: LoadedTable, settings: DatanotesSettings, links: CheckLinks, c: TableColumn, loadSource = true) {
   const { table: target, rows } = await links.linked(t, c.name, loadSource);
   if (c.ref_where) await links.prepare(target, c.ref_where);
-  const matches = c.ref_where ? compileWhere(c.ref_where as Where, target, settings, rowGetter(null, target, settings), links) : () => true;
+  const matches = c.ref_where ? compileWhere(c.ref_where as Where, target, settings, rowGetter(null, target, settings), links, true) : () => true;
   const by = c.ref_by;
   const tcol = by ? by.target_column ?? by.column : "";
   const valid = (d: LevelDemand) => (r: LoadedRow) =>

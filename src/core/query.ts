@@ -9,9 +9,10 @@
 import type { ColumnSpec } from "./types-table";
 import { isEmptyValue, linkNoteName } from "./validate";
 import { guide, GuidedError, unknownName } from "./hints";
+import type { ColumnAliases } from "./column-aliases";
 
-const columnsHint = (col: string, known: ReadonlySet<string>) =>
-  unknownName(col, [...known], "columns", `An expression is a column, "path", or date(<column>) shifted in days: date(watched_on)+1.`, "groupBy");
+const columnsHint = (col: string, known: ReadonlySet<string>, aliases: ColumnAliases | undefined) =>
+  unknownName(col, [...known], "columns", `An expression is a column, "path", or date(<column>) shifted in days: date(watched_on)+1.`, "groupBy", aliases?.words);
 
 export class QueryInputError extends GuidedError {
   override readonly name = "QueryInputError";
@@ -40,13 +41,17 @@ function shiftDate(value: unknown, days: number): string | null {
   return d.toISOString().slice(0, 10);
 }
 
-/** Compile an expression against the columns a table knows. */
-export function compileExpr(text: string, known: ReadonlySet<string>, specs: ReadonlyMap<string, ColumnSpec>): Expr {
+/**
+ * Compile an expression against the columns a table knows. With `aliases`, a column's alias stands
+ * for the column (column-aliases.ts): a plain name becomes the column's (the expression's `text`
+ * too), a name inside `date()` reads the column and the text stays as written.
+ */
+export function compileExpr(text: string, known: ReadonlySet<string>, specs: ReadonlyMap<string, ColumnSpec>, aliases?: ColumnAliases): Expr {
   const t = text.trim();
   const m = t.match(DATE_EXPR);
   if (m) {
-    const col = m[1]!;
-    if (!known.has(col)) throw new QueryInputError(`unknown column in expression "${text}": "${col}"`, columnsHint(col, known));
+    const col = aliases ? aliases.resolve(m[1]!) : m[1]!;
+    if (!known.has(col)) throw new QueryInputError(`unknown column in expression "${text}": "${col}"`, columnsHint(col, known, aliases));
     const days = m[3] ? Number(m[3]) * (m[2] === "-" ? -1 : 1) : 0;
     return {
       text: t,
@@ -56,9 +61,10 @@ export function compileExpr(text: string, known: ReadonlySet<string>, specs: Rea
       },
     };
   }
-  if (!known.has(t)) throw new QueryInputError(`unknown column or expression: "${text}"`, columnsHint(t, known));
-  const spec = specs.get(t);
-  return { text: t, eval: (row) => (t === "path" ? row.path : row.get(t)), ...(spec ? { spec } : {}) };
+  const col = aliases ? aliases.resolve(t) : t;
+  if (!known.has(col)) throw new QueryInputError(`unknown column or expression: "${text}"`, columnsHint(col, known, aliases));
+  const spec = specs.get(col);
+  return { text: col, eval: (row) => (col === "path" ? row.path : row.get(col)), ...(spec ? { spec } : {}) };
 }
 
 /** Normalized join/group keys of a value: links by note name, lists expanded, empties dropped. */

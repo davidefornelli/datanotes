@@ -5,6 +5,27 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.9.0
+
+Datanotes 3.9.0 lets a column's aliases stand for the column in reads and writes. No operation, argument or setting goes away.
+
+### Aliases stand for their column
+
+[Use a column's aliases in reads and writes](/guides/database-objects/columns/#use-a-columns-aliases-in-reads-and-writes) shows them at work.
+
+- **Reads**: `select_rows` takes an alias in `columns`, `expand`, `where`, `order_by`, `group_by`, `aggregates` and `join`. Views and time travel resolve it too.
+- **Writes**: `insert_row`, `update_row`, `update_rows`, `delete_rows`, `merge_rows`, `move_rows`, `adopt_rows` and `batch` take an alias wherever they take a column name.
+- **Answers keep the real name**: `columns: ["name"]` on a task whose `title` declares the alias `name` returns `title`.
+- **Real names win**: an alias equal to a column, a field or a file column never redirects.
+- **Ambiguous aliases**: an alias that two columns declare maps to neither. Naming it is refused, with both columns in the message.
+- **One column, one key**: a write that names a column twice, as itself and by an alias, is refused.
+- **Better hints**: an unknown column suggests first the column whose alias or label matches, then a near spelling.
+
+### Before you update
+
+- **Programs**: a read or a write that named an alias and got "unknown column" now succeeds. Nothing else changes.
+- **CHECKs and `ref_where`**: they still name real columns only, so a rename or a drop still finds every rule that reads a column.
+
 ## 3.8.0
 
 Datanotes 3.8.0 keeps a named token's grants on a table when you rename or move it, removes a schema left empty and lets `set_table_bases` take over a table's own `ref: self` column. No operation, argument or setting goes away.

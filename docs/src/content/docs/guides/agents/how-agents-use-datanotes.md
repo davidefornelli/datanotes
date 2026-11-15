@@ -41,7 +41,7 @@ The meanings come from `value_descriptions`, which you give when you create the 
 }
 ```
 
-Every table and every column has a description, because the engine refuses one without. Agents and people understand the schema through them, so write each for a reader who never saw your notes. Good aliases help too: the better both are, the less the agent guesses. You set them with `create_table`, `add_column`, `alter_table`, `alter_column` and, for catalogs and schemas, `comment_on`.
+Every table and every column has a description, because the engine refuses one without. Agents and people understand the schema through them, so write each for a reader who never saw your notes. Good aliases help too: the better both are, the less the agent guesses. A column’s alias also works in place of its name, in reads and in writes: [Use a column’s aliases in reads and writes](/guides/database-objects/columns/#use-a-columns-aliases-in-reads-and-writes). You set them with `create_table`, `add_column`, `alter_table`, `alter_column` and, for catalogs and schemas, `comment_on`.
 
 A table created before descriptions were required may lack some. `describe_table` lists them in `missing_descriptions`, and the agent fills them with `alter_table` and `alter_column`. [Describe every table and column](/guides/database-objects/tables/#describe-every-table-and-column) shows the rule in use.
 

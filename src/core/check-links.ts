@@ -237,7 +237,7 @@ export class CheckLinks {
     const target = this.tables.get(key);
     const byPath = target ? this.rows.get(target.catalog.ref.full) : undefined;
     if (!target || !byPath) throw new OperationInputError(this.missing.get(key) ?? `CHECK links not loaded for "${col}"`);
-    const pred = compileWhere({ [col.slice(dot + 1)]: cond } as Where, target, this.settings, rowGetter(null, target, this.settings), this);
+    const pred = compileWhere({ [col.slice(dot + 1)]: cond } as Where, target, this.settings, rowGetter(null, target, this.settings), this, true);
     return (row) => {
       const v = fmGet(row.ordered, head);
       const paths = (Array.isArray(v) ? v : [v]).filter((x) => !isEmptyValue(x)).map((x) => this.resolve(x, row.file.path));

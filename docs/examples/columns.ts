@@ -24,7 +24,7 @@ const chapter: Chapter = {
   examples: [
     {
       title: "Add a sparse column",
-      say: "A new column is sparse by default: the table knows it, but only the rows that get a value store it. Use sparse columns for things you record sometimes. Every column needs a `description`, and `label` and `aliases` add other words for it. They tell an agent what the column means, so it reuses the column instead of adding a second one. `note` links to a note that documents the column.",
+      say: "A new column is sparse by default: the table knows it, but only the rows that get a value store it. Use sparse columns for things you record sometimes. Every column needs a `description`, and `label` and `aliases` add other words for it. They tell an agent what the column means, so it reuses the column instead of adding a second one. Reads and writes accept an alias in place of the column’s name. `note` links to a note that documents the column.",
       steps: [
         {
           op: "add_column",
@@ -104,6 +104,36 @@ const chapter: Chapter = {
         },
         { say: "`dense: false` makes the column sparse again. Rows written from now on store it only when it has a value, and the empty `minutes` already in Nosferatu stays:", op: "alter_column", args: { table: "film", column: "minutes", changes: { dense: false } }, showFile: `${FILM}/Nosferatu.md` },
       ],
+    },
+    {
+      title: "Use a column’s aliases in reads and writes",
+      say: "A column’s `aliases` stand for the column wherever you name a column. Here `runtime` and `length` are aliases of `minutes`, so an agent that says “runtime” reads and writes `minutes`. Aliases work in these places:\n\n- **Reads**: `columns`, `where`, `order_by`, `group_by`, `aggregates`, `expand` and the columns of a `join`, in `select_rows` and in a view’s query\n- **Writes**: the values of `insert_row` and `merge_rows`, `set`, `unset` and `where` of `update_row` and `update_rows`, `delete_rows`, `move_rows`, `adopt_rows` and every step of a `batch`",
+      steps: [
+        {
+          say: "In a `batch`, each step takes aliases too:",
+          op: "batch",
+          args: {
+            summary: "fix the runtimes",
+            operations: [
+              { op: "update_row", table: "film", path: `${FILM}/Nosferatu.md`, set: { runtime: 94 } },
+              { op: "update_rows", table: "film", where: { title: "Metropolis" }, set: { length: 149 } },
+            ],
+          },
+        },
+        {
+          say: "The answer keeps the column’s real name, so `minutes` comes back for `runtime`:",
+          op: "select_rows",
+          args: { table: "film", columns: ["title", "runtime"], where: { length: { gte: 90 } }, order_by: "-runtime" },
+          check: (v) => (v.rows[0]?.minutes !== 149 || "runtime" in (v.rows[0] ?? {})) && "minutes 149 first, under its real name, expected",
+        },
+        {
+          say: "A write that names a column twice, once by its name and once by an alias, is refused. The engine doesn’t guess which value you meant:",
+          op: "update_row",
+          args: { table: "film", path: `${FILM}/Metropolis.md`, set: { minutes: 153, runtime: 150 } },
+          refused: true,
+        },
+      ],
+      after: "Matching is exact and case-sensitive, as for column names. A real column name always wins: an alias that is also the name of another column never redirects. When two columns of a table declare the same alias, naming it is refused, and the error names both columns. CHECK constraints and `ref_where` filters name real columns only.",
     },
     {
       title: "Rename a column",

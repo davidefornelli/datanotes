@@ -30,6 +30,7 @@ import { CheckLinks } from "./check-links";
 import { basenameOf, claimFreeName, renderPathTemplate } from "./path-templates";
 import { computedColumnNames, fileCreated, normalizeDatetimes, withGenerated, withIdentity, withRowId } from "./computed-columns";
 import { compileWhere, knownKeys, resolveWithin, type Where } from "./where";
+import { resolveValueKeys, tableAliases } from "./column-aliases";
 import { constraintViolations, hierarchyViolations } from "./row-checks";
 import { linkedCheckViolations } from "./changeset-checks";
 import { messageOf } from "./message";
@@ -60,6 +61,24 @@ interface Retarget {
   /** Extra values per note path (applied after `set`). */
   perRow?: Record<string, Record<string, unknown>>;
   relocate: boolean;
+}
+
+/**
+ * `r` with the aliases of the destination's columns replaced by the columns (column-aliases.ts)
+ * in `set`, `per_row` and the targets of `rename`; with `src` (move_rows), the aliases of the
+ * source's columns too in the keys of `rename` and in `drop`.
+ */
+function resolveRetarget(dst: LoadedTable, settings: DatanotesSettings, r: Retarget, src?: LoadedTable): Retarget {
+  const d = tableAliases(dst, knownKeys(dst, settings));
+  const s = src ? tableAliases(src, knownKeys(src, settings)) : null;
+  const from = (k: string) => (s ? s.resolve(k) : k);
+  return {
+    ...r,
+    rename: Object.fromEntries(Object.entries(r.rename).map(([k, v]) => [from(k), typeof v === "string" ? d.resolve(v) : v])),
+    set: resolveValueKeys(r.set, d, "set"),
+    drop: new Set([...r.drop].map(from)),
+    ...(r.perRow ? { perRow: Object.fromEntries(Object.entries(r.perRow).map(([p, v]) => [p, v && typeof v === "object" ? resolveValueKeys(v, d, `per_row["${p}"]`) : v])) } : {}),
+  };
 }
 
 function checkRetarget(dst: LoadedTable, settings: DatanotesSettings, r: Retarget): void {
@@ -198,7 +217,8 @@ async function moveRowsImpl(
   const src = await loadTable(app, settings, input.table);
   const dst = await loadTable(app, settings, input.toTable);
   if (src.def.schemaPath === dst.def.schemaPath) throw new OperationInputError(`source and destination are the same table`);
-  const r: Retarget = { rename: input.rename ?? {}, set: input.set ?? {}, drop: new Set(input.drop ?? []), relocate: input.relocate === true };
+  let r: Retarget = { rename: input.rename ?? {}, set: input.set ?? {}, drop: new Set(input.drop ?? []), relocate: input.relocate === true };
+  r = resolveRetarget(dst, settings, r, src);
   checkRetarget(dst, settings, r);
   const pred = compileWhere(await resolveWithin(app, settings, src, input.where), src, settings);
   const rows = (await loadRows(app, settings, src)).filter(pred);
@@ -268,13 +288,14 @@ async function adoptRowsImpl(app: App, settings: DatanotesSettings, input: Adopt
   if (!Array.isArray(input.paths) || input.paths.length === 0) throw new OperationInputError(`"paths" needs at least one note`);
   const norm = (p: string) => (p.endsWith(".md") ? p : `${p}.md`);
   const perRow = Object.fromEntries(Object.entries(input.perRow ?? {}).map(([p, v]) => [norm(p), v]));
-  const r: Retarget = {
+  let r: Retarget = {
     rename: input.rename ?? {},
     set: input.set ?? {},
     drop: new Set(input.drop ?? []),
     perRow,
     relocate: input.relocate !== false,
   };
+  r = resolveRetarget(dst, settings, r);
   checkRetarget(dst, settings, r);
   const paths = [...new Set(input.paths.map(norm))].sort();
   for (const p of Object.keys(perRow)) {
