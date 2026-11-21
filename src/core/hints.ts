@@ -85,6 +85,7 @@ export const DOCS = {
   autolinkTargets: "/guides/read-and-write/automatic-links.md#choose-the-tables-a-link-may-point-to",
   versions: "/guides/history/table-history.md#list-the-versions-of-a-table",
   readAsOf: "/guides/history/table-history.md#read-a-table-as-it-was",
+  rowHistory: "/guides/history/table-history.md#see-who-changed-a-row",
   restore: "/guides/history/restore.md#restore-a-table-to-an-old-version",
   restoreDatabase: "/guides/history/restore.md#time-travel-and-restore-the-whole-database",
   vacuum: "/guides/history/vacuum.md#trim-old-history-with-vacuum_table",

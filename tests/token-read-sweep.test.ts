@@ -155,6 +155,7 @@ const VARIANTS: Record<string, Json[]> = {
   describe_semantic_index: [],
   list_migrations: [{ limit: 1000 }, { table: "weight" }, { table: "health" }, { op: "insert_row" }, { op: "update_row", limit: 1000 }, { since: "2000-01-01T00:00:00Z" }],
   describe_history: [...onTables(), { limit: 1000 }, { since: "2000-01-01T00:00:00Z" }],
+  row_history: [{ table: "weight", path: "@heavy" }, { table: "pantry", path: "@eggs" }, { table: "pantry", path: "@heavy" }, { table: WEIGHT, path: "@heavy-no-ext", limit: 1000 }],
   table_changes: [...onTables({ start_version: 0 }), { table: "weight", start_version: 1, end_version: 3 }],
   list_changes: [
     { since: 0, limit: 1000 },

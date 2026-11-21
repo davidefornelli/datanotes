@@ -35,6 +35,7 @@ export const READ_TABLE_ARGS: Readonly<Record<string, readonly string[]>> = {
   list_link_targets: ["table"],
   table_changes: ["table"],
   describe_history: ["table"],
+  row_history: ["table"],
 };
 
 /** Operations only the owner calls, never a named token (even with `maintain`). */

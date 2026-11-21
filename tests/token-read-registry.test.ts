@@ -243,6 +243,7 @@ describe("token registry: reads before they run", () => {
       list_link_targets: ["table"],
       table_changes: ["table"],
       describe_history: ["table"],
+      row_history: ["table"],
     });
     const check = (op: string, body: unknown) => s.registry.check("cook", `/operations/${op}/`, body);
     expect(await check("semantic_search", { query: "x", tables: ["pantry", "weight"] })).toEqual(new ReadDeniedError("token cook may not read personal.health.weight"));

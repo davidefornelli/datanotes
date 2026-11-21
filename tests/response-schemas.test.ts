@@ -194,7 +194,7 @@ describe("responseSchema", () => {
         { name: "friends", type: "list", items: "link", ref: "self", inverse: "friends" },
       ],
     }));
-    await check("insert_row", { table: "person", values: { name: "Bob" } });
+    const bob = await check<{ planned_creates: string[] }>("insert_row", { table: "person", values: { name: "Bob" } });
     await check("align_relations", { table: "person", dry_run: true });
     await check("add_column", described({ table: "person", column: { name: "leader", type: "link", ref: "self", ref_where: { name: "Bob" } } }));
     await check("describe_table", { table: "person" });
@@ -206,6 +206,7 @@ describe("responseSchema", () => {
     await check("list_migrations", { limit: 5 });
     await check("describe_history", { table: "mood" });
     await check("table_changes", { table: "mood", start_version: 0 });
+    expect(await check("row_history", { table: "person", path: bob.planned_creates[0]! })).toMatchObject({ exists: true, created: { change: "insert" } });
     await check("restore_table", { table: "mood", version: 0, dry_run: true });
     // the whole database: before its first commit every table is dropped (a plan per table)
     expect(await check<{ tables: unknown[] }>("restore_database", { timestamp: "2000-01-01T00:00:00Z", dry_run: true })).toMatchObject({ tables: [{ action: "drop" }, { action: "drop" }, { action: "drop" }] });

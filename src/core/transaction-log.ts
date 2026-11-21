@@ -277,6 +277,28 @@ export async function readCommit(
   return movedCommit(parseCommit(await versionText(app, toc, version)), await databaseMoves(app));
 }
 
+/**
+ * The commits of a table's log after version `after`, oldest first, with today's paths. The
+ * versions are read a chunk at a time, and only the commits whose text `keep` accepts are parsed:
+ * a cheap test on the raw text (an id, a file name) skips the commits that cannot matter. `keep`
+ * runs on each commit after the caller handled the ones before it, so it may change as they go.
+ */
+export async function* scanCommits(
+  app: App,
+  settings: Pick<DatanotesSettings, "databaseFolder">,
+  full: string,
+  after: number,
+  keep: (text: string) => boolean,
+  chunk = 256,
+): AsyncGenerator<Commit> {
+  const toc = await tocOf(app, settings, full);
+  const moves = await databaseMoves(app);
+  const versions = toc.versions.filter((v) => v > after);
+  for (let i = 0; i < versions.length; i += chunk) {
+    for (const text of await versionTexts(app, toc, versions.slice(i, i + chunk))) if (keep(text)) yield movedCommit(parseCommit(text), moves);
+  }
+}
+
 /** A commit with today's paths: the moves of the database folder recorded after it applied. */
 function movedCommit(c: Commit, moves: readonly DatabaseMove[]): Commit {
   let out = c;
