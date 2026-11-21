@@ -14605,6 +14605,464 @@ export const OPERATIONS: OperationDef[] = [
     }
   },
   {
+    "name": "row_history",
+    "description": "The version history of ONE row, like a document's: who created it, who changed it last, and every change, newest first. Read from the table's transaction log (nothing extra is stored in the note), so it needs history on for the table.\n\nName the row by `table` and `id` (its system UUID) or `path` (now, or before it was deleted). The row is followed by its id across renames and moves between tables (move_rows); a row without an id by its path.\n\n- `created` / `last_modified`: when, by which operation and agent (`actor`: session, harness, model, tool, auth). `created` is null when the oldest versions were vacuumed (`history_start.truncated`); a row present when its table's history began shows that version (often CREATE TABLE, no actor).\n- `versions`: `version` (of `table`), `timestamp`, `operation`, `change` (insert, update, move, delete), `source` (`external` = a hand edit: an editor, git, a sync, no agent), `actor`, `migration_id` (undo_migration), `path` and `old_path` (rename), `from_table` (move), `changes` `{column: {before, after}}`, `body_changed` and `body_diff` (lines removed and added).\n- `limit` (default 50, max 1000), `since` / `before` (ISO date or date-time); pass `next_before` as `before` for the next, older page.\n\nThe whole row as it was at a version: select_rows with `version` (or `timestamp`). Every change of a table: table_changes; of the database: list_changes.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "table": {
+          "type": "string",
+          "description": "The table (a dropped one by its full catalog.schema.table name)."
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The row's system id (UUID)."
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The row's vault path, now or before it was deleted (`.md` optional)."
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Versions to return (default 50, at most 1000)."
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO date or date-time: only the versions at or after it."
+        },
+        "before": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO date or date-time: only the versions before it (the previous answer's `next_before`)."
+        }
+      },
+      "required": [
+        "table"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "title": "Row History",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "responseSchema": {
+      "type": "object",
+      "properties": {
+        "table": {
+          "type": "string",
+          "description": "The table the row is in now (or was in last, when deleted)."
+        },
+        "id": {
+          "type": "string",
+          "description": "The row's system id."
+        },
+        "path": {
+          "type": "string",
+          "description": "The row's path now (or its last one)."
+        },
+        "exists": {
+          "type": "boolean",
+          "description": "Whether the row exists now."
+        },
+        "created": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "The table the row was in."
+            },
+            "version": {
+              "type": "integer",
+              "description": "The table's version (describe_history; select_rows `version` reads the table as it was then)."
+            },
+            "timestamp": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string",
+              "description": "The log's operation: WRITE, UPDATE, DELETE, MOVE ROWS, MERGE, RESTORE, UNDO, EXTERNAL_EDIT (a hand edit), …"
+            },
+            "change": {
+              "type": "string",
+              "enum": [
+                "insert",
+                "update",
+                "move",
+                "delete"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "engine",
+                "external"
+              ],
+              "description": "`external`: changed outside the engine (an editor, git, a sync): no agent is known."
+            },
+            "path": {
+              "type": "string",
+              "description": "The row's path after the version (before it, for a delete)."
+            },
+            "actor": {
+              "type": "object",
+              "description": "The agent behind the version (absent for hand edits): `session`, `harness`, `harness_version`, `model`, `tool` (reported by the agent's MCP server) and `auth` (the credential: `owner` or a token's name, set by the engine).",
+              "properties": {
+                "session": {
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "auth": {
+                  "type": "string"
+                }
+              }
+            },
+            "user_name": {
+              "type": "string",
+              "description": "\"harness / model\" of the agent."
+            },
+            "migration_id": {
+              "type": "string",
+              "description": "The operation in the journal (list_migrations, undo_migration)."
+            }
+          },
+          "required": [
+            "table",
+            "version",
+            "timestamp",
+            "operation",
+            "change",
+            "source",
+            "path"
+          ],
+          "description": "Its first version: null when the older versions were vacuumed."
+        },
+        "last_modified": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "The table the row was in."
+            },
+            "version": {
+              "type": "integer",
+              "description": "The table's version (describe_history; select_rows `version` reads the table as it was then)."
+            },
+            "timestamp": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string",
+              "description": "The log's operation: WRITE, UPDATE, DELETE, MOVE ROWS, MERGE, RESTORE, UNDO, EXTERNAL_EDIT (a hand edit), …"
+            },
+            "change": {
+              "type": "string",
+              "enum": [
+                "insert",
+                "update",
+                "move",
+                "delete"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "engine",
+                "external"
+              ],
+              "description": "`external`: changed outside the engine (an editor, git, a sync): no agent is known."
+            },
+            "path": {
+              "type": "string",
+              "description": "The row's path after the version (before it, for a delete)."
+            },
+            "actor": {
+              "type": "object",
+              "description": "The agent behind the version (absent for hand edits): `session`, `harness`, `harness_version`, `model`, `tool` (reported by the agent's MCP server) and `auth` (the credential: `owner` or a token's name, set by the engine).",
+              "properties": {
+                "session": {
+                  "type": "string"
+                },
+                "harness": {
+                  "type": "string"
+                },
+                "harness_version": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "auth": {
+                  "type": "string"
+                }
+              }
+            },
+            "user_name": {
+              "type": "string",
+              "description": "\"harness / model\" of the agent."
+            },
+            "migration_id": {
+              "type": "string",
+              "description": "The operation in the journal (list_migrations, undo_migration)."
+            }
+          },
+          "required": [
+            "table",
+            "version",
+            "timestamp",
+            "operation",
+            "change",
+            "source",
+            "path"
+          ],
+          "description": "Its newest version."
+        },
+        "history_start": {
+          "type": "object",
+          "description": "Where the history read starts: the oldest version kept of the oldest table followed; `truncated` when older versions were vacuumed.",
+          "properties": {
+            "table": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "timestamp": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "table",
+            "version",
+            "timestamp",
+            "truncated"
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "description": "Versions matching since / before."
+        },
+        "versions": {
+          "type": "array",
+          "description": "Newest first.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table the row was in."
+              },
+              "version": {
+                "type": "integer",
+                "description": "The table's version (describe_history; select_rows `version` reads the table as it was then)."
+              },
+              "timestamp": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string",
+                "description": "The log's operation: WRITE, UPDATE, DELETE, MOVE ROWS, MERGE, RESTORE, UNDO, EXTERNAL_EDIT (a hand edit), …"
+              },
+              "change": {
+                "type": "string",
+                "enum": [
+                  "insert",
+                  "update",
+                  "move",
+                  "delete"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "engine",
+                  "external"
+                ],
+                "description": "`external`: changed outside the engine (an editor, git, a sync): no agent is known."
+              },
+              "path": {
+                "type": "string",
+                "description": "The row's path after the version (before it, for a delete)."
+              },
+              "actor": {
+                "type": "object",
+                "description": "The agent behind the version (absent for hand edits): `session`, `harness`, `harness_version`, `model`, `tool` (reported by the agent's MCP server) and `auth` (the credential: `owner` or a token's name, set by the engine).",
+                "properties": {
+                  "session": {
+                    "type": "string"
+                  },
+                  "harness": {
+                    "type": "string"
+                  },
+                  "harness_version": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "tool": {
+                    "type": "string"
+                  },
+                  "auth": {
+                    "type": "string"
+                  }
+                }
+              },
+              "user_name": {
+                "type": "string",
+                "description": "\"harness / model\" of the agent."
+              },
+              "migration_id": {
+                "type": "string",
+                "description": "The operation in the journal (list_migrations, undo_migration)."
+              },
+              "old_path": {
+                "type": "string",
+                "description": "A rename or move: the path before."
+              },
+              "from_table": {
+                "type": "string",
+                "description": "A move from another table (move_rows): the table it came from."
+              },
+              "changes": {
+                "type": "object",
+                "description": "The columns the version changed, `{column: {before, after}}` (`null`: no value); an insert lists every column it set.",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "before": {},
+                    "after": {}
+                  },
+                  "required": [
+                    "before",
+                    "after"
+                  ]
+                }
+              },
+              "body_changed": {
+                "type": "boolean"
+              },
+              "body_diff": {
+                "type": "object",
+                "description": "The body's lines removed and added (at most 20 each, each cut at 200 characters; `truncated` when there were more).",
+                "properties": {
+                  "removed": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "added": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "removed",
+                  "added"
+                ]
+              }
+            },
+            "required": [
+              "table",
+              "version",
+              "timestamp",
+              "operation",
+              "change",
+              "source",
+              "path",
+              "changes",
+              "body_changed"
+            ]
+          }
+        },
+        "next_before": {
+          "type": "string",
+          "description": "Pass as `before` for the next (older) page; absent on the last page."
+        }
+      },
+      "required": [
+        "table",
+        "path",
+        "exists",
+        "created",
+        "last_modified",
+        "history_start",
+        "total",
+        "versions"
+      ]
+    }
+  },
+  {
     "name": "list_changes",
     "description": "Change feed across all tables: numbered row changes (`seq`), oldest first, from engine writes\nand from hand edits (`source: external`). Each has `table`, `kind` (insert, update, delete, move,\nmetastore, unreadable), `op` (the operation that made it), `path`, `row_id`, `changes` ({column: {before, after}}), `actor`, `migration_id`. Hand edits are compared in batches (0.7 s after the last vault change, at most 5 s after the first), in the order they happened, renames included. A hand edit that creates, changes, renames or removes a row is checked against the tables' rules (as check_table does) with the rows that link to it: the last event of each row in the batch has `violations` ([{path, violations: [{code, column | constraint (the CHECK's name), index, message}]}]), what the edit breaks (a rule a row already broke is not listed); empty when it breaks nothing, absent when nothing was checked (engine events, a check that failed). A hand edit of metastore.yaml that changes tables' entries checks every row of those tables: on its `metastore` event. At most 100 per event; `violations_total` then counts them all. A note renamed or moved by hand (a row or a plain note) has the links to its old path rewritten across the vault once the vault is quiet (4 s without a change; not while git pulls, rebases or merges; setting repairLinksOnHandMove, on by default), and its move event does not report them as broken_link: that repair's events (`op: repair_links`) follow the batch and name the moves in `cause` ([{path, old_path, seq}], `seq` of the row's move event). A hand edit that leaves a row's front matter unreadable (broken YAML) is a `kind: unreadable` event with one violation of code `unreadable`: every read leaves the row out until the note is fixed, and the fix is an update of the row's last readable state (an insert for a new note). Agents' tool calls (reported by MCP servers) are `kind: tool_call` events (`call`: tool, args, ok, duration_ms, value, served_by), returned only when `kinds` includes tool_call. Pass the returned\n`last` as `since` next time (`head` is the newest number); `wait_ms` (max 60000) waits for a new change (long poll); `limit` max 5000. `gap: true` means\nolder changes were dropped: re-read the tables. `where` filters rows as in select_rows (on the values after the change). `auth`: only the changes made with this credential (`owner` or a token's name); `session`: only those of one agent session (with `kinds: [\"tool_call\"]`: its tool calls). Per-table versions: `table_changes`.",
     "inputSchema": {
@@ -21465,6 +21923,7 @@ export const OPERATION_KIND: Readonly<Record<string, OperationKind>> = {
   undo_migration: "history",
   describe_history: "history",
   table_changes: "history",
+  row_history: "history",
   restore_table: "history",
   restore_database: "history",
   vacuum_table: "history",

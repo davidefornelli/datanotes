@@ -2982,6 +2982,96 @@ answer restore_table.warnings[].docs: string
 answer restore_table.warnings[].hint: string
 answer restore_table.warnings[].message: string
 answer restore_table.warnings[].table: string
+answer row_history.created.actor.auth: string
+answer row_history.created.actor.harness: string
+answer row_history.created.actor.harness_version: string
+answer row_history.created.actor.model: string
+answer row_history.created.actor.session: string
+answer row_history.created.actor.tool: string
+answer row_history.created.actor: object
+answer row_history.created.change = "delete"
+answer row_history.created.change = "insert"
+answer row_history.created.change = "move"
+answer row_history.created.change = "update"
+answer row_history.created.change: string
+answer row_history.created.migration_id: string
+answer row_history.created.operation: string
+answer row_history.created.path: string
+answer row_history.created.source = "engine"
+answer row_history.created.source = "external"
+answer row_history.created.source: string
+answer row_history.created.table: string
+answer row_history.created.timestamp: string
+answer row_history.created.user_name: string
+answer row_history.created.version: integer
+answer row_history.created: null
+answer row_history.created: object
+answer row_history.exists: boolean
+answer row_history.history_start.table: string
+answer row_history.history_start.timestamp: string
+answer row_history.history_start.truncated: boolean
+answer row_history.history_start.version: integer
+answer row_history.history_start: object
+answer row_history.id: string
+answer row_history.last_modified.actor.auth: string
+answer row_history.last_modified.actor.harness: string
+answer row_history.last_modified.actor.harness_version: string
+answer row_history.last_modified.actor.model: string
+answer row_history.last_modified.actor.session: string
+answer row_history.last_modified.actor.tool: string
+answer row_history.last_modified.actor: object
+answer row_history.last_modified.change = "delete"
+answer row_history.last_modified.change = "insert"
+answer row_history.last_modified.change = "move"
+answer row_history.last_modified.change = "update"
+answer row_history.last_modified.change: string
+answer row_history.last_modified.migration_id: string
+answer row_history.last_modified.operation: string
+answer row_history.last_modified.path: string
+answer row_history.last_modified.source = "engine"
+answer row_history.last_modified.source = "external"
+answer row_history.last_modified.source: string
+answer row_history.last_modified.table: string
+answer row_history.last_modified.timestamp: string
+answer row_history.last_modified.user_name: string
+answer row_history.last_modified.version: integer
+answer row_history.last_modified: null
+answer row_history.last_modified: object
+answer row_history.next_before: string
+answer row_history.path: string
+answer row_history.table: string
+answer row_history.total: integer
+answer row_history.versions: object[]
+answer row_history.versions[].actor.auth: string
+answer row_history.versions[].actor.harness: string
+answer row_history.versions[].actor.harness_version: string
+answer row_history.versions[].actor.model: string
+answer row_history.versions[].actor.session: string
+answer row_history.versions[].actor.tool: string
+answer row_history.versions[].actor: object
+answer row_history.versions[].body_changed: boolean
+answer row_history.versions[].body_diff.added: string[]
+answer row_history.versions[].body_diff.removed: string[]
+answer row_history.versions[].body_diff.truncated: boolean
+answer row_history.versions[].body_diff: object
+answer row_history.versions[].change = "delete"
+answer row_history.versions[].change = "insert"
+answer row_history.versions[].change = "move"
+answer row_history.versions[].change = "update"
+answer row_history.versions[].change: string
+answer row_history.versions[].changes: object
+answer row_history.versions[].from_table: string
+answer row_history.versions[].migration_id: string
+answer row_history.versions[].old_path: string
+answer row_history.versions[].operation: string
+answer row_history.versions[].path: string
+answer row_history.versions[].source = "engine"
+answer row_history.versions[].source = "external"
+answer row_history.versions[].source: string
+answer row_history.versions[].table: string
+answer row_history.versions[].timestamp: string
+answer row_history.versions[].user_name: string
+answer row_history.versions[].version: integer
 answer search.meaning = "failed"
 answer search.meaning = "off"
 answer search.meaning = "on"
@@ -3991,6 +4081,22 @@ argument restore_table.timestamp: string
 argument restore_table.version optional
 argument restore_table.version: integer
 argument restore_table.version: null
+argument row_history.before optional
+argument row_history.before: null
+argument row_history.before: string
+argument row_history.id optional
+argument row_history.id: null
+argument row_history.id: string
+argument row_history.limit optional
+argument row_history.limit: integer
+argument row_history.limit: null
+argument row_history.path optional
+argument row_history.path: null
+argument row_history.path: string
+argument row_history.since optional
+argument row_history.since: null
+argument row_history.since: string
+argument row_history.table: string
 argument search.folder optional
 argument search.folder: null
 argument search.folder: string
@@ -4347,6 +4453,7 @@ operation rename_column
 operation rename_value
 operation restore_database
 operation restore_table
+operation row_history
 operation search
 operation search_notes
 operation select_rows
@@ -4416,6 +4523,7 @@ route POST /datanotes/operations/rename_column/
 route POST /datanotes/operations/rename_value/
 route POST /datanotes/operations/restore_database/
 route POST /datanotes/operations/restore_table/
+route POST /datanotes/operations/row_history/
 route POST /datanotes/operations/search/
 route POST /datanotes/operations/search_notes/
 route POST /datanotes/operations/select_rows/

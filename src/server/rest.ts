@@ -37,6 +37,7 @@ import { MalformedColumnError, MalformedTableOptionsError } from "../core/table-
 import { TableNotFoundError } from "../core/table-registry";
 import { AmbiguousCatalogRefError, MetastoreError } from "../core/metastore";
 import { describeHistory, restoreTable, tableChanges, vacuumTable, wireCommit } from "../core/history";
+import { rowHistory } from "../core/row-history";
 import { packRows, unpackRows } from "../core/pack-rows";
 import { describeDatabaseHistory, restoreDatabase } from "../core/database-history";
 import { graphNeighbors, graphPath, graphTraverse, type Direction, type GraphNodeSet } from "../core/graph";
@@ -982,6 +983,11 @@ export function createHandlers(
       const start = optInt(b, "start_version")!;
       const end = optInt(b, "end_version");
       return { status: 200, json: await tableChanges(app, s(), { table: str(b, "table")!, startVersion: start, ...(end !== undefined ? { endVersion: end } : {}) }) };
+    },
+    row_history: async (b) => {
+      const limit = optInt(b, "limit");
+      const opt = (k: string) => (str(b, k) !== undefined ? { [k]: str(b, k)! } : {});
+      return { status: 200, json: await rowHistory(app, s(), { table: str(b, "table")!, ...opt("id"), ...opt("path"), ...opt("since"), ...opt("before"), ...(limit !== undefined ? { limit } : {}) }) };
     },
     restore_table: async (b) => {
       const at = asOf(b);

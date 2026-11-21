@@ -5,6 +5,27 @@ description: "What each version of Datanotes brings, newest first, starting with
 
 This page lists each version of Datanotes, newest first. Datanotes follows [semantic versioning](https://semver.org): a major version can break what you rely on, and its notes list those changes first. The package is on [npm](https://www.npmjs.com/package/datanotes), and each version has a [GitHub release](https://github.com/davidefornelli/datanotes/releases).
 
+## 3.10.0
+
+Datanotes 3.10.0 adds `row_history`, the version history of one row. No operation, argument or setting goes away.
+
+### See who changed a row
+
+[See who changed a row](/guides/history/table-history/#see-who-changed-a-row) shows it at work.
+
+- **Who and when**: `created` and `last_modified` give the time, the operation and the agent (`actor`: session, harness, model, tool and credential).
+- **Every version**: each one lists the columns it changed, from what to what, and the lines of the body it removed and added.
+- **Hand edits**: a change made outside the engine, in an editor, through git or a sync, has `source: external` and no agent.
+- **Renames and moves**: the engine follows the row by its id, so a rename gives `old_path` and a `move_rows` gives `from_table`.
+- **Deleted rows**: the history stays, found by any path the row had or by its id.
+- **Nothing new in the note**: the engine reads it from the table's transaction log, so it needs history on.
+- **Paging**: `limit`, `since` and `before`, with `next_before` for the next page.
+
+### Limits
+
+- **Vacuumed logs**: a row whose oldest versions were vacuumed has `created: null`, and `history_start.truncated` says where its history starts.
+- **Rows without an id**: the engine follows them by path, so a rename starts a new history.
+
 ## 3.9.0
 
 Datanotes 3.9.0 lets a column's aliases stand for the column in reads and writes. No operation, argument or setting goes away.

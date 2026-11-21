@@ -441,7 +441,7 @@ export const PAGES: GuidePage[] = [
     path: `${HISTORY}/table-history`,
     title: "Table history and time travel",
     label: "Table history and time travel",
-    description: "Turn history on, list a table’s versions, read a table as it was, compare two versions and find hand edits.",
+    description: "Turn history on, list a table’s versions, read a table as it was, compare two versions, see who changed a row and find hand edits.",
     order: 2,
     intro: [
       "With history on, every write to a table becomes a numbered version in a transaction log, including edits made by hand. The engine keeps the log in its store, outside the vault.",
@@ -454,6 +454,7 @@ export const PAGES: GuidePage[] = [
       ["history", "Read a table as it was"],
       ["history", "Copy a table as it was"],
       ["history", "See what changed between two versions"],
+      ["history", "See who changed a row"],
       ["history", "Find hand edits in the history"],
       ["history", "Turn history on for every table"],
       ["history", "See the history settings in `metastore.yaml`"],

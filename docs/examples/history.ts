@@ -74,6 +74,20 @@ const chapter: Chapter = {
       steps: [{ op: "table_changes", args: (ctx) => ({ table: "film", start_version: before(ctx) }) }],
     },
     {
+      title: "See who changed a row",
+      say: "`row_history` shows the versions of one row, newest first, like the version history of a document. Each version says when it happened, which operation and which agent made it (`actor`), and which columns changed, from what to what. `created` and `last_modified` sum it up. The engine reads it from the table's log, so the note itself stores nothing extra.",
+      steps: [
+        { op: "row_history", args: { table: "film", path: `${FILM}/Nosferatu.md` }, check: (v) => v.created?.change !== "insert" && "an insert expected first" },
+        {
+          say: "It follows the row across renames and moves between tables. It finds a deleted row by its last path, and pages with `limit` and `before`:",
+          op: "row_history",
+          args: { table: "film", path: `${FILM}/Metropolis.md`, limit: 2 },
+          check: (v) => (v.exists !== false || !v.next_before) && "Metropolis was deleted, with more than two versions",
+        },
+      ],
+      after: "A version with `source: external` is a hand edit, made outside the engine, so no agent is known. To read the whole row as it was at a version, pass that `version` to `select_rows`.",
+    },
+    {
       title: "Restore a table to an old version",
       say: "`restore_table` brings the rows and the definition back to a version:\n\n- it removes the rows added since\n- it gives changed rows their old values\n- it brings removed rows back\n\nThe restore doesn’t rewrite history: it’s a new version, and you can undo it. Run it with `dry_run` first.",
       steps: [

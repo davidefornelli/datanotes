@@ -44,6 +44,7 @@ import {
 import { addConstraint, cloneTable, commentOn, createView, defineBase, dropConstraint, dropView, setTableBases } from "./catalog-ops";
 import { configureDatabase, describeDatabase } from "./database";
 import { describeHistory, restoreTable, tableChanges, vacuumTable } from "./history";
+import { rowHistory } from "./row-history";
 import { packRows, unpackRows } from "./pack-rows";
 import { describeDatabaseHistory, restoreDatabase } from "./database-history";
 import { listMigrations } from "./journal";
@@ -147,6 +148,8 @@ export interface DatanotesPublicApi {
   undo(migrationId: string): Promise<Out<typeof undoOperation>>;
   describeHistory(input: In<typeof describeHistory>): Promise<Out<typeof describeHistory>>;
   tableChanges(input: In<typeof tableChanges>): Promise<Out<typeof tableChanges>>;
+  /** The versions of one row, newest first: who created it, who changed it last, every change with its agent. */
+  rowHistory(input: In<typeof rowHistory>): Promise<Out<typeof rowHistory>>;
   restoreTable: Write<typeof restoreTable>;
   /** The commits of every logged table, newest first; the commits of one operation across tables are grouped (`tables`). */
   describeDatabaseHistory(input?: In<typeof describeDatabaseHistory>): Promise<Out<typeof describeDatabaseHistory>>;
@@ -376,6 +379,7 @@ export function createPublicApi(
     undo: (migrationId) => undoOperation(app, s(), migrationId),
     describeHistory: (input) => describeHistory(app, s(), input),
     tableChanges: (input) => tableChanges(app, s(), input),
+    rowHistory: (input) => rowHistory(app, s(), input),
     restoreTable: (input, opts) => restoreTable(app, s(), input, opts),
     describeDatabaseHistory: (input = {}) => describeDatabaseHistory(app, s(), input),
     restoreDatabase: (input, opts) => restoreDatabase(app, s(), input, opts),

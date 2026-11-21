@@ -114,6 +114,44 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "a row's history: who created it and who changed it last, every version with its agent and columns, a rename, a hand edit, a delete found by its old path, refusals",
+    ops: ["row_history"],
+    timeout: 30_000,
+    async run(t) {
+      type V = { version: number; timestamp: string; change: string; operation: string; source: string; path: string; old_path?: string; actor?: Record<string, unknown>; changes: Record<string, { before: unknown; after: unknown }>; body_changed: boolean };
+      type H = { table: string; id: string; path: string; exists: boolean; created: V | null; last_modified: V | null; total: number; versions: V[]; next_before?: string; history_start: { version: number; truncated: boolean } };
+      const ins = await t.ok<WriteResult>("insert_row", { table: "task", values: { title: "Benchmark the engines", project: "[[Data platform]]", priority: "low" } });
+      await t.ok("update_row", { table: "task", path: task("Benchmark the engines"), set: { priority: "high" }, body: "Compare three engines.\n" });
+      await t.ok("update_row", { table: "task", path: task("Benchmark the engines"), set: { title: "Benchmark the query engines" } });
+      t.handEdit(task("Benchmark the query engines"), t.read(task("Benchmark the query engines")).replace("status: todo", "status: doing"));
+      if (t.host === "in-process") await t.ok("update_row", { table: "person", path: person("Ada Lovelace"), set: { email: "ada@engine.example" } });
+      const h = await until(async () => {
+        const r = await t.ok<H>("row_history", { table: "task", path: task("Benchmark the query engines") });
+        return r.versions[0]?.operation === "EXTERNAL_EDIT" && r;
+      }, 15_000, "the hand edit logged");
+      expect(h).toMatchObject({ table: "work.planning.task", path: task("Benchmark the query engines"), exists: true, total: 4, history_start: { version: 0, truncated: false } });
+      expect(h.versions.map((v) => `${v.change} ${v.operation} ${v.source}`)).toEqual(["update EXTERNAL_EDIT external", "move UPDATE engine", "update UPDATE engine", "insert WRITE engine"]);
+      expect(h.created).toMatchObject({ change: "insert", operation: "WRITE", migration_id: ins.migration_id, actor: { harness: "test-vault-ops" } });
+      expect(h.last_modified).toMatchObject({ source: "external", operation: "EXTERNAL_EDIT" });
+      expect(h.versions[0]!.actor).toBeUndefined(); // a hand edit has no agent
+      expect(h.versions[0]!.changes).toEqual({ status: { before: "todo", after: "doing" } });
+      expect(h.versions[1]).toMatchObject({ old_path: task("Benchmark the engines"), changes: { title: { before: "Benchmark the engines", after: "Benchmark the query engines" } } });
+      expect(h.versions[2]).toMatchObject({ changes: { priority: { before: "low", after: "high" } }, body_changed: true });
+      // the same row by its id, a page at a time
+      const p1 = await t.ok<H>("row_history", { table: "task", id: h.id, limit: 3 });
+      expect([p1.versions.length, p1.next_before]).toEqual([3, h.versions[2]!.timestamp]);
+      expect((await t.ok<H>("row_history", { table: "task", id: h.id, before: p1.next_before })).versions.map((v) => v.change)).toEqual(["insert"]);
+      // deleted: its history stays, found by any path it had
+      await t.ok("delete_rows", { table: "task", where: { title: "Benchmark the query engines" } });
+      const gone = await t.ok<H>("row_history", { table: "task", path: task("Benchmark the engines") });
+      expect([gone.exists, gone.total, gone.last_modified?.change, gone.id]).toEqual([false, 5, "delete", h.id]);
+      // a row of the vault as the engine first saw it: version 0, no agent
+      expect((await t.ok<H>("row_history", { table: "task", path: task("Pick a query engine") })).created).toMatchObject({ version: 0, operation: "CREATE TABLE" });
+      expect(await t.refused("row_history", { table: "task", path: task("Pick a query engin") })).toBe(`work.planning.task has no row at ${task("Pick a query engin")}, now or in its history`);
+      expect(await t.refused("row_history", { table: "task" })).toBe(`pass the row's "id" or "path"`);
+    },
+  },
+  {
     name: "history for every table from configure_database; a table's own setting wins; a dropped table described and restored",
     ops: ["configure_database", "describe_history", "drop_table", "restore_table", "alter_table"],
     async run(t) {
